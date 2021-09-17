@@ -216,10 +216,8 @@ class In(Node):
         
 
 # TODO
-# 1) Update the constructor
-# 2) write in add_input
-# 3) write in add_iterface
-# add "scalar input" rather than tensor
+# 3) write in add_interface
+# 4) add "scalar input" rather than tensor
 
 class Network(nn.Module):
     """
@@ -236,13 +234,6 @@ class Network(nn.Module):
 
         for in_ in inputs:
             self.add_input(in_)
-
-        # for in_ in ins:
-        #     if in_.name in self._nodes:
-        #         raise KeyError(f'Input with name {in_.name} already exists')
-        #     self._nodes[in_.name] = in_
-        #     self._ins.append(in_)
-        # self._ins: typing.List[In] = []
     
         self._default_ins: typing.List[str] = [] # [in_.name for in_ in self._ins]
         self._default_outs: typing.List[str] = []

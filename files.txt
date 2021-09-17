@@ -1,1 +1,0 @@
-/anaconda3/envs/pytorch2/lib/python3.8/site-packages/takonet-0.1.0-py3.8.egg
