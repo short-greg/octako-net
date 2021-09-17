@@ -1,3 +1,4 @@
+from torch._C import Value
 import torch.nn as nn
 import torch
 import typing
@@ -57,6 +58,9 @@ class Node(nn.Module):
         self._labels = labels
         self._annotation = annotation or ''
     
+    def add_label(self, label: str):
+        self._labels.append(label)
+    
     @property
     def labels(self) -> typing.List[str]:
         return copy.copy(self._labels)
@@ -64,6 +68,10 @@ class Node(nn.Module):
     @property
     def annotation(self) -> str:
         return self._annotation
+
+    @annotation.setter
+    def annotation(self, annotation: str) -> str:
+        self._annotation = annotation
 
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -79,6 +87,9 @@ class Node(nn.Module):
         Returns:
             typing.List[str]: Names of the nodes input into the node
         """
+        raise NotImplementedError
+    
+    def clone(self):
         raise NotImplementedError
 
 
@@ -148,6 +159,13 @@ class OperationNode(Node):
             typing.List[str]: Names of the nodes input into the node
         """
         return [in_.module for in_ in self.inputs]
+
+    def clone(self):
+        return OperationNode(
+            self.name, self.operation, self._inputs, self._out_size, self._labels,
+            self._annotation
+
+        )
     
     def forward(self, *args):
 
@@ -212,6 +230,13 @@ class In(Node):
 
         return In(
             name, torch.Size([]), default_type, default_value, labels, annotation
+        )
+
+    def clone(self):
+        return In(
+            self.name, self._out_size, self._value_type, self._default_value, self._labels,
+            self._annotation
+
         )
         
 
@@ -498,12 +523,62 @@ class Network(nn.Module):
             result[output] = cur_result
         
         return result
+    
+    def _extract_helper(self, node: Node, network, input_names: typing.List[str], inputs: typing.Dict[str, In]):
 
-    def get_node(self, key):
+        for port in node.inputs:
+            sub_node = self._nodes[port.module]
+            if sub_node not in network._nodes:
+                if port.module not in input_names:
+                    network._nodes[port.module] = sub_node
+                    self._extract_helper(self, input_names)
+                else:
+                    node = node.clone()
+                    # TODO: Incorrect.. Can be multiple input ports
+                    node.ports
+
+    def extract(self, output_names: typing.List[str], inputs: typing.Dict[str, In]):
+        # TODO: FINISH
+
+        input_names = [name for name, in_ in inputs]
+        
+        if len(set(output_names)) != len(output_names):
+            raise ValueError(f'There are duplicate names in {output_names}')
+        
+        if len(set(input_names)) != len(input_names):
+            raise ValueError(f'There are duplicate names in {input_names}')
+
+        if not self.are_inputs(output_names, input_names):
+            raise ValueError(f'{input_names} are not inputs for {output_names}')
+
+        network = Network([node for _, node in inputs.items()])
+        
+        for output_name in output_names:
+            node = self._nodes[output_name]
+            
+    def get_node(self, key) -> Node:
 
         return self._nodes[key]
     
-    def __iter__(self):
+    def merge_in(self, network, label: str):
+        """Merge a network into this network
+
+        Args:
+            network ([Network]): Network to merge in
+            label (str): Label to assign the nodes in the network merged in
+        """
+        network: Network = network
+
+        for name, node in network:
+            node: Node = node.clone()
+            node.add_label(label)
+            
+            if type(node) == In:
+                self.add_input(node)
+            else:
+                self._nodes[name] = node
+
+    def __iter__(self) -> typing.Tuple[str, Node]:
         """Iterate over all nodes
 
         Returns:
@@ -525,6 +600,22 @@ class Network(nn.Module):
         result_dict = self.probe(self._default_outs, inputs)
         result = [result_dict[out] for out in self._default_outs]
         return result
+
+
+def merge(networks: typing.Dict[str, Network]) -> Network:
+    """Merge networks together. Names of nodes must not overlap
+
+    Args:
+        networks (typing.Dict[str, Network]): Networks to merge together {label: Network}
+
+    Returns:
+        Network
+    """
+    
+    result = Network()
+    for label, network in networks.items():
+        result.merge_in(network, label)
+    return result
 
 
 class NetworkInterface(nn.Module):
