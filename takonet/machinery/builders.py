@@ -70,10 +70,10 @@ class FeedForwardBuilder(object):
 
 class ReductionType(Enum):
 
-    MeanReduction = objectives.reducers.MeanReduction
-    SumReduction = objectives.reducers.SumReduction
-    NullReduction = objectives.reducers.NullReduction
-    BatchMeanReduction = objectives.reducers.BatchMeanReduction
+    MeanReduction = objectives.MeanReduction
+    SumReduction = objectives.SumReduction
+    NullReduction = objectives.NullReduction
+    BatchMeanReduction = objectives.BatchMeanReduction
 
 
 class LossBuilder(object):
