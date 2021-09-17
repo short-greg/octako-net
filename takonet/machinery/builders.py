@@ -86,47 +86,47 @@ class LossBuilder(object):
         self._validator: typing.Callable[[int, float], Operation] = self.binary_classifier
         self._target_processor: typing.Callable[[torch.Size], Operation] = self.null_processor
 
-    def mse(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: reducers.ObjectiveReduction=reducers.MeanReduction):
+    def mse(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         # TODO: Add in a weight
         return Operation(
             nn.MSELoss(reduction=reducer.as_str()), reducer.get_out_size(in_size)
         )
 
-    def bce(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: reducers.ObjectiveReduction=reducers.MeanReduction):
+    def bce(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         return Operation(
             nn.BCELoss(reduction=reducer.as_str()), reducer.get_out_size(in_size)
         )
 
-    def cross_entropy(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: reducers.ObjectiveReduction=reducers.MeanReduction):
+    def cross_entropy(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         return Operation(
             nn.CrossEntropyLoss(reduction=reducer.as_str()), reducer.get_out_size(in_size)
         )
 
-    def l1_reg(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor], reducer: reducers.ObjectiveReduction=reducers.MeanReduction):
+    def l1_reg(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor], reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         return Operation(
-            regularizers.L1Reg(reduction=reducer, weight=weight), reducer.get_out_size(in_size)
+            objectives.L1Reg(reduction=reducer, weight=weight), reducer.get_out_size(in_size)
         )
 
-    def l2_reg(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: reducers.ObjectiveReduction=reducers.MeanReduction):
+    def l2_reg(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         return Operation(
-            regularizers.L2Reg(reduction=reducer, weight=weight), reducer.get_out_size(in_size)
+            objectives.L2Reg(reduction=reducer, weight=weight), reducer.get_out_size(in_size)
         )
     
-    def binary_classifier(self, in_size: torch.Size, reducer: typing.Type[reducers.ObjectiveReduction]=reducers.MeanReduction):
+    def binary_classifier(self, in_size: torch.Size, reducer: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction):
 
         return Operation(
-            fitnesses.BinaryClassificationFitness(reduction_cls=reducer), reducer.get_out_size(in_size)
+            objectives.BinaryClassificationFitness(reduction_cls=reducer), reducer.get_out_size(in_size)
         )
 
-    def multiclassifier(self, in_size: torch.Size, reducer: typing.Type[reducers.ObjectiveReduction]=reducers.MeanReduction):
+    def multiclassifier(self, in_size: torch.Size, reducer: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction):
 
         return Operation(
-            fitnesses.ClassificationFitness(reduction_cls=reducer), reducer.get_out_size(in_size)
+            objectives.ClassificationFitness(reduction_cls=reducer), reducer.get_out_size(in_size)
         )
 
     def scale(self, in_size: torch.Size):
