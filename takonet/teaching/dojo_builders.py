@@ -1,10 +1,9 @@
-from .dojos import Dojo, StandardTeacher, Goal, StandardGoal, Teacher
+from .dojos import Dojo, StandardDojo, StandardTeacher, Goal, StandardGoal, Teacher
 from torch.utils import data as data_utils
-from . import observers2 as observers
+from . import observers
 import typing
 
 
-# move this out
 class DojoBuilder(object):
     """[Helper class for building a dojo. Simplfies some of the interactions]
     """
@@ -12,29 +11,31 @@ class DojoBuilder(object):
     def __init__(
         self, name: str, goal: Goal=None
     ):
-        self.dojo = Dojo(name, goal)
+        self.dojo = StandardDojo(name, goal)
+    
+    def add_staff(self, teacher: Teacher, is_base: bool=True):
+        if is_base:
+            self.dojo.add_base_staff(teacher)
+        else:
+            self.dojo.add_sub_staff(teacher)
+        return self
 
     def build_tester(
         self, name: str, material: data_utils.Dataset, 
         batch_size: int=32, is_base: bool=False
     ):
-        self.dojo.add_staff(
-            StandardTeacher(
-                name, material, batch_size, 1
-            ), is_base
+        teacher = StandardTeacher(
+            name, material, batch_size, 1
         )
-        return self
+        return self.add_staff(teacher, is_base)
 
     def build_trainer(
         self, name: str, material: data_utils.Dataset, n_rounds=10,
         batch_size: int=32, is_base: bool=False
     ):
-        self.dojo.add_staff(
-            StandardTeacher(
-                name, material, batch_size, n_rounds
-            ), is_base
-        )
-        return self
+        return self.add_staff(StandardTeacher(
+            name, material, batch_size, n_rounds
+        ), is_base)
     
     def build_teacher_trigger(
         self, listener: str, listening_to: str, 
@@ -148,4 +149,3 @@ def build_testing_dojo(
     ).build_progress_bar(
         "Progress Bar", listen_to=["Trainer", "Tester"]
     ).get_result()
-

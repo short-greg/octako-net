@@ -1,30 +1,13 @@
-from .bulletins import Course, Entry
-from .students import Student
-from . import events
-from .events import TeachingEvent
-from .staff import Run, StandardTeacher
-from .bulletins import RunProgress
+from takonet.teaching.dojos import Lecture
+from dojos import Observer, Course
+import typing
 import tqdm
-import typing
-import typing
 
-
-class Observer(object):
-
-    def __init__(
-        self, name
-    ):
-        self._name = name
-
-    @property
-    def name(self):
-        return self._name
-        
 
 class ProgressBar(Observer):
 
     def __init__(
-        self, name: str, course: Course, listen_to: typing.List[StandardTeacher]
+        self, name: str, course: Course, listen_to: typing.List[str]
     ):
         """[Track progress of training]
 
@@ -36,32 +19,46 @@ class ProgressBar(Observer):
         self.pbar = None
         self._course = course
         self._teachers = {}
-        for teacher in listen_to:
-            teacher.round_started_event.add_listener(self.enter)
-            teacher.result_updated_event.add_listener(self.update)
-            teacher.round_finished_event.add_listener(self.exit)
-            self._teachers[teacher.name] = teacher
+        self._listen_to = set(listen_to)
+        self._name = name
+
+        course.lesson_started_event.add_listener(self.enter)
+        course.result_updated_event.add_listener(self.update)
+        course.lesson_finished_event.add_listener(self.exit)
 
     @property
     def name(self):
         return self._name
 
-    def enter(self, entry: Entry):
+    def enter(self, name: str):
+        if name not in self._listen_to:
+            return
+        
+        lecture: Lecture = self._course.get_lecture(name)
+
         if self.pbar is not None:
             self.pbar.close()
-        self.pbar = tqdm.tqdm(total=entry.progress.n_round_iterations)
-        self.pbar.set_description_str(f'{entry.teacher_name} - {entry.section}')
+        self.pbar = tqdm.tqdm(total=lecture.n_lesson_iterations)
+        self.pbar.set_description_str(f'{name} - {lecture.cur_lesson_iteration}')
 
-    def update(self, entry: Entry):
+    def update(self, name: str):
+        if name not in self._listen_to:
+            return
+        
+        lecture: Lecture = self._course.get_lecture(name)
 
-        self.pbar.set_description_str(f'{entry.teacher_name} - {entry.section}')
+        self.pbar.set_description_str(f'{name} - {lecture.cur_lesson_iteration}')
         self.pbar.update(1)
 
-        self.pbar.total = entry.progress.n_round_iterations
-        self.pbar.set_postfix(entry.results.mean(axis=0).to_dict())
+        self.pbar.total = lecture.n_lesson_iterations
+        self.pbar.set_postfix(lecture.results.mean(axis=0).to_dict())
         self.pbar.refresh()
 
-    def exit(self, entry: Entry):
+    def exit(self, name: str):
+        if name not in self._listen_to:
+            return
+        
+        lecture: Lecture = self._course.get_lecture(name)
 
         if self.pbar is not None:
             self.pbar.close()
@@ -73,7 +70,7 @@ class TriggerCondition(object):
     """[Checks to see if the trigger should be executed.]
     """
 
-    def check(self, progress: RunProgress):
+    def check(self, lecture: Lecture):
         raise NotImplementedError
 
 
@@ -83,43 +80,42 @@ class IterationCondition(TriggerCondition):
         assert period >= 1
         self._period = period
 
-    def check(self, progress: RunProgress):
-        return not bool((progress.cur_iteration + 1) % self._period)
+    def check(self, lecture: Lecture):
+        return not bool((lecture.cur_iteration + 1) % self._period)
 
 
-class RoundCondition(object):
+class LessonCondition(object):
 
     def __init__(self, period: int=1):
         assert period >= 1
         self._period = period
 
-    def check(self, progress: RunProgress):
+    def check(self, lecture: Lecture):
 
         # TODO: epoch is not guaranteed to be here.. think how to handle this
-        return not bool((progress.cur_round + 1) % self._period)
+        return not bool((lecture.cur_lesson + 1) % self._period)
 
 
-class RoundFinishedCondition(object):
+class LessonFinishedCondition(object):
 
-    def check(self, progress: RunProgress):
+    def check(self, lecture: Lecture):
         # TODO: epoch is not guaranteed to be here.. think how to handle this
-        return progress.round_finished
+        return lecture.lesson_finished
 
 
 class FinishedCondition(object):
 
-    def check(self, progress: RunProgress):
+    def check(self, lecture: Lecture):
         # TODO: epoch is not guaranteed to be here.. think how to handle this
-        return progress.finished
+        return lecture.finished
 
 
 class Trigger(Observer):
 
     def __init__(
         self, name: str, condition: TriggerCondition, 
-        observing_event: TeachingEvent,
         observer_method: typing.Callable,
-        course: Course
+        course: Course, listen_to_event: str, 
     ):
         """[summary]
 
@@ -130,35 +126,34 @@ class Trigger(Observer):
             observer_method (typing.Callable): [Method to call]
         """
         self._name = name
+
+        self._course = course
+        self._course.listen_to(listen_to_event, self.on_trigger)
         self._condition = condition
         self._observer_method = observer_method
-        self._observing_event = observing_event
-        self._observing_event.add_listener(self.on_trigger)
         self._course = course
     
     @property
     def name(self):
         return self._name
     
-    def on_trigger(self, entry: Entry):
-        progress = entry.progress
-        cur_class = self._course.get_class(entry.class_id)
-        student = cur_class.get_student(entry.student)
-        if self._condition.check(progress):
-            self._observer_method(student, "run")
-            # run.add_response(response)
+    def on_trigger(self, name: str):
+        lecture = self._course.get_lecture(name)
+        if self._condition.check(lecture):
+            self._observer_method()
 
 
-class TriggerBuilder(object):
+class TriggerInviter(object):
 
-    RESULT_UPDATED = 'update'
-    ROUND_STARTED = 'round_update'
-    ROUND_FINISHED = 'round_finished'
+    RESULT_UPDATED = 'result_updated'
+    LESSON_STARTED = 'lesson_started'
+    LESSON_FINISHED = 'lesson_finished'
     STARTED = 'started'
     FINISHED = 'finished'
+    ADVANCED = 'advanced'
 
     def __init__(
-        self, name: str, condition: TriggerCondition=None,
+        self, name: str, callback: typing.Callable[[]], condition: TriggerCondition=None,
         observing_event=None,
     ):
         """[Set up and bulid a trigger]
@@ -169,9 +164,10 @@ class TriggerBuilder(object):
             observing_event ([type], optional): [description]. Defaults to None.
         """
         self._name = name
-        self._condition = condition or FinishedCondition()
-        self._observing_event = observing_event or self.ROUND_FINISHED
-    
+        self._condition = condition or LessonFinishedCondition()
+        self._observing_event = observing_event or self.LESSON_FINISHED
+        self._callback = callback
+
     def set_finished_condition(self):
 
         self._condition = FinishedCondition()
@@ -182,14 +178,14 @@ class TriggerBuilder(object):
         self._condition = IterationCondition(period)
         return self
     
-    def set_round_condition(self, period: int=1):
+    def set_lesson_condition(self, period: int=1):
 
-        self._condition = RoundCondition(period)
+        self._condition = LessonCondition(period)
         return self
     
     def set_round_finished_condition(self):
 
-        self._condition = RoundFinishedCondition()
+        self._condition = LessonFinishedCondition()
         return self
 
     def set_observing_result_update(self):
@@ -197,14 +193,14 @@ class TriggerBuilder(object):
         self._observing_event = self.RESULT_UPDATED
         return self
     
-    def set_observing_round_started(self):
+    def set_observing_lesson_started(self):
 
-        self._observing_event = self.ROUND_STARTED
+        self._observing_event = self.LESSON_STARTED
         return self
 
-    def set_observing_round_finished(self):
+    def set_observing_lesson_finished(self):
 
-        self._observing_event = self.ROUND_FINISHED
+        self._observing_event = self.LESSON_FINISHED
         return self
 
     def set_observing_started(self):
@@ -219,41 +215,7 @@ class TriggerBuilder(object):
     def set_name(self, name: str):
         self._name = name
         return self
-
-    def get_event(self, observing: StandardTeacher):
-        """[Get the event that enacts the trigger from the teacher]
-
-        Args:
-            observing (StandardTeacher): [The teacher being observed]
-
-        Returns:
-            [type]: [description]
-        """
-
-        if self._observing_event ==  self.FINISHED:
-            return observing.finished_event
-        elif self._observing_event == self.RESULT_UPDATED:
-            return observing.result_updated_event
-        elif self._observing_event == self.ROUND_STARTED:
-            return observing.round_started_event
-        elif self._observing_event == self.ROUND_FINISHED:
-            return observing.round_finished_event
-        elif self._observing_event == self.STARTED:
-            return observing.started_event
-
-    def build(self, observing: Observer, observer_method: typing.Callable, course: Course):
-
-        return Trigger(self._name, self._condition,  self.get_event(observing), observer_method, course)
-
-
-class Audience(object):
-    """[Convenience class for storing observers]
-    """
-
-    def __init__(self):
-
-        self._members = {}
     
-    def add(self, observer: Observer):
+    def invite(self, course: Course):
 
-        self._members[observer.name] = observer
+        return Trigger(self._name, self._callback, self._condition, self._observing_event, course)

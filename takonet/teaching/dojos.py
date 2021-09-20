@@ -1,321 +1,456 @@
-from abc import abstractmethod
-from dataclasses import dataclass, field as dataclass_field
-from .bulletins import Class, Course, Goal, StandardGoal
-from torch.utils.data.dataset import Dataset
-from . import staff
-from .staff import Run, Teacher, StandardTeacher
-from . import observers
+
+import dataclasses
 import typing
-from torch.utils import data as data_utils
+from takonet.machinery import learners
+from abc import ABC, abstractmethod
+import pandas as pd
+from . import events
+from torch.utils import data as torch_data
 
 
-
-@dataclass
-class Experiment(object):
-    """[]
-    """
-    name: str
-    goal: Goal
-    n_steps: int
-    base: staff.Ordered
-    sub: staff.Staff
-    audience: typing.Dict[str, Teacher]
-    steps: int = 0
-    is_finished: bool=False
-    runs: typing.List[typing.Dict[str, Run]]=dataclass_field(default_factory=list)
-
-    def take_step(self):
-        self.steps += 1
-    
-    def finish(self):
-        self.is_finished = True
-
-    def evaluate(self) -> float:
-        return self.goal.evaluate(self.runs)
-
-
-# TODO: REFACTOR DOJO
-# dojo should specify course etc
-
-
-class Dojo(object):
-
-    def __init__(
-        self, name: str, goal: Goal=None
-        
-    ):
-        """[A teaching system for training a learner]
-        Args:
-            name (str): [Name of the dojo]
-            goal (Goal, optional): [The goal for the teaching system]. Defaults to None.
-        """
-        super().__init__()
-        self._name: str = name
-        self._goal: Goal = goal
-        self._experiments: typing.List[Experiment] = []
-        self._base: staff.Ordered = staff.Ordered()
-        self._sub: staff.Staff = staff.Staff()
-        self._audience: typing.Dict[str, observers.Observer] = {}
-        self._n_runs: int = 0
-        self._n_finished: int = 0
-
-        self.course = Course(self._goal, 100)
+class Teacher(ABC):
 
     @property
-    def goal(self):
-        return self._goal
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    def teach(self):
+        pass
+
+
+class Observer(ABC):
     
-    @goal.setter
-    def goal(self, goal: Goal):
-        self._goal = goal
+    @property
+    def name(self) -> str:
+        pass
 
-    def get(self, member: str, only_staff: bool=False):
 
-        if member in self._base:
-            return self._base[member]
-        if member in self._sub:
-            return self._sub[member]
-        if not only_staff and member in self._audience:
-            return self._audience[member]
+@dataclasses.dataclass
+class Evaluation:
+
+    to_maximize: bool
+    result: float
+
+
+@dataclasses.dataclass
+class Course(ABC):
+
+    result_updated_event = events.TeachingEvent[str]()
+    started_event = events.TeachingEvent[str]()
+    finished_event = events.TeachingEvent[str]()
+    lesson_started_event = events.TeachingEvent[str]()
+    lesson_finished_event = events.TeachingEvent[str]()
+    advance_event = events.TeachingEvent[str]()
+
+    EVENT_MAP = {
+        "result_updated": result_updated_event,
+        "started": started_event,
+        "finished": finished_event,
+        "lesson_started": lesson_started_event,
+        "lesson_finished": lesson_finished_event,
+        "advanced": advance_event
+    }
+
+    def listen_to(self, event_key: str, f: typing.Callable[[str]]):
+
+        if event_key not in self.EVENT_MAP:
+            raise ValueError(f'Event name {event_key} is not a valid event (Valid Events: {self.EVENT_MAP})')
         
-        return None
+        self.EVENT_MAP[event_key].add_listener(f)
 
-    def get_base(self, idx: int):
-        if idx < 0 or idx >= len(self._base):
-            raise IndexError
-        return self._base.get(idx)
+    @abstractmethod
+    def update_results(self, teacher: Teacher):
+        pass
+
+    @abstractmethod
+    def advance(self, teacher: Teacher):
+        pass
+
+    @abstractmethod
+    def start_lesson(self, teacher: Teacher, n_lesson_iterations: int):
+        pass
+
+    @abstractmethod
+    def start(self, teacher: Teacher, n_lessons: int):
+        pass
+
+    @abstractmethod
+    def finish_lesson(self, teacher: Teacher):
+        pass
+
+    @abstractmethod
+    def finish(self, teacher: Teacher):
+        pass
+
+    @abstractmethod
+    def get_student(self, teacher: Teacher):
+        pass
     
-    def is_staff(self, name: str) -> bool:
-        """[Check if a name is a staff member]
+    @abstractmethod
+    def evaluate(self) -> Evaluation:
+        pass
 
-        Args:
-            name (str): [Name of staff member]
+    @abstractmethod
+    def advance_lecture(self):
+        pass
 
-        Returns:
-            bool: [Whether the name is a staff member]
-        """
 
-        return name in self._base or name in self._sub
+class TeacherInviter(ABC):
 
-    def is_observer(self, name: str) -> bool:
-        """[Check if a name is an observer ]
+    @abstractmethod
+    def invite(self, course: Course) -> Teacher:
+        pass
 
-        Args:
-            member (str): [Name of the member]
+    @property
+    def teacher_name(self) -> str:
+        raise NotImplementedError
 
-        Returns:
-            bool: [Whether the name is a staff member]
-        """
-        return name in self._audience
+
+class ObserverInviter(ABC):
+
+    @abstractmethod
+    def invite(self, course: Course) -> Observer:
+        pass
+
+    @property
+    def observer_name(self) -> str:
+        raise NotImplementedError
+
+
+class Dojo(ABC):
+    
+    @abstractmethod
+    def teach(self, learner: learners.Learner):
+        pass
+
+    @abstractmethod
+    def summarize(self):
+        pass
+        # create the course
+        # invite teachers/observers
+
+
+class Goal(ABC):
+
+    @abstractmethod
+    def evaluate(self) -> Evaluation:
+        pass
+    
+    @property
+    def to_maximize(self) -> bool:
+        pass
+
+
+class GoalSetter(ABC):
+
+    @abstractmethod
+    def set(self, course) -> Goal:
+        pass
+
+
+class Staff(object):
+    """[Convenience class for storing teachers]
+    """
+
+    def __init__(self):
+        self._members = {}
+    
+    def add(self, teacher: Teacher):
+        self._members[teacher.name] = teacher
+
+    def get(self, name: str) -> typing.Union[Teacher, None]:
+        return self._members.get(name)
+
+    def __iter__(self):
+        for teacher in self._members.values():
+            yield teacher
+    
+    def __len__(self):
+        return len(self._members)
+    
+    def __getitem__(self, name: str) -> Teacher:
+
+        if name not in self._members:
+            raise KeyError(f'{name} is not in staff.')
+
+        return self._members[name]
+    
+    def __contains__(self, name: str):
+
+        return name in self._members
+
+
+class Ordered(Staff):
+    """[Convenience class for storing staff an order. ]
+    """
+
+    def __init__(self):
+        super().__init__()
+
+        self._order = []
+    
+    def get(self, name: typing.Union[int, str]) -> Teacher:
+        
+        if type(name) == str:
+            return super().get(name)
+        return self._order[name]
+    
+    def add(self, teacher: Teacher):
+        super().add(teacher)
+        self._order.append(teacher)
 
     def reorder(self, order: typing.List):
-        """[Change the order of the base teachers]
+        assert len(order) == len(self._order)
+        assert len(set(order)) == len(order)
+        assert max(order) == len(order) - 1
+        assert min(order) == 0
 
-        Args:
-            order (typing.List): [The updated order for the base teachers]
-
-        Returns:
-            [type]: [description]
-        """
-        self._base.reorder(order)
-        return self
+        updated_order = []
+        for i in order:
+            updated_order.append(self._order[i])
+        self._order = updated_order
     
-    def check_addition(self, name):
+    def __iter__(self):
+        for teacher in self._order:
+            yield teacher
 
-        if name in self._audience or name in self._base or name in self._sub:
-            raise KeyError(f'Member with name {name} already exists')
+    def __getitem__(self, name: typing.Union[str, int]):
+        if type(name) == int:
+            return self._order[name]
+        return super().__getitem__(name)
+
+
+@dataclasses.dataclass
+class Lecture:
+    """[Struct for storing progress on a run]
+    """
+    name: str
+    n_lessons: int
+    n_lesson_iterations: int
+    cur_lesson_iteration: int = 0
+    cur_lesson: int = 0
+    cur_iteration: int = 0
+    finished: bool = False
+    lesson_finished: bool = False
+    results: pd.DataFrame = None
+
+    def __post_init__(self):
+        self.results = self.results or pd.DataFrame()
+
+    def append_results(self, results: typing.Dict[str, float]) -> bool:
+        if self.finished:
+            return False
+
+        difference = set(results.keys()).difference(self.results.columns)
+        for key in difference:
+            self.results[key] = pd.Series(dtype='float')
+
+        self.results.loc[len(self.results)] = results
+        return True
+
+
+class StandardCourse(Course):
+
+    def __init__(self, learner: learners.Learner, goal: Goal):
+
+        self._goal = goal
+        self._lectures: typing.List[typing.Dict[str, typing.List[Lecture]]] = []
+        self._student = learner
     
-    def add_base_staff(self, teacher: Teacher):
-        self.check_addition(teacher.name)
-        teacher.bulletin_accessor = self.course.get_teacher_bulletin(teacher.name)
-        self._base.add(teacher)
-        return self
+    def get_cur_lecture(self, teacher_name: str) -> Lecture:
+        if teacher_name not in self._lectures[-1]:
+            raise ValueError(f'Teacher {teacher_name} is not a part of the current lecture')
+        
+        return self._lectures[-1][teacher_name][-1]
+
+    def update_results(self, teacher: Teacher, results: typing.Dict[str, float]):  
+        lecture = self.get_cur_lecture(teacher)
+        lecture.append_results(results)
+        self.result_updated_event.invoke(teacher.name)
+
+    def start_lesson(self, teacher: Teacher, n_lesson_iterations: int):       
+        lecture = self.get_cur_lecture(teacher)
+        lecture.cur_lesson += 1
+        lecture.cur_iteration = 0
+        lecture.n_lesson_iterations = n_lesson_iterations
+        self.lesson_finished_event.invoke(teacher.name)
+
+    def start(self, teacher: Teacher):
+        if teacher.name not in self._lectures[-1]:
+            self._lectures[-1][teacher.name] = [Lecture()]
+        else:
+            self._lectures[-1][teacher.name].append(Lecture())
+        
+        self.started_event.invoke(teacher.name)
+
+    def finish_lesson(self, teacher: Teacher):
+        lecture = self.get_cur_lecture(teacher)
+        lecture.lesson_finished = True
+        self.lesson_finished_event.invoke(teacher.name)
+
+    def finish(self, teacher: Teacher):
+        lecture = self.get_cur_lecture(teacher)
+        lecture.finished = True
+        self.finished_event.invoke(teacher.name)
+
+    def advance(self, teacher: Teacher):        
+        lecture = self.get_cur_lecture(teacher)
+        lecture.cur_iteration += 1
+        lecture.cur_lesson_iteration += 1
+        self.finished_event.invoke(teacher.name)
+
+    def get_student(self, teacher: Teacher):
+        return self._student
     
-    def add_sub_staff(self, teacher: Teacher):
-        self.check_addition(teacher.name)
-        teacher.bulletin_accessor = self.course.get_teacher_bulletin(teacher.name)
-        self._sub.add(teacher)
-        return self
+    def evaluate(self) -> Evaluation:
+        return self._goal.evaluate()
+
+    def advance_lecture(self):
+        self._lectures.append({})
     
-    def add_staff(self, teacher: Teacher, is_base: bool):
+    def get_results(self, teacher_name: str, section_id: int=-1, lecture_id: int=-1):
+        return self._lectures[section_id][teacher_name][lecture_id].results
 
-        if is_base:
-            self.add_base_staff(teacher)
-        else: self.add_sub_staff(teacher)
-        return self
 
-    def add_observer(self, observer: observers.Observer):
-        self.check_addition(observer.name)
-        self._audience[observer.name] = observer
-        return self
+class StandardGoal(Goal):
 
-    def summarize(self) -> str:
+    def __init__(self, course: StandardCourse, is_maximization: bool, teacher_name: str, field: str):
 
-        # add __str__ function to all staff
-        # summarize the base staff
-        # sumamrize the sub staff
-        # summarize the 
-
-        return ""
-
-    def __len__(self):
-        return len(self._base)
-
-    def experiment(self, learner, name: str='') -> Class:
-
-        cur_class = self.course.start_class()
-        student = cur_class.enroll(learner)
-        self._n_runs += 1
-
-        for i, teacher in enumerate(self._base):
-            base_run: Run = teacher.run(student, f'{name}_{i}')
-            # experiment.runs.append(base_run)
+        self._course = course
+        self._is_maximization = is_maximization
+        self._teacher_name = teacher_name
+        self._field = field
     
-        # experiment.finish()
-        self._n_finished += 1
-        return cur_class
+    def evaluate(self) -> Evaluation:
+
+        lecture_num = -1
+        lesson_num = -1
+        results: pd.DataFrame = self._course.get_results(self._teacher_name, lecture_num, lesson_num)
+        return Evaluation(self._is_maximization, results[self._field].mean(axis=0))
 
 
-class DojoBuilder(object):
-    """[Helper class for building a dojo. Simplfies some of the interactions]
+class StandardTeacher(object):
+    """Teacher that loops over the training data and calls the learn/test function on the learner
     """
 
     def __init__(
-        self, name: str, goal: Goal=None
+        self, name: str, course: StandardCourse, material: torch_data.Dataset, batch_size: int, n_lessons: int,
+        is_training: bool=True,
     ):
-        self.dojo = Dojo(name, goal)
+        """[initializer]
 
-    def build_tester(
-        self, name: str, material: data_utils.Dataset, 
-        batch_size: int=32, is_base: bool=False
-    ):
-        self.dojo.add_staff(
-            StandardTeacher(
-                name, material, batch_size, 1
-            ), is_base
+        Args:
+            name (str): [Name of the teacher]
+            material (Dataset): [Default dataset for the teacher to use]
+            batch_size (int): [Default batch size]
+            n_rounds (int): [Default number of rounds to continue]
+            is_training (bool, optional): [Whether the teacher should teach (learn) or test]. Defaults to True.
+        """
+        self._material = material
+        self._is_training = is_training
+        self._batch_size = batch_size
+        self._name = name
+        self._course = course
+        self._n_lessons = n_lessons
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def teach(self):
+        """[Run the teacher]
+
+        Args:
+            learner (learners.Learner): [Name of the learner]
+            run_name (str): [Name of run]
+
+        Returns:
+            Run: The current run
+        """
+        to_shuffle = self._is_training
+
+        data_loader = torch_data.DataLoader(
+            self._material, batch_size=self._batch_size, 
+            shuffle=to_shuffle
         )
-        return self
+        
+        self._course.start(self, self._n_lessons)
+        for _ in range(self._n_lessons):
+            student = self._course.get_student(self)
+            
+            self._course.start_lesson(self, len(data_loader))
 
-    def build_trainer(
-        self, name: str, material: data_utils.Dataset, n_rounds=10,
-        batch_size: int=32, is_base: bool=False
-    ):
-        self.dojo.add_staff(
-            StandardTeacher(
-                name, material, batch_size, n_rounds
-            ), is_base
-        )
-        return self
+            for x, t in data_loader:
+                if self._is_training:
+                    item_results = student.learn(x, t)
+                else:
+                    item_results = student.test(x, t)
+                item_results = {k: res.detach().cpu().numpy() for k, res in item_results.items()}
+                self._course.update_results(self, item_results)
+                self._course.advance(self)
+            
+            self._course.finish_lesson(self)
     
-    def build_teacher_trigger(
-        self, listener: str, listening_to: str, 
-        trigger_builder: observers.TriggerBuilder
-    ):
-        listener: StandardTeacher = self.dojo.get(listener, only_staff=True)
+        self._course.finish(self)
 
-        if listener is None:
-            raise ValueError(f"{listener} is not a valid member of the dojo")
-        listening_to: StandardTeacher = self.dojo.get(listening_to, only_staff=True)
-        if listening_to is None:
-            raise ValueError(f"{listening_to} is not a valid member of the dojo")
-        assert listening_to is not None
 
-        self.dojo.add_observer(trigger_builder.build(
-                listening_to, listener.run, self.dojo.course
-            ))
-        return self
+class StandardDojo(Dojo):
 
-    def build_progress_bar(self, name: str, listen_to: typing.List[str]):
+    def __init__(self, name: str, goal_setter: Goal):
+        self._name: str = name
+        self._goal: GoalSetter = goal_setter
+        self._base: typing.List[TeacherInviter] = []
+        self._sub: typing.Set[TeacherInviter] = set()
+        self._members: typing.Set[str] = set()
+        self._audience: typing.Set[ObserverInviter] = set()
+        self._n_finished: int = 0
 
-        teachers: typing.List[Teacher] = []
-        for teacher_name in listen_to:
-            teacher = self.dojo.get(teacher_name)
-            assert teacher is not None
-            teachers.append(teacher)
+    def add_base_staff(self, teacher_inviter: TeacherInviter):
 
-        self.dojo.add_observer(
-            observers.ProgressBar(
-                name, self.dojo.course, listen_to=teachers
-            )
-        )
-        return self
+        if teacher_inviter.teacher_name in self._members:
+            raise ValueError(f'Staff with name {teacher_inviter.teacher_name} already exists')
+        
+        self._members.add(teacher_inviter.teacher_name)
+        self._base.append(teacher_inviter)
+
+    def add_sub_staff(self, teacher_inviter: TeacherInviter):
+
+        if teacher_inviter.teacher_name in self._members:
+            raise ValueError(f'Staff with name {teacher_inviter.teacher_name} already exists')
+        
+        self._members.add(teacher_inviter.teacher_name)
+        self._sub.add(teacher_inviter)
+
+    def add_observer(self, observer_inviter: ObserverInviter):
+
+        if observer_inviter.observer_name in self._members:
+            raise ValueError(f'Staff with name {observer_inviter.observer_name} already exists')
+        
+        self._members.add(observer_inviter.observer_name)
+        self._audience.add(observer_inviter)
     
-    def get_result(self):
-        return self.dojo
-
-    def reset(self, name: str=None, goal: Goal=None):
-
-        name = name or self.name
-        goal = goal or self.goal
-
-        self.dojo = Dojo(name, goal)
+    def __len__(self):
+        return len(self._base)
     
+    def summarize(self) -> str:
+        return ""
+    
+    def teach(self, learner: learners.Learner) -> StandardCourse:
+        
+        course = StandardCourse(learner, self._goal)
 
-def build_validation_dojo(
-    name: str, to_maximize: bool, goal_field: str, training_data: Dataset, test_data: Dataset,
-    n_epochs: int=10, training_batch_size: int=32, test_batch_size: int=32
-) -> Dojo:
-    """[Function to build a dojo for doing validation]
+        base_teachers = [teacher_inviter.invite(course) for teacher_inviter in self._base]
+        sub_teachers = [teacher_inviter.invite(course) for teacher_inviter in self._sub]
 
-    Args:
-        name (str): [Name of dojo]
-        to_maximize (bool): [Whether the dojo should maximize]
-        goal_field (str): [The goal for the validation]
-        training_data (Dataset): [Dataset used for training]
-        test_data (Dataset): [Dataset used for testing]
-        n_epochs (int, optional): [Number of epochs to train for]. Defaults to 10.
-        training_batch_size (int, optional): [Batch size for training]. Defaults to 32.
-        test_batch_size (int, optional): [Batch Size for testing]. Defaults to 32.
-
-    Returns:
-        [Dojo]: The validation dojo
-    """
-    goal = StandardGoal(to_maximize, "Validator", goal_field)
-    dojo_builder = DojoBuilder(name, goal)
-    return dojo_builder.build_trainer(
-        "Trainer", training_data, n_epochs, training_batch_size, True
-    ).build_tester(
-        "Validator", test_data, test_batch_size, False
-    ).build_progress_bar(
-        "Progress Bar", listen_to=["Trainer", "Validator"]
-    ).build_teacher_trigger(
-        "Validator", "Trainer",
-        observers.TriggerBuilder(
-            "Validator Trigger"
-        ).set_observing_round_finished().set_round_condition()
-    ).get_result()
+        for observer_inviter in self._audience:
+            observer_inviter.invite(course, sub_teachers)
+        
+        for teacher in base_teachers:
+            teacher.teach()
+        
+        return course
 
 
-def build_testing_dojo(
-    name: str, to_maximize: bool, goal_field: str, training_data: Dataset, test_data: Dataset,
-    n_epochs: int=10, training_batch_size: int=32, test_batch_size: int=32
-):    
-    """[Function to build a dojo for doing validation]
-
-    Args:
-        name (str): [Name of dojo]
-        to_maximize (bool): [Whether the dojo should maximize]
-        goal_field (str): [The goal for the validation]
-        training_data (Dataset): [Dataset used for training]
-        test_data (Dataset): [Dataset used for testing]
-        n_epochs (int, optional): [Number of epochs to train for]. Defaults to 10.
-        training_batch_size (int, optional): [Batch size for training]. Defaults to 32.
-        test_batch_size (int, optional): [Batch Size for testing]. Defaults to 32.
-
-    Returns:
-        [Dojo]: The validation dojo
-    """
-    goal = StandardGoal(to_maximize, "Tester", goal_field)
-    dojo_builder = DojoBuilder(name, goal)
-    return dojo_builder.build_trainer(
-        "Trainer", training_data, n_epochs, training_batch_size, True
-    ).build_tester(
-        "Tester", test_data, test_batch_size, False
-    ).build_teacher_trigger(
-        "Tester", "Trainer",
-        observers.TriggerBuilder(
-            "Tester Trigger"
-        ).set_finished_condition().set_observing_finished()
-    ).build_progress_bar(
-        "Progress Bar", listen_to=["Trainer", "Tester"]
-    ).get_result()
+# course = dojos
+# result = course.evaluate()

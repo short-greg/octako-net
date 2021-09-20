@@ -5,7 +5,6 @@ from takonet.machinery import learners
 from abc import ABC, abstractmethod
 import pandas as pd
 from . import events
-from takonet import teaching
 from torch.utils import data as torch_data
 
 
@@ -69,11 +68,11 @@ class Course(ABC):
         pass
 
     @abstractmethod
-    def start_lesson(self, teacher: Teacher):
+    def start_lesson(self, teacher: Teacher, n_lesson_iterations: int):
         pass
 
     @abstractmethod
-    def start(self, teacher: Teacher):
+    def start(self, teacher: Teacher, n_lessons: int):
         pass
 
     @abstractmethod
@@ -251,7 +250,6 @@ class Lecture:
         return True
 
 
-
 class StandardCourse(Course):
 
     def __init__(self, learner: learners.Learner, goal: Goal):
@@ -333,7 +331,7 @@ class StandardGoal(Goal):
 
 
 class StandardTeacher(object):
-    """[summary]
+    """Teacher that loops over the training data and calls the learn/test function on the learner
     """
 
     def __init__(
@@ -389,12 +387,12 @@ class StandardTeacher(object):
                 else:
                     item_results = student.test(x, t)
                 item_results = {k: res.detach().cpu().numpy() for k, res in item_results.items()}
-                self._course.update_results(item_results)
+                self._course.update_results(self, item_results)
                 self._course.advance(self)
             
-            self._course.finish_lesson()
+            self._course.finish_lesson(self)
     
-        self._course.finish()
+        self._course.finish(self)
 
 
 class StandardDojo(Dojo):

@@ -1,5 +1,5 @@
-from takonet.teaching.dojos2 import Lecture
-from dojos2 import Observer, Course
+from takonet.teaching.dojos import Lecture
+from dojos import Observer, Course
 import typing
 import tqdm
 
@@ -84,7 +84,7 @@ class IterationCondition(TriggerCondition):
         return not bool((lecture.cur_iteration + 1) % self._period)
 
 
-class RoundCondition(object):
+class LessonCondition(object):
 
     def __init__(self, period: int=1):
         assert period >= 1
@@ -96,7 +96,7 @@ class RoundCondition(object):
         return not bool((lecture.cur_lesson + 1) % self._period)
 
 
-class RoundFinishedCondition(object):
+class LessonFinishedCondition(object):
 
     def check(self, lecture: Lecture):
         # TODO: epoch is not guaranteed to be here.. think how to handle this
@@ -164,7 +164,7 @@ class TriggerInviter(object):
             observing_event ([type], optional): [description]. Defaults to None.
         """
         self._name = name
-        self._condition = condition or FinishedCondition()
+        self._condition = condition or LessonFinishedCondition()
         self._observing_event = observing_event or self.LESSON_FINISHED
         self._callback = callback
 
@@ -178,14 +178,14 @@ class TriggerInviter(object):
         self._condition = IterationCondition(period)
         return self
     
-    def set_round_condition(self, period: int=1):
+    def set_lesson_condition(self, period: int=1):
 
-        self._condition = RoundCondition(period)
+        self._condition = LessonCondition(period)
         return self
     
     def set_round_finished_condition(self):
 
-        self._condition = RoundFinishedCondition()
+        self._condition = LessonFinishedCondition()
         return self
 
     def set_observing_result_update(self):

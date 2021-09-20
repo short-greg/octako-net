@@ -1,13 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
-from takonet.teaching.bulletins import Class, Course
 
-from pandas.core import base
-from takonet.teaching.dojos import Experiment
 import optuna
 import typing
 import math
-from takonet.teaching import studies, dojos
+from takonet.teaching import studies, dojos2 as dojos
 
 
 PDELIM = "/"
@@ -408,22 +405,22 @@ class StudyRunner(object):
         self._n_trials = n_trials
         self._direction = self.get_direction(to_maximize)
     
-    def get_objective(self, name: str, classes: typing.List[Class], parameters: typing.List) -> typing.Callable:
+    def get_objective(self, name: str, courses: typing.List[dojos.Course], parameters: typing.List) -> typing.Callable:
         cur: int = 0
         def objective(trial: optuna.Trial):
             nonlocal cur
-            nonlocal classes
+            nonlocal courses
             nonlocal parameters
-            cur_class = self._study.perform(trial=trial, validation=True)
+            course = self._study.perform(trial=trial, validation=True)
             parameters.append(trial.params)
             cur += 1
-            classes.append(cur_class)
-            return cur_class.evaluate()
+            courses.append(course)
+            return course.evaluate()
         return objective
 
-    def run(self, name) -> typing.List[dojos.Experiment]:
+    def run(self, name) -> typing.List[dojos.Course]:
 
-        classes: typing.List[Class] = []
+        classes: typing.List[dojos.Course] = []
         parameters = []
         study = optuna.create_study(direction=self._direction)
         objective = self.get_objective(name, classes, parameters)
