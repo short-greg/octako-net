@@ -83,8 +83,8 @@ def build_validation_dojo(
     Returns:
         [Dojo]: The validation dojo
     """
-    goal = StandardGoal(to_maximize, "Validator", goal_field)
-    dojo_builder = DojoBuilder(name, goal)
+    goal_setter = GoalSetter(StandardGoal, to_maximize=to_maximize, teacher_name="Validator", goal_field=goal_field)
+    dojo_builder = DojoBuilder(name, goal_setter)
     return dojo_builder.add_trainer(
         "Trainer", training_data, n_epochs, training_batch_size, True
     ).add_tester(
@@ -118,8 +118,8 @@ def build_testing_dojo(
     Returns:
         [Dojo]: The validation dojo
     """
-    goal = StandardGoal(to_maximize, "Tester", goal_field)
-    dojo_builder = DojoBuilder(name, goal)
+    goal_setter = GoalSetter(StandardGoal, to_maximize=to_maximize, teacher_name="Tester", goal_field=goal_field)
+    dojo_builder = DojoBuilder(name, goal_setter)
     return dojo_builder.add_trainer(
         "Trainer", training_data, n_epochs, training_batch_size, True
     ).add_tester(
