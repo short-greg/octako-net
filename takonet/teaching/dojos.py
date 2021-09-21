@@ -521,7 +521,7 @@ class StandardDojo(Dojo):
         self._members.add(observer_inviter.observer_name)
         self._audience.add(observer_inviter)
     
-    def get_teacher(self, name: str) -> typing.Tuple(TeacherInviter, bool):
+    def get_teacher(self, name: str) -> typing.Tuple[TeacherInviter, bool]:
 
         for inviter in self._base:
             if name == inviter.teacher_name:

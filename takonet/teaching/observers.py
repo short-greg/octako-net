@@ -111,8 +111,8 @@ class FinishedCondition(object):
 class Trigger(Observer):
 
     def __init__(
-        self, name: str, condition: TriggerCondition, 
-        teacher_name: str,
+        self, name: str, teacher_name: str, condition: TriggerCondition, 
+        
         course: Course, listen_to_event: str, 
     ):
         """[summary]

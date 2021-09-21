@@ -42,6 +42,6 @@ class TestDojoBuilder:
 
         dojo_builder = dojo_builders.DojoBuilder("Validation Dojo", goal_setter)
         dojo_builder.add_trainer("Trainer", dataset, is_base=True)
-        dojo_builder.add_trainer("Trainer", dataset, is_base=False)
+        dojo_builder.add_trainer("Trainer2", dataset, is_base=False)
         dojo = dojo_builder.get_result()
         assert dojo.is_base_staff("Trainer")
