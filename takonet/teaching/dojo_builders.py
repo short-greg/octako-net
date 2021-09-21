@@ -1,4 +1,4 @@
-from .dojos import Dojo, StandardDojo, StandardTeacher, Goal, StandardGoal, Teacher
+from .dojos import Dojo, GoalSetter, ObserverInviter, StandardDojo, StandardTeacher, Goal, StandardGoal, Teacher, TeacherInviter
 from torch.utils import data as data_utils
 from . import observers
 import typing
@@ -9,9 +9,11 @@ class DojoBuilder(object):
     """
 
     def __init__(
-        self, name: str, goal: Goal=None
+        self, name: str, goal_setter: GoalSetter=None
     ):
-        self.dojo = StandardDojo(name, goal)
+        self._name = name
+        self._goal_setter = goal_setter
+        self.dojo = StandardDojo(name, goal_setter)
     
     def add_staff(self, teacher: Teacher, is_base: bool=True):
         if is_base:
@@ -20,65 +22,46 @@ class DojoBuilder(object):
             self.dojo.add_sub_staff(teacher)
         return self
 
-    def build_tester(
+    def add_tester(
         self, name: str, material: data_utils.Dataset, 
         batch_size: int=32, is_base: bool=False
     ):
-        teacher = StandardTeacher(
-            name, material, batch_size, 1
+        teacher = TeacherInviter(
+            Teacher, name, material=material, batch_size=batch_size, n_lessons=1
         )
         return self.add_staff(teacher, is_base)
 
-    def build_trainer(
-        self, name: str, material: data_utils.Dataset, n_rounds=10,
+    def add_trainer(
+        self, name: str, material: data_utils.Dataset, n_lessons=10,
         batch_size: int=32, is_base: bool=False
     ):
-        return self.add_staff(StandardTeacher(
-            name, material, batch_size, n_rounds
+        return self.add_staff(TeacherInviter(
+            Teacher, name, material=material, batch_size=batch_size, n_lessons=n_lessons,
         ), is_base)
     
-    def build_teacher_trigger(
-        self, listener: str, listening_to: str, 
-        trigger_builder: observers.TriggerInviter
-    ):
-        listener: StandardTeacher = self.dojo.get(listener, only_staff=True)
+    def add_teacher_trigger(self,  trigger_inviter: observers.TriggerInviter):
+        self.dojo.add_observer(
+            trigger_inviter
+        )
 
-        if listener is None:
-            raise ValueError(f"{listener} is not a valid member of the dojo")
-        listening_to: StandardTeacher = self.dojo.get(listening_to, only_staff=True)
-        if listening_to is None:
-            raise ValueError(f"{listening_to} is not a valid member of the dojo")
-        assert listening_to is not None
-
-        self.dojo.add_observer(trigger_builder.build(
-                listening_to, listener.run, self.dojo.course
-            ))
         return self
 
-    def build_progress_bar(self, name: str, listen_to: typing.List[str]):
-
-        teachers: typing.List[Teacher] = []
-        for teacher_name in listen_to:
-            teacher = self.dojo.get(teacher_name)
-            assert teacher is not None
-            teachers.append(teacher)
+    def add_progress_bar(self, name: str, listen_to: typing.List[str]):
 
         self.dojo.add_observer(
-            observers.ProgressBar(
-                name, self.dojo.course, listen_to=teachers
-            )
+            ObserverInviter(observers.ProgressBar, "Progress Bar", listen_to=listen_to)
         )
         return self
     
     def get_result(self):
         return self.dojo
 
-    def reset(self, name: str=None, goal: Goal=None):
+    def reset(self, name: str=None, goal_setter: GoalSetter=None):
 
-        name = name or self.name
-        goal = goal or self.goal
+        name = name or self._name
+        goal_setter = goal_setter or self._goal_setter
 
-        self.dojo = Dojo(name, goal)
+        self.dojo = Dojo(name, goal_setter)
     
 
 def build_validation_dojo(
@@ -102,17 +85,17 @@ def build_validation_dojo(
     """
     goal = StandardGoal(to_maximize, "Validator", goal_field)
     dojo_builder = DojoBuilder(name, goal)
-    return dojo_builder.build_trainer(
+    return dojo_builder.add_trainer(
         "Trainer", training_data, n_epochs, training_batch_size, True
-    ).build_tester(
+    ).add_tester(
         "Validator", test_data, test_batch_size, False
-    ).build_progress_bar(
+    ).add_progress_bar(
         "Progress Bar", listen_to=["Trainer", "Validator"]
-    ).build_teacher_trigger(
+    ).add_teacher_trigger(
         "Validator", "Trainer",
         observers.TriggerInviter(
             "Validator Trigger"
-        ).set_observing_lesson_finished().set_round_condition()
+        ).set_observing_lesson_finished().set_lesson_condition()
     ).get_result()
 
 
@@ -137,15 +120,15 @@ def build_testing_dojo(
     """
     goal = StandardGoal(to_maximize, "Tester", goal_field)
     dojo_builder = DojoBuilder(name, goal)
-    return dojo_builder.build_trainer(
+    return dojo_builder.add_trainer(
         "Trainer", training_data, n_epochs, training_batch_size, True
-    ).build_tester(
+    ).add_tester(
         "Tester", test_data, test_batch_size, False
-    ).build_teacher_trigger(
+    ).add_teacher_trigger(
         "Tester", "Trainer",
         observers.TriggerInviter(
             "Tester Trigger"
         ).set_finished_condition().set_observing_finished()
-    ).build_progress_bar(
+    ).add_progress_bar(
         "Progress Bar", listen_to=["Trainer", "Tester"]
     ).get_result()

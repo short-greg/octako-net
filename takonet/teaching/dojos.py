@@ -278,9 +278,9 @@ class Ordered(Staff):
 
 class StandardCourse(Course):
 
-    def __init__(self, learner: learners.Learner, goal: Goal):
+    def __init__(self, learner: learners.Learner, goal_setter: GoalSetter):
 
-        self._goal = goal
+        self._goal = goal_setter.set(self)
         self._lectures: typing.List[typing.Dict[str, typing.List[Lecture]]] = [{}]
         self._student = learner
     
@@ -445,9 +445,9 @@ class StandardTeacherInviter(TeacherInviter):
 
 class StandardDojo(Dojo):
 
-    def __init__(self, name: str, goal_setter: Goal):
+    def __init__(self, name: str, goal_setter: GoalSetter):
         self._name: str = name
-        self._goal: GoalSetter = goal_setter
+        self._goal_setter: GoalSetter = goal_setter
         self._base: typing.List[TeacherInviter] = []
         self._sub: typing.Set[TeacherInviter] = set()
         self._members: typing.Set[str] = set()
@@ -525,7 +525,7 @@ class StandardDojo(Dojo):
     
     def teach(self, learner: learners.Learner) -> StandardCourse:
         
-        course = StandardCourse(learner, self._goal)
+        course = StandardCourse(learner, self._goal_setter)
 
         base_teachers = [teacher_inviter.invite(course) for teacher_inviter in self._base]
         sub_teachers = [teacher_inviter.invite(course) for teacher_inviter in self._sub]

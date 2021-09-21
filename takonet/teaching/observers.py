@@ -33,7 +33,7 @@ class ProgressBar(Observer):
         if name not in self._listen_to:
             return
         
-        lecture: Lecture = self._course.get_lecture(name)
+        lecture: Lecture = self._course.get_cur_lecture(name)
 
         if self.pbar is not None:
             self.pbar.close()
