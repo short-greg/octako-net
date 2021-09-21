@@ -39,11 +39,9 @@ class DojoBuilder(object):
             Teacher, name, material=material, batch_size=batch_size, n_lessons=n_lessons,
         ), is_base)
     
-    def add_teacher_trigger(self,  trigger_inviter: observers.TriggerInviter):
-        self.dojo.add_observer(
-            trigger_inviter
-        )
+    def add_teacher_trigger(self, name: str, trigger_inviter: observers.TriggerInviter):
 
+        self.dojo.add_observer(trigger_inviter)
         return self
 
     def add_progress_bar(self, name: str, listen_to: typing.List[str]):
@@ -94,7 +92,7 @@ def build_validation_dojo(
     ).add_teacher_trigger(
         "Validator", "Trainer",
         observers.TriggerInviter(
-            "Validator Trigger"
+            "Validator Trigger", "Validator"
         ).set_observing_lesson_finished().set_lesson_condition()
     ).get_result()
 
@@ -127,7 +125,7 @@ def build_testing_dojo(
     ).add_teacher_trigger(
         "Tester", "Trainer",
         observers.TriggerInviter(
-            "Tester Trigger"
+            "Tester Trigger", "Tester"
         ).set_finished_condition().set_observing_finished()
     ).add_progress_bar(
         "Progress Bar", listen_to=["Trainer", "Tester"]

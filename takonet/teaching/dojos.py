@@ -1,6 +1,7 @@
 
 import dataclasses
 import typing
+from pandas.core import base
 
 from torch._C import Value
 from takonet.machinery import learners
@@ -73,6 +74,8 @@ class Course(ABC):
     lesson_started_event = events.TeachingEvent[str]()
     lesson_finished_event = events.TeachingEvent[str]()
     advance_event = events.TeachingEvent[str]()
+    # invokes Course and name of teacher
+    teacher_trigger_event = events.TeachingEvent()
 
     EVENT_MAP = {
         "result_updated": result_updated_event,
@@ -125,6 +128,9 @@ class Course(ABC):
     @abstractmethod
     def evaluate(self) -> Evaluation:
         pass
+    
+    def trigger_teacher(self, teacher_name: str):
+        self.teacher_trigger_event.invoke(self, teacher_name)
 
     @abstractmethod
     def advance_lecture(self):
@@ -283,7 +289,10 @@ class StandardCourse(Course):
         self._goal = goal_setter.set(self)
         self._lectures: typing.List[typing.Dict[str, typing.List[Lecture]]] = [{}]
         self._student = learner
-    
+        self._base_teachers: typing.Dict[str, Teacher] = dict()
+        self._sub_teachers: typing.Dict[str, Teacher] = dict()
+        self._observers: typing.Dict[str, Teacher] = dict()
+
     def get_cur_lecture(self, teacher_name: str) -> Lecture:
         if len(self._lectures) == 0 or teacher_name not in self._lectures[-1]:
             return None
@@ -337,12 +346,22 @@ class StandardCourse(Course):
 
     def get_student(self, teacher: Teacher):
         return self._student
+
+    def trigger_teacher(self, teacher_name):
+        if teacher_name not in self._sub_teachers:
+            raise ValueError("Teacher must be a sub teacher in order to trigger")
+        self._sub_teachers[teacher_name].teach()
     
     def evaluate(self) -> Evaluation:
         return self._goal.evaluate()
 
     def advance_lecture(self):
         self._lectures.append({})
+    
+    def set_teachers(self, base_teachers: typing.List[Teacher], sub_teachers: typing.List[Teacher], audience: typing.List[Observer]):
+        self._base_teachers = {teacher.name for teacher in base_teachers}
+        self._sub_teachers = {teacher.name for teacher in sub_teachers}
+        self._audience = {observer.name for observer in audience}
     
     def get_results(self, teacher_name: str, section_id: int=-1, lecture_id: int=-1):
         return self._lectures[section_id][teacher_name][lecture_id].results
@@ -502,6 +521,18 @@ class StandardDojo(Dojo):
         self._members.add(observer_inviter.observer_name)
         self._audience.add(observer_inviter)
     
+    def get_teacher(self, name: str) -> typing.Tuple(TeacherInviter, bool):
+
+        for inviter in self._base:
+            if name == inviter.teacher_name:
+                return inviter, True
+        
+        for inviter in self._sub:
+            if name == inviter.teacher_name:
+                return inviter, False
+
+        raise ValueError("Teacher name {} is not a valid teacher".format(name))
+    
     def __len__(self):
         return len(self._base)
     
@@ -529,6 +560,10 @@ class StandardDojo(Dojo):
 
         base_teachers = [teacher_inviter.invite(course) for teacher_inviter in self._base]
         sub_teachers = [teacher_inviter.invite(course) for teacher_inviter in self._sub]
+
+        course.set_teachers(
+            base_teachers, sub_teachers, [observer for observer in self._audience]
+        )
 
         for observer_inviter in self._audience:
             observer_inviter.invite(course, sub_teachers)

@@ -112,7 +112,7 @@ class Trigger(Observer):
 
     def __init__(
         self, name: str, condition: TriggerCondition, 
-        observer_method: typing.Callable,
+        teacher_name: str,
         course: Course, listen_to_event: str, 
     ):
         """[summary]
@@ -128,7 +128,7 @@ class Trigger(Observer):
         self._course = course
         self._course.listen_to(listen_to_event, self.on_trigger)
         self._condition = condition
-        self._observer_method = observer_method
+        self._teacher_name = teacher_name
         self._course = course
     
     @property
@@ -138,7 +138,7 @@ class Trigger(Observer):
     def on_trigger(self, name: str):
         lecture = self._course.get_cur_lecture(name)
         if self._condition.check(lecture):
-            self._observer_method()
+            self._course.trigger_teacher(self._teacher_name)
 
 
 class TriggerInviter(object):
@@ -151,7 +151,7 @@ class TriggerInviter(object):
     ADVANCED = 'advanced'
 
     def __init__(
-        self, name: str, callback: typing.Callable[[], typing.NoReturn], condition: TriggerCondition=None,
+        self, name: str, teacher_name: str, condition: TriggerCondition=None,
         observing_event=None,
     ):
         """[Set up and bulid a trigger]
@@ -162,9 +162,9 @@ class TriggerInviter(object):
             observing_event ([type], optional): [description]. Defaults to None.
         """
         self._name = name
+        self._teacher_name = teacher_name
         self._condition = condition or LessonFinishedCondition()
         self._observing_event = observing_event or self.LESSON_FINISHED
-        self._callback = callback
 
     def set_finished_condition(self):
 
@@ -216,4 +216,4 @@ class TriggerInviter(object):
     
     def invite(self, course: Course):
 
-        return Trigger(self._name, self._callback, self._condition, self._observing_event, course)
+        return Trigger(self._name, self._teacher_name, self._condition, self._observing_event, course)
