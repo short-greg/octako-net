@@ -1,10 +1,6 @@
-from takonet.teaching import events
 from takonet.machinery import learners
 from takonet.teaching import observers, dojos
 import pytest
-import torch.utils.data as torch_data
-import torch
-import pandas as pd
 
 
 class DummyLearner(learners.Learner):
@@ -101,11 +97,6 @@ def get_test_course():
 
 
 class TestTrigger(object):
-
-    # @staticmethod
-    # def setup_teacher() -> dojos.StandardTeacher:
-
-    #    return dojos.StandardTeacher("teacher", torch_data.TensorDataset(torch.randn(4, 2)), 32, 1, 1, True)
         
     def test_on_trigger_not_executing_on_no_updates(self):
         listener = Listener()

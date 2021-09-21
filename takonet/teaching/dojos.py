@@ -1,6 +1,8 @@
 
 import dataclasses
 import typing
+
+from torch._C import Value
 from takonet.machinery import learners
 from abc import ABC, abstractmethod
 import pandas as pd
@@ -259,48 +261,56 @@ class StandardCourse(Course):
     def __init__(self, learner: learners.Learner, goal: Goal):
 
         self._goal = goal
-        self._lectures: typing.List[typing.Dict[str, typing.List[Lecture]]] = []
+        self._lectures: typing.List[typing.Dict[str, typing.List[Lecture]]] = [{}]
         self._student = learner
     
     def get_cur_lecture(self, teacher_name: str) -> Lecture:
-        if teacher_name not in self._lectures[-1]:
-            raise ValueError(f'Teacher {teacher_name} is not a part of the current lecture')
+        if len(self._lectures) == 0 or teacher_name not in self._lectures[-1]:
+            return None
+            # raise ValueError(f'Teacher {teacher_name} is not a part of the current lecture')
 
-        print('After', self._lectures[-1][teacher_name][-1])
         return self._lectures[-1][teacher_name][-1]
+    
+    def _verify_get_cur_lecture(self, teacher: Teacher) -> Lecture:
+
+        lecture = self.get_cur_lecture(teacher.name)
+
+        if lecture is None:
+            raise ValueError("No current lecture for {}".format(teacher.name))
+        return lecture
 
     def update_results(self, teacher: Teacher, results: typing.Dict[str, float]):  
-        lecture = self.get_cur_lecture(teacher)
+        lecture = self._verify_get_cur_lecture(teacher)
         lecture.append_results(results)
         self.result_updated_event.invoke(teacher.name)
 
     def start_lesson(self, teacher: Teacher, n_lesson_iterations: int):       
-        lecture = self.get_cur_lecture(teacher)
+        lecture = self._verify_get_cur_lecture(teacher)
         lecture.cur_lesson += 1
         lecture.cur_iteration = 0
         lecture.n_lesson_iterations = n_lesson_iterations
         self.lesson_finished_event.invoke(teacher.name)
 
-    def start(self, teacher: Teacher):
+    def start(self, teacher: Teacher, n_lessons: int, n_lesson_iterations: int=0):
         if teacher.name not in self._lectures[-1]:
-            self._lectures[-1][teacher.name] = [Lecture()]
+            self._lectures[-1][teacher.name] = [Lecture(teacher.name, n_lessons, n_lesson_iterations)]
         else:
-            self._lectures[-1][teacher.name].append(Lecture())
+            self._lectures[-1][teacher.name].append(Lecture(teacher.name, n_lessons, n_lesson_iterations))
         
         self.started_event.invoke(teacher.name)
 
     def finish_lesson(self, teacher: Teacher):
-        lecture = self.get_cur_lecture(teacher)
+        lecture = self._verify_get_cur_lecture(teacher)
         lecture.lesson_finished = True
         self.lesson_finished_event.invoke(teacher.name)
 
     def finish(self, teacher: Teacher):
-        lecture = self.get_cur_lecture(teacher)
+        lecture = self._verify_get_cur_lecture(teacher)
         lecture.finished = True
         self.finished_event.invoke(teacher.name)
 
     def advance(self, teacher: Teacher):        
-        lecture = self.get_cur_lecture(teacher)
+        lecture = self._verify_get_cur_lecture(teacher)
         lecture.cur_iteration += 1
         lecture.cur_lesson_iteration += 1
         self.finished_event.invoke(teacher.name)
@@ -340,7 +350,7 @@ class StandardTeacher(object):
     """
 
     def __init__(
-        self, name: str, course: StandardCourse, material: torch_data.Dataset, batch_size: int, n_lessons: int,
+        self, name: str, course: Course, material: torch_data.Dataset, batch_size: int, n_lessons: int,
         is_training: bool=True,
     ):
         """[initializer]
@@ -400,6 +410,30 @@ class StandardTeacher(object):
         self._course.finish(self)
 
 
+class StandardTeacherInviter(object):
+
+
+    def __init__(
+        self, teacher_name: str, material: torch_data.Dataset, batch_size: int, n_lessons: int,
+        is_training: bool=True
+    ):
+        self._teacher_name= teacher_name
+        self._material = material
+        self._batch_size = batch_size
+        self._n_lessons = n_lessons
+        self._is_training = is_training
+    
+    @property
+    def teacher_name(self):
+        return self._teacher_name
+
+    def invite(self, course: Course):
+
+        return StandardTeacher(
+            self._teacher_name, course, self._material, self._batch_size, self._n_lessons, self._is_training
+        )
+
+
 class StandardDojo(Dojo):
 
     def __init__(self, name: str, goal_setter: Goal):
@@ -410,6 +444,30 @@ class StandardDojo(Dojo):
         self._members: typing.Set[str] = set()
         self._audience: typing.Set[ObserverInviter] = set()
         self._n_finished: int = 0
+    
+    def is_base_staff(self, name: str):
+        for member in self._base:
+            if name == member.teacher_name:
+                return True
+
+        return False
+
+    def is_observer(self, name: str):
+        for member in self._audience:
+            if name == member.observer_name:
+                return True
+
+        return False
+
+    def is_substaff(self, name: str):
+        for member in self._sub:
+            if name == member.teacher_name:
+                return True
+
+        return False
+    
+    def is_staff(self, name: str):
+        return name in self._members
 
     def add_base_staff(self, teacher_inviter: TeacherInviter):
 
