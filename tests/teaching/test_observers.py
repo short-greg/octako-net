@@ -1,26 +1,39 @@
 from takonet.teaching import events
 from takonet.machinery import learners
-from takonet.teaching import observers
-from takonet.teaching import staff
+from takonet.teaching import observers, dojos
 import pytest
 import torch.utils.data as torch_data
 import torch
 import pandas as pd
 
 
+class DummyLearner(learners.Learner):
+    def learn(self, x, y): pass;
+    def test(self, x, y): pass;
+
+
+class DummyGoal(dojos.Goal):
+    def evaluate(self): return 0.;
+
+
+def create_lecture(n_lessons, cur_iteration):
+    learner = DummyLearner()
+    goal = dojos.Goal()
+    return 
+
+
 class TestIterationCondition(object):
 
     def test_check_condition_with_valid(self):
-
+        lecture = dojos.Lecture('lecture', n_lessons=5, n_lesson_iterations=5, cur_iteration=2)
         condition = observers.IterationCondition(period=2)
-        progress = staff.RunProgress(10, 5, cur_iteration=1)
-        assert condition.check(progress)
+        assert condition.check(lecture)
 
     def test_check_condition_with_invalid(self):
 
+        lecture = dojos.Lecture('lecture', n_lessons=10, n_lesson_iterations=5, cur_iteration=4)
         condition = observers.IterationCondition(period=3)
-        progress = staff.RunProgress(10, 5, cur_iteration=4)
-        assert not condition.check(progress)
+        assert not condition.check(lecture)
 
     def test_invalid_period(self):
 
@@ -29,25 +42,25 @@ class TestIterationCondition(object):
             observers.IterationCondition(period=0)
 
 
-class TestRoundCondition(object):
+class TestLessonCondition(object):
 
     def test_check_condition_with_valid(self):
 
-        condition = observers.RoundCondition(period=2)
-        progress = staff.RunProgress(10, 5, cur_round=3)
+        condition = observers.LessonCondition(period=2)
+        progress = dojos.Lecture('lecture', 10, 5, cur_lesson=2)
         assert condition.check(progress)
 
     def test_check_condition_with_invalid(self):
 
-        condition = observers.RoundCondition(period=3)
-        progress = staff.RunProgress(10, 5, cur_round=3)
+        condition = observers.LessonCondition(period=2)
+        progress = dojos.Lecture('lecture', 10, 5, cur_lesson=3)
         assert not condition.check(progress)
 
     def test_invalid_period(self):
 
         with pytest.raises(AssertionError):
 
-            observers.RoundCondition(period=0)
+            observers.LessonCondition(period=0)
 
 
 class TestFinishedCondition(object):
@@ -55,14 +68,14 @@ class TestFinishedCondition(object):
     def test_check_condition_with_valid(self):
 
         condition = observers.FinishedCondition()
-        progress = staff.RunProgress(10, 5, finished=True)
-        assert condition.check(progress)
+        lecture = dojos.Lecture('lecture', 10, 5, finished=True)
+        assert condition.check(lecture)
 
     def test_check_condition_with_valid(self):
 
         condition = observers.FinishedCondition()
-        progress = staff.RunProgress(10, 5, finished=False)
-        assert not condition.check(progress)
+        lecture = dojos.Lecture('lecture', 10, 5, finished=False)
+        assert not condition.check(lecture)
 
 
 class Listener(object):
@@ -74,90 +87,46 @@ class Listener(object):
         self.called = True
 
 
-# class TestLearner(learners.Learner):
+class StandardCourseForTesting(dojos.StandardCourse):
 
-#     def learn(self, x, t):
-#         return {}
+    def set_lecture(self, name: str, lecture: dojos.Lecture):
+        if len(self._lectures) == 0:
+            self._lectures.append({})
+        self._lectures[-1][name] = [lecture]
 
-#     def test(self, x, t): 
-#         return {}
-        
+
+def get_test_course():
+
+    return StandardCourseForTesting(DummyLearner(), DummyGoal())
+
 
 class TestTrigger(object):
 
-    @staticmethod
-    def setup_teacher() -> staff.StandardTeacher:
+    # @staticmethod
+    # def setup_teacher() -> dojos.StandardTeacher:
 
-        return staff.StandardTeacher("teacher", torch_data.TensorDataset(torch.randn(4, 2)), 32, 1, 1, True)
-
-    # def setup_run(self):
-
-    #     return staff.Run(
-    #         "x", TestLearner(), 
-    #         torch_data.TensorDataset(torch.rand(2,2)), None, 32, "y", staff.RunProgress(2,2)
-    #     )
+    #    return dojos.StandardTeacher("teacher", torch_data.TensorDataset(torch.randn(4, 2)), 32, 1, 1, True)
         
     def test_on_trigger_not_executing_on_no_updates(self):
         listener = Listener()
-        teaching_event = events.TeachingEvent[staff.Run]()
-        progress = staff.RunProgress(10, 2, cur_iteration=0)
-        run = staff.Run(
-            'run', None, None, None, 0, 'teacher', progress
-        )
-        observers.Trigger('Teacher Trigger', observers.IterationCondition(2), teaching_event, listener.call)
-        teaching_event.invoke(run)
+        # teaching_event = events.TeachingEvent[str]()
+        name = 'Teacher'
+        course = get_test_course()
+        course.set_lecture("Teacher", dojos.Lecture("Teacher", 5, 10, cur_iteration=1))
+        
+        observers.Trigger('Teacher Trigger', observers.IterationCondition(2), listener.call, course,  "advanced")
+        
+        course.advance_event.invoke(name)
         assert listener.called is False
 
     def test_on_trigger_executing_on_one_update(self):
         listener = Listener()
-        teaching_event = events.TeachingEvent[staff.Run]()
-        progress = staff.RunProgress(10, 2, cur_iteration=1)
-        run = staff.Run(
-            'run', None, None, None, 0, 'teacher', progress
-        )
-        observers.Trigger('Teacher Trigger', observers.IterationCondition(2), teaching_event, listener.call)
-        teaching_event.invoke(run)
+        # teaching_event = events.TeachingEvent[str]()
+        name = 'Teacher'
+        course = get_test_course()
+        course.set_lecture("Teacher", dojos.Lecture("Teacher", 5, 10, cur_iteration=2))
+
+        observers.Trigger('Teacher Trigger', observers.IterationCondition(2), listener.call, course,  "advanced")
+        course.advance_event.invoke(name)
         assert listener.called is True
-
-
-class TestProgressBar(object):
-
-    def setup_data(self):
-        return pd.DataFrame([[1, 2], [0, 1]], columns=['x', 'y'])
-
-    def test_enter(self):
-
-        teacher = staff.StandardTeacher("hi", None, None, 1, 1)
-        pbar = observers.ProgressBar("PBar", [teacher])
-        progress = staff.RunProgress(10, 2)
-        run = staff.Run(
-            'run', None, None, self.setup_data(), 0, 'teacher', progress
-        )
-        teacher.round_started_event.invoke(run)
-
-        assert pbar.pbar is not None
-
-    def test_update(self):
-
-        teacher = staff.StandardTeacher("hi", None, None, 1, 1)
-        pbar = observers.ProgressBar("PBar", [teacher])
-        progress = staff.RunProgress(10, 1)
-        run = staff.Run(
-            'run', None, None, self.setup_data(), 0, 'teacher', progress
-        )
-        teacher.round_started_event.invoke(run)
-        teacher.result_updated_event.invoke(run)
-        assert pbar.pbar.n == 1
-
-    def test_exit(self):
-
-        teacher = staff.StandardTeacher("hi", None, None, 1, 1)
-        pbar = observers.ProgressBar("PBar", [teacher])
-        progress = staff.RunProgress(10, 1)
-        run = staff.Run(
-            'run', None, None, self.setup_data(), 0, 'teacher', progress
-        )
-        teacher.round_started_event.invoke(run)
-        teacher.result_updated_event.invoke(run)
-        teacher.round_finished_event.invoke(run)
-        assert pbar.pbar is None
+    

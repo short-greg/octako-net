@@ -34,6 +34,35 @@ class Evaluation:
 
 
 @dataclasses.dataclass
+class Lecture:
+    """[Struct for storing progress on a run]
+    """
+    name: str
+    n_lessons: int
+    n_lesson_iterations: int
+    cur_lesson_iteration: int = 0
+    cur_lesson: int = 0
+    cur_iteration: int = 0
+    finished: bool = False
+    lesson_finished: bool = False
+    results: pd.DataFrame = None
+
+    def __post_init__(self):
+        self.results = self.results or pd.DataFrame()
+
+    def append_results(self, results: typing.Dict[str, float]) -> bool:
+        if self.finished:
+            return False
+
+        difference = set(results.keys()).difference(self.results.columns)
+        for key in difference:
+            self.results[key] = pd.Series(dtype='float')
+
+        self.results.loc[len(self.results)] = results
+        return True
+
+
+@dataclasses.dataclass
 class Course(ABC):
 
     result_updated_event = events.TeachingEvent[str]()
@@ -52,7 +81,7 @@ class Course(ABC):
         "advanced": advance_event
     }
 
-    def listen_to(self, event_key: str, f: typing.Callable[[str]]):
+    def listen_to(self, event_key: str, f: typing.Callable[[str], typing.NoReturn]):
 
         if event_key not in self.EVENT_MAP:
             raise ValueError(f'Event name {event_key} is not a valid event (Valid Events: {self.EVENT_MAP})')
@@ -85,6 +114,10 @@ class Course(ABC):
 
     @abstractmethod
     def get_student(self, teacher: Teacher):
+        pass
+
+    @abstractmethod
+    def get_cur_lecture(self, teacher_name: str) -> Lecture:
         pass
     
     @abstractmethod
@@ -221,35 +254,6 @@ class Ordered(Staff):
         return super().__getitem__(name)
 
 
-@dataclasses.dataclass
-class Lecture:
-    """[Struct for storing progress on a run]
-    """
-    name: str
-    n_lessons: int
-    n_lesson_iterations: int
-    cur_lesson_iteration: int = 0
-    cur_lesson: int = 0
-    cur_iteration: int = 0
-    finished: bool = False
-    lesson_finished: bool = False
-    results: pd.DataFrame = None
-
-    def __post_init__(self):
-        self.results = self.results or pd.DataFrame()
-
-    def append_results(self, results: typing.Dict[str, float]) -> bool:
-        if self.finished:
-            return False
-
-        difference = set(results.keys()).difference(self.results.columns)
-        for key in difference:
-            self.results[key] = pd.Series(dtype='float')
-
-        self.results.loc[len(self.results)] = results
-        return True
-
-
 class StandardCourse(Course):
 
     def __init__(self, learner: learners.Learner, goal: Goal):
@@ -261,7 +265,8 @@ class StandardCourse(Course):
     def get_cur_lecture(self, teacher_name: str) -> Lecture:
         if teacher_name not in self._lectures[-1]:
             raise ValueError(f'Teacher {teacher_name} is not a part of the current lecture')
-        
+
+        print('After', self._lectures[-1][teacher_name][-1])
         return self._lectures[-1][teacher_name][-1]
 
     def update_results(self, teacher: Teacher, results: typing.Dict[str, float]):  
@@ -450,7 +455,3 @@ class StandardDojo(Dojo):
             teacher.teach()
         
         return course
-
-
-# course = dojos
-# result = course.evaluate()

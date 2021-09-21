@@ -1,5 +1,4 @@
-from takonet.teaching.dojos import Lecture
-from dojos import Observer, Course
+from takonet.teaching.dojos import Lecture, Observer, Course
 import typing
 import tqdm
 
@@ -81,7 +80,7 @@ class IterationCondition(TriggerCondition):
         self._period = period
 
     def check(self, lecture: Lecture):
-        return not bool((lecture.cur_iteration + 1) % self._period)
+        return not bool((lecture.cur_iteration) % self._period)
 
 
 class LessonCondition(object):
@@ -91,9 +90,8 @@ class LessonCondition(object):
         self._period = period
 
     def check(self, lecture: Lecture):
-
         # TODO: epoch is not guaranteed to be here.. think how to handle this
-        return not bool((lecture.cur_lesson + 1) % self._period)
+        return not bool((lecture.cur_lesson) % self._period)
 
 
 class LessonFinishedCondition(object):
@@ -138,7 +136,7 @@ class Trigger(Observer):
         return self._name
     
     def on_trigger(self, name: str):
-        lecture = self._course.get_lecture(name)
+        lecture = self._course.get_cur_lecture(name)
         if self._condition.check(lecture):
             self._observer_method()
 
@@ -153,7 +151,7 @@ class TriggerInviter(object):
     ADVANCED = 'advanced'
 
     def __init__(
-        self, name: str, callback: typing.Callable[[]], condition: TriggerCondition=None,
+        self, name: str, callback: typing.Callable[[], typing.NoReturn], condition: TriggerCondition=None,
         observing_event=None,
     ):
         """[Set up and bulid a trigger]

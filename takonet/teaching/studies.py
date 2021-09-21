@@ -9,7 +9,7 @@ import typing
 class Study(ABC):
 
     @abstractmethod
-    def perform() -> typing.List[dojos.Experiment]:
+    def perform() -> typing.List[dojos.Course]:
         pass
 
 
