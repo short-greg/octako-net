@@ -252,12 +252,30 @@ def get_teacher_inviter(name="Inviter", is_training=True):
         name, dataset, 32, 10, is_training
     )
 
-"""
+
+class DummyGoalWithCourse(dojos.Goal):
+
+    def __init__(self, course: dojos.Course):
+        pass
+
+    def evaluate(self): return 0.;
+
+
+class DummyObserver(dojos.Observer):
+
+    def __init__(self, name: str):
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name
+
+
 class TestDojo:
 
     def test_add_base_staff(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter())
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         dojo.add_base_staff(inviter)
 
@@ -266,114 +284,93 @@ class TestDojo:
 
     def test_add_sub_staff(self):
 
-        dataset = torch.utils.data.TensorDataset(
-            torch.randn(4, 2), torch.randint(0, 4, (4,))
-        )
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        inviter = get_teacher_inviter()
+        dojo.add_sub_staff(inviter)
 
-        builder = dojos.DojoBuilder(
-            'Study', dojos.StandardGoal(True, "Teacher", 'X')
-        )
-        builder.build_trainer(
-            'Teacher', dataset, 32, 10, True
-        )
-        builder.build_tester(
-            'Validator', dataset, 32, False
-        )
-        # dojo.goal = dojos.Goal("Validator", "Classification", True)
-
-        assert len(builder.get_result()) == 1
-
-    def test_add_goal_with_valid(self):
-
-        goal = dojos.StandardGoal("Teacher", "Classification", True)
-        builder = dojos.DojoBuilder(
-            'Study', goal
-        )
-        builder.build_trainer(
-            'Teacher', dataset, 32, 5, True
-        )
-        # builder.goal = goal
-        assert builder.get_result().goal is goal
+        assert len(dojo) == 0
+        assert dojo.is_sub_staff(inviter.teacher_name)
 
     def test_is_staff_with_valid(self):
 
-        builder = dojos.DojoBuilder(
-            'Study', dojos.StandardGoal(True, "Teacher", 'X')
-        )
-        builder.build_trainer(
-            'Teacher', dataset, 32, 5, True
-        )
-        assert builder.get_result().is_staff('Teacher')
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        inviter = get_teacher_inviter()
+        dojo.add_base_staff(inviter)
+
+        assert dojo.is_staff(inviter.teacher_name)
 
     def test_is_staff_with_non_staff_member(self):
 
-        builder = dojos.DojoBuilder(
-            'Study', dojos.StandardGoal(True, "Teacher", 'X')
-        )
-        builder.build_trainer(
-            'Teacher', dataset, 32, 5, True
-        )
-        assert not builder.get_result().is_staff('Validator')
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        inviter = get_teacher_inviter()
+        dojo.add_sub_staff(inviter)
+
+        assert len(dojo) == 0
+        assert not dojo.is_staff("Validator")
 
     def test_is_staff_with_sub(self):
 
-        builder = dojos.DojoBuilder(
-            'Study', dojos.StandardGoal(True, "Teacher", 'X')
-        )
-        builder.build_trainer(
-            'Teacher', dataset, 32, 5, True
-        )
-        builder.build_tester(
-            'Tester', dataset, 32, False
-        )
-        assert builder.get_result().is_staff('Tester')
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        inviter = get_teacher_inviter()
+        dojo.add_sub_staff(inviter)
+
+        assert dojo.is_staff(inviter.teacher_name)
 
     def test_is_staff_with_observer(self):
 
-        dojo = dojos.DojoBuilder(
-            'Study', dojos.StandardGoal(True, "Teacher", 'X')
-        )
-        dojo.build_trainer(
-            'Teacher', dataset, 32, 5, True
-        )
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo.add_observer(dojos.ObserverInviter(DummyObserver, 'observer'))
 
-        dojo.build_progress_bar(
-            'Progress Bar', ['Teacher']
-        )
-        assert not dojo.get_result().is_staff('Progress Bar')
+        assert dojo.is_observer("observer")
 
-    def test_is_observer_with_valid(self):
+    def test_is_not_observer_with_invalid(self):
 
-        builder = dojos.DojoBuilder(
-            'Study', dojos.StandardGoal(True, "Teacher", 'X')
-        )
-        builder.build_trainer(
-            'Teacher', dataset, 32, 5, True
-        )
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo.add_observer(dojos.ObserverInviter(DummyObserver, 'observer1'))
 
-        builder.build_progress_bar(
-            'Progress Bar', ['Teacher']
-        )
+        assert not dojo.is_observer("observer")
 
-        assert builder.get_result().is_observer('Progress Bar')
+    def test_reorder_cannot_be_done_if_duplicates(self):
 
-    def test_reorder(self):
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        inviter = get_teacher_inviter()
+        inviter2 = get_teacher_inviter(2)
+        dojo.add_base_staff(inviter)
+        dojo.add_base_staff(inviter2)
 
-        builder = dojos.DojoBuilder(
-            'Study', dojos.StandardGoal(True, "Teacher", 'X')
-        )
-        builder.build_trainer(
-            'Teacher', dataset, 32, 5, True
-        )
-        
-        builder.build_trainer(
-            'Teacher 2', dataset, 32, 5, True
-        )
-        dojo = builder.get_result()
-        teacher = dojo.get_base(1)
+        with pytest.raises(ValueError):
+            dojo.reorder([1, 1])
+
+    def test_reorder_cannot_be_done_if_lower_bound_invalid(self):
+
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        inviter = get_teacher_inviter()
+        inviter2 = get_teacher_inviter(2)
+        dojo.add_base_staff(inviter)
+        dojo.add_base_staff(inviter2)
+
+        with pytest.raises(ValueError):
+            dojo.reorder([-1, 1])
+
+    def test_reorder_cannot_be_done_if_upper_bound_invalid(self):
+
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        inviter = get_teacher_inviter()
+        inviter2 = get_teacher_inviter(2)
+        dojo.add_base_staff(inviter)
+        dojo.add_base_staff(inviter2)
+
+        with pytest.raises(ValueError):
+            dojo.reorder([0, 2])
+
+    def test_reorder_produces_the_correct_order(self):
+
+        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        inviter = get_teacher_inviter()
+        inviter2 = get_teacher_inviter(2)
+        dojo.add_base_staff(inviter)
+        dojo.add_base_staff(inviter2)
 
         dojo.reorder([1, 0])
-
-        assert dojo.get_base(0) is teacher
-
-"""
+        assert dojo[0].teacher_name == inviter2.teacher_name
+        assert dojo[1].teacher_name == inviter.teacher_name

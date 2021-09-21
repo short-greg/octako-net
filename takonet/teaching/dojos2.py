@@ -131,26 +131,40 @@ class Course(ABC):
         pass
 
 
-class TeacherInviter(ABC):
+class TeacherInviter(object):
 
-    @abstractmethod
-    def invite(self, course: Course) -> Teacher:
-        pass
+    def __init__(self, teacher_cls: typing.Type[Teacher], teacher_name: str, *args, **kwargs):
 
+        self._args = args
+        self._kwargs = kwargs
+        self._teacher_cls = teacher_cls
+        self._teacher_name = teacher_name
+    
     @property
     def teacher_name(self) -> str:
-        raise NotImplementedError
+        return self._teacher_name
+
+    def invite(self, course) -> Observer:
+        
+        return self._teacher_cls(*self._args, **self._kwargs, name=self._teacher_name, course=course)
 
 
-class ObserverInviter(ABC):
+class ObserverInviter(object):
 
-    @abstractmethod
-    def invite(self, course: Course) -> Observer:
-        pass
+    def __init__(self, observer_cls: typing.Type[Observer], observer_name: str, *args, **kwargs):
 
+        self._args = args
+        self._kwargs = kwargs
+        self._observer_cls = observer_cls
+        self._observer_name = observer_name
+    
     @property
     def observer_name(self) -> str:
-        raise NotImplementedError
+        return self._observer_name
+
+    def invite(self, course) -> Observer:
+        
+        return self._observer_cls(*self._args, **self._kwargs, name=self._observer_name, course=course)
 
 
 class Dojo(ABC):
@@ -177,11 +191,17 @@ class Goal(ABC):
         pass
 
 
-class GoalSetter(ABC):
+class GoalSetter(object):
 
-    @abstractmethod
+    def __init__(self, goal_cls: typing.Type[Goal], *args, **kwargs):
+
+        self._args = args
+        self._kwargs = kwargs
+        self._goal_cls = goal_cls
+
     def set(self, course) -> Goal:
-        pass
+        
+        return self._goal_cls(*self._args, **self._kwargs, course=course)
 
 
 class Staff(object):
@@ -410,27 +430,16 @@ class StandardTeacher(object):
         self._course.finish(self)
 
 
-class StandardTeacherInviter(object):
+class StandardTeacherInviter(TeacherInviter):
 
 
     def __init__(
         self, teacher_name: str, material: torch_data.Dataset, batch_size: int, n_lessons: int,
         is_training: bool=True
     ):
-        self._teacher_name= teacher_name
-        self._material = material
-        self._batch_size = batch_size
-        self._n_lessons = n_lessons
-        self._is_training = is_training
-    
-    @property
-    def teacher_name(self):
-        return self._teacher_name
-
-    def invite(self, course: Course):
-
-        return StandardTeacher(
-            self._teacher_name, course, self._material, self._batch_size, self._n_lessons, self._is_training
+        super().__init__(
+            StandardTeacher, teacher_name, material=material, batch_size=batch_size, 
+            n_lessons=n_lessons, is_training=is_training
         )
 
 
@@ -459,7 +468,7 @@ class StandardDojo(Dojo):
 
         return False
 
-    def is_substaff(self, name: str):
+    def is_sub_staff(self, name: str):
         for member in self._sub:
             if name == member.teacher_name:
                 return True
@@ -495,6 +504,21 @@ class StandardDojo(Dojo):
     
     def __len__(self):
         return len(self._base)
+    
+    def __getitem__(self, i):
+        return self._base[i]
+    
+    def reorder(self, new_order: typing.List[int]):
+
+        if len(new_order) != len(self._base):
+            raise ValueError("New order must contain the same number of elements as the base")
+        if min(new_order) != 0:
+            raise ValueError("New order must have a lower bound of 0")
+        if max(new_order) != len(self._base) - 1:
+            raise ValueError("New order must have a upper bound equal to the length of the base teachers")
+        if len(set(new_order)) != len(new_order):
+            raise ValueError("New order must not contain duplicate values")
+        self._base = [self._base[new_order[i]] for i in range(len(self._base))]
     
     def summarize(self) -> str:
         return ""
