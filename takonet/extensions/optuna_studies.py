@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import optuna
 import typing
 import math
-from takonet.teaching import studies, dojos2 as dojos
+from takonet.teaching import studies, dojos
 
 
 PDELIM = "/"
