@@ -85,14 +85,14 @@ class Lecture:
 @dataclasses.dataclass
 class Course(ABC):
 
-    result_updated_event = events.TeachingEvent[str]()
-    started_event = events.TeachingEvent[str]()
-    finished_event = events.TeachingEvent[str]()
-    lesson_started_event = events.TeachingEvent[str]()
-    lesson_finished_event = events.TeachingEvent[str]()
-    advance_event = events.TeachingEvent[str]()
-    teacher_trigger_event = events.TeachingEvent()
-    message_posted_event = events.TeachingEvent[typing.Tuple[typing.Set[str], IMessage]]()
+    result_updated_event = events.TeachingEvent[str]("Result Updated")
+    started_event = events.TeachingEvent[str]("Started")
+    finished_event = events.TeachingEvent[str]("Finished")
+    lesson_started_event = events.TeachingEvent[str]("Lesson Started")
+    lesson_finished_event = events.TeachingEvent[str]("Lesson Finished")
+    advance_event = events.TeachingEvent[str]("Advanced")
+    # teacher_trigger_event = events.TeachingEvent()
+    message_posted_event = events.TeachingEvent[typing.Tuple[typing.Set[str], IMessage]]("Message Posted")
 
     EVENT_MAP = {
         "result_updated": result_updated_event,
@@ -104,12 +104,12 @@ class Course(ABC):
         "message_posted": message_posted_event
     }
 
-    def listen_to(self, event_key: str, f: typing.Callable[[str], typing.NoReturn]):
+    def listen_to(self, event_key: str, f: typing.Callable[[str], typing.NoReturn], listen_to_filter: typing.Union[str, typing.Set[str]]=None):
 
         if event_key not in self.EVENT_MAP:
             raise ValueError(f'Event name {event_key} is not a valid event (Valid Events: {self.EVENT_MAP})')
         
-        self.EVENT_MAP[event_key].add_listener(f)
+        self.EVENT_MAP[event_key].add_listener(f, listen_to_filter)
 
     @abstractmethod
     def update_results(self, teacher: Teacher):
@@ -148,6 +148,14 @@ class Course(ABC):
         pass
     
     @abstractmethod
+    def get_teacher(self, name: str) -> Teacher:
+        pass
+
+    @abstractmethod
+    def get_observer(self, name: str) -> Observer:
+        pass
+
+    @abstractmethod
     def send_message(self, recepient: typing.Union[str, typing.List[str]], content: IMessage):
         """Send a message to another teacher or observer
 
@@ -168,8 +176,8 @@ class Course(ABC):
         pass
     
     # TODO: Remove - Use "send message or post message"
-    def trigger_teacher(self, teacher_name: str):
-        self.teacher_trigger_event.invoke(self, teacher_name)
+    # def trigger_teacher(self, teacher_name: str):
+    #    self.teacher_trigger_event.invoke(teacher_name, teacher_name)
 
     @abstractmethod
     def advance_lecture(self):
@@ -217,12 +225,14 @@ class Dojo(ABC):
     @abstractmethod
     def teach(self, learner: learners.Learner):
         pass
+    
+    @abstractmethod
+    def resume_course(self, state_dict: dict):
+        pass
 
     @abstractmethod
     def summarize(self):
         pass
-        # create the course
-        # invite teachers/observers
 
 
 class Goal(ABC):
@@ -350,14 +360,14 @@ class StandardCourse(Course):
     def update_results(self, teacher: Teacher, results: typing.Dict[str, float]):  
         lecture = self._verify_get_cur_lecture(teacher)
         lecture.append_results(results)
-        self.result_updated_event.invoke(teacher.name)
+        self.result_updated_event.invoke(teacher.name, teacher.name)
 
     def start_lesson(self, teacher: Teacher, n_lesson_iterations: int):       
         lecture = self._verify_get_cur_lecture(teacher)
         lecture.cur_lesson += 1
         lecture.cur_iteration = 0
         lecture.n_lesson_iterations = n_lesson_iterations
-        self.lesson_started_event.invoke(teacher.name)
+        self.lesson_started_event.invoke(teacher.name, teacher.name)
 
     def start(self, teacher: Teacher, n_lessons: int, n_lesson_iterations: int=0):
         if teacher.name not in self._lectures[-1]:
@@ -365,23 +375,23 @@ class StandardCourse(Course):
         else:
             self._lectures[-1][teacher.name].append(Lecture(teacher.name, n_lessons, n_lesson_iterations))
         
-        self.started_event.invoke(teacher.name)
+        self.started_event.invoke(teacher.name, teacher.name)
 
     def finish_lesson(self, teacher: Teacher):
         lecture = self._verify_get_cur_lecture(teacher)
         lecture.lesson_finished = True
-        self.lesson_finished_event.invoke(teacher.name)
+        self.lesson_finished_event.invoke(teacher.name, teacher.name)
 
     def finish(self, teacher: Teacher):
         lecture = self._verify_get_cur_lecture(teacher)
         lecture.finished = True
-        self.finished_event.invoke(teacher.name)
+        self.finished_event.invoke(teacher.name, teacher.name)
 
     def advance(self, teacher: Teacher):        
         lecture = self._verify_get_cur_lecture(teacher)
         lecture.cur_iteration += 1
         lecture.cur_lesson_iteration += 1
-        self.advance_event.invoke(teacher.name)
+        self.advance_event.invoke(teacher.name, teacher.name)
 
     def get_student(self, teacher: Teacher):
         return self._student
@@ -412,6 +422,9 @@ class StandardCourse(Course):
     def get_sub(self, name: str):
         if name in self._sub_teachers:
             return self._sub_teachers[name]
+
+    def get_teacher(self, name) -> Teacher:
+        return self.get_base(name) or self.get_sub(name) 
 
     def get_observer(self, name: str):
         if name in self._observers:
@@ -647,3 +660,7 @@ class StandardDojo(Dojo):
             teacher.teach()
         
         return course
+    
+    def resume_course(self, state_dict: dict):
+        # TODO: Implement
+        pass

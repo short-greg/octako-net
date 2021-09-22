@@ -92,7 +92,7 @@ def build_validation_dojo(
     ).add_teacher_trigger(
         "Validator Trigger",
         observers.TriggerInviter(
-            "Validator Trigger", "Validator"
+            "Validator Trigger", "Trainer", "Validator"
         ).set_observing_lesson_finished().set_lesson_condition()
     ).get_result()
 
@@ -125,7 +125,7 @@ def build_testing_dojo(
     ).add_teacher_trigger(
         "Tester Trigger", 
         observers.TriggerInviter(
-            "Tester Trigger", "Tester"
+            "Tester Trigger", "Trainer", "Tester"
         ).set_finished_condition().set_observing_finished()
     ).add_progress_bar(
         "Progress Bar", listen_to=["Trainer", "Tester"]

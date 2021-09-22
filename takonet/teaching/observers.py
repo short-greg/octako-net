@@ -21,9 +21,9 @@ class ProgressBar(Observer):
         self._listen_to = set(listen_to)
         self._name = name
 
-        course.lesson_started_event.add_listener(self.enter)
-        course.result_updated_event.add_listener(self.update)
-        course.lesson_finished_event.add_listener(self.exit)
+        course.lesson_started_event.add_listener(self.enter, self._listen_to)
+        course.result_updated_event.add_listener(self.update, self._listen_to)
+        course.lesson_finished_event.add_listener(self.exit, self._listen_to)
 
     def send(self, message: IMessage):
         # TODO: Implement
@@ -34,8 +34,6 @@ class ProgressBar(Observer):
         return self._name
 
     def enter(self, name: str):
-        if name not in self._listen_to:
-            return
         
         lecture: Lecture = self._course.get_cur_lecture(name)
 
@@ -45,8 +43,6 @@ class ProgressBar(Observer):
         self.pbar.set_description_str(f'{name} - {lecture.cur_lesson_iteration}')
 
     def update(self, name: str):
-        if name not in self._listen_to:
-            return
         
         lecture: Lecture = self._course.get_cur_lecture(name)
 
@@ -58,10 +54,6 @@ class ProgressBar(Observer):
         self.pbar.refresh()
 
     def exit(self, name: str):
-        if name not in self._listen_to:
-            return
-        
-        lecture: Lecture = self._course.get_cur_lecture(name)
 
         if self.pbar is not None:
             self.pbar.close()
@@ -114,8 +106,8 @@ class FinishedCondition(object):
 
 class Trigger(Observer):
     def __init__(
-        self, name: str, teacher_name: str, condition: TriggerCondition, listen_to_event: str,
-        course: Course
+        self, name: str, listen_to_teachers: typing.Union[str, typing.Set[str]], teacher_name: str, 
+        condition: TriggerCondition, listen_to_event: str, course: Course
     ):
         """[summary]
 
@@ -128,9 +120,10 @@ class Trigger(Observer):
         self._name = name
 
         self._course = course
-        self._course.listen_to(listen_to_event, self.on_trigger)
+        self._course.listen_to(listen_to_event, self.on_trigger, listen_to_teachers)
         self._condition = condition
         self._teacher_name = teacher_name
+        self._listen_to_teachers = listen_to_teachers
         self._course = course
     
     @property
@@ -144,7 +137,8 @@ class Trigger(Observer):
     def on_trigger(self, name: str):
         lecture = self._course.get_cur_lecture(name)
         if self._condition.check(lecture):
-            self._course.trigger_teacher(self._teacher_name)
+            teacher = self._course.get_teacher(self._teacher_name)
+            teacher.teach()
 
 
 class TriggerInviter(ObserverInviter):
@@ -157,7 +151,8 @@ class TriggerInviter(ObserverInviter):
     ADVANCED = 'advanced'
 
     def __init__(
-        self, name: str, teacher_name: str, condition: TriggerCondition=None,
+        self, name: str, observing_names: typing.Union[str, typing.Set[str]], 
+        teacher_name: str, condition: TriggerCondition=None,
         observing_event=None,
     ):
         """[Set up and bulid a trigger]
@@ -167,8 +162,11 @@ class TriggerInviter(ObserverInviter):
             condition (TriggerCondition, optional): [description]. Defaults to None.
             observing_event ([type], optional): [description]. Defaults to None.
         """
+
         self._observer_name = name
+        self._observer_name = observing_event
         self._teacher_name = teacher_name
+        self._observing_names = observing_names
         self._condition = condition or LessonFinishedCondition()
         self._observing_event = observing_event or self.LESSON_FINISHED
     
@@ -226,4 +224,4 @@ class TriggerInviter(ObserverInviter):
     
     def invite(self, course: Course):
 
-        return Trigger(self._observer_name, self._teacher_name, self._condition, self._observing_event, course)
+        return Trigger(self._observer_name, self._observing_names, self._teacher_name, self._condition, self._observing_event, course)
