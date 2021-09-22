@@ -2,7 +2,6 @@ import dataclasses
 import typing
 from pandas.core import base
 
-from torch._C import Value
 from takonet.machinery import learners
 from abc import ABC, abstractmethod
 import pandas as pd
@@ -82,27 +81,27 @@ class Lecture:
         return True
 
 
-@dataclasses.dataclass
 class Course(ABC):
 
-    result_updated_event = events.TeachingEvent[str]("Result Updated")
-    started_event = events.TeachingEvent[str]("Started")
-    finished_event = events.TeachingEvent[str]("Finished")
-    lesson_started_event = events.TeachingEvent[str]("Lesson Started")
-    lesson_finished_event = events.TeachingEvent[str]("Lesson Finished")
-    advance_event = events.TeachingEvent[str]("Advanced")
-    # teacher_trigger_event = events.TeachingEvent()
-    message_posted_event = events.TeachingEvent[typing.Tuple[typing.Set[str], IMessage]]("Message Posted")
+    def __init__(self):
 
-    EVENT_MAP = {
-        "result_updated": result_updated_event,
-        "started": started_event,
-        "finished": finished_event,
-        "lesson_started": lesson_started_event,
-        "lesson_finished": lesson_finished_event,
-        "advanced": advance_event,
-        "message_posted": message_posted_event
-    }
+        self.result_updated_event = events.TeachingEvent[str]("Result Updated")
+        self.started_event = events.TeachingEvent[str]("Started")
+        self.finished_event = events.TeachingEvent[str]("Finished")
+        self.lesson_started_event = events.TeachingEvent[str]("Lesson Started")
+        self.lesson_finished_event = events.TeachingEvent[str]("Lesson Finished")
+        self.advance_event = events.TeachingEvent[str]("Advanced")
+        self.message_posted_event = events.TeachingEvent[typing.Tuple[typing.Set[str], IMessage]]("Message Posted")
+
+        self.EVENT_MAP = {
+            "result_updated": self.result_updated_event,
+            "started": self.started_event,
+            "finished": self.finished_event,
+            "lesson_started": self.lesson_started_event,
+            "lesson_finished": self.lesson_finished_event,
+            "advanced": self.advance_event,
+            "message_posted": self.message_posted_event
+        }
 
     def listen_to(self, event_key: str, f: typing.Callable[[str], typing.NoReturn], listen_to_filter: typing.Union[str, typing.Set[str]]=None):
 
@@ -334,7 +333,7 @@ class Ordered(Staff):
 class StandardCourse(Course):
 
     def __init__(self, learner: learners.Learner, goal_setter: GoalSetter):
-
+        super().__init__()
         self._goal = goal_setter.set(self)
         self._lectures: typing.List[typing.Dict[str, typing.List[Lecture]]] = [{}]
         self._student = learner
@@ -369,7 +368,8 @@ class StandardCourse(Course):
         self.lesson_started_event.invoke(teacher.name, teacher.name)
 
     def start(self, teacher: Teacher, n_lessons: int, n_lesson_iterations: int=0):
-        if teacher.name not in self._lectures[-1]:
+        current_lecture = self._lectures[-1]
+        if teacher.name not in current_lecture:
             self._lectures[-1][teacher.name] = [Lecture(teacher.name, n_lessons, n_lesson_iterations)]
         else:
             self._lectures[-1][teacher.name].append(Lecture(teacher.name, n_lessons, n_lesson_iterations))
@@ -657,7 +657,8 @@ class StandardDojo(Dojo):
         )
         for i, teacher in enumerate(base_teachers):
             teacher.teach()
-            if i < len(base_teachers) - 1:
+            last_iteration = i == len(base_teachers) - 1
+            if not last_iteration:
                 course.advance_lecture()
         
         return course

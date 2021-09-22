@@ -226,5 +226,4 @@ class TriggerInviter(ObserverInviter):
         return self
     
     def invite(self, course: Course):
-
-        return Trigger(self._observer_name, self._observing_names, self._teacher_name, self._condition, self._observing_event, course)
+        return Trigger(self._observer_name, self._observing_names, self._teacher_name, self._condition, self._observing_event, course=course)
