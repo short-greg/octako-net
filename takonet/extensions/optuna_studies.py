@@ -415,18 +415,18 @@ class StudyRunner(object):
             parameters.append(trial.params)
             cur += 1
             courses.append(course)
-            return course.evaluate()
+            return course.evaluate().result
         return objective
 
     def run(self, name) -> typing.List[dojos.Course]:
 
-        classes: typing.List[dojos.Course] = []
+        courses: typing.List[dojos.Course] = []
         parameters = []
         study = optuna.create_study(direction=self._direction)
-        objective = self.get_objective(name, classes, parameters)
+        objective = self.get_objective(name, courses, parameters)
         study.optimize(objective, self._n_trials)
         best_params = ParamConverter(study.best_params).to_dict()
         parameters.append(study.best_params)
         
-        classes.append(self._study.perform(best=best_params))
-        return classes, parameters
+        courses.append(self._study.perform(best=best_params))
+        return courses, parameters

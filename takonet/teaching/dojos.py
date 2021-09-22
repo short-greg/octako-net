@@ -345,7 +345,6 @@ class StandardCourse(Course):
     def get_cur_lecture(self, teacher_name: str) -> Lecture:
         if len(self._lectures) == 0 or teacher_name not in self._lectures[-1]:
             return None
-            # raise ValueError(f'Teacher {teacher_name} is not a part of the current lecture')
 
         return self._lectures[-1][teacher_name][-1]
     
@@ -374,7 +373,7 @@ class StandardCourse(Course):
             self._lectures[-1][teacher.name] = [Lecture(teacher.name, n_lessons, n_lesson_iterations)]
         else:
             self._lectures[-1][teacher.name].append(Lecture(teacher.name, n_lessons, n_lesson_iterations))
-        
+
         self.started_event.invoke(teacher.name, teacher.name)
 
     def finish_lesson(self, teacher: Teacher):
@@ -656,8 +655,10 @@ class StandardDojo(Dojo):
         course.set_teachers(
             base_teachers, sub_teachers, observers
         )
-        for teacher in base_teachers:
+        for i, teacher in enumerate(base_teachers):
             teacher.teach()
+            if i < len(base_teachers) - 1:
+                course.advance_lecture()
         
         return course
     

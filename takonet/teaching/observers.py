@@ -39,6 +39,9 @@ class ProgressBar(Observer):
 
         if self.pbar is not None:
             self.pbar.close()
+        
+        if lecture is None:
+            raise ValueError(f"Could not retrieve lecture for {name}.")
         self.pbar = tqdm.tqdm(total=lecture.n_lesson_iterations)
         self.pbar.set_description_str(f'{name} - {lecture.cur_lesson_iteration}')
 
