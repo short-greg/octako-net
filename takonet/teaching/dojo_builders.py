@@ -27,7 +27,7 @@ class DojoBuilder(object):
         batch_size: int=32, is_base: bool=False
     ):
         teacher = TeacherInviter(
-            Teacher, name, material=material, batch_size=batch_size, n_lessons=1
+            StandardTeacher, name, material=material, batch_size=batch_size, n_lessons=1
         )
         return self.add_staff(teacher, is_base)
 
@@ -36,7 +36,7 @@ class DojoBuilder(object):
         batch_size: int=32, is_base: bool=False
     ):
         return self.add_staff(TeacherInviter(
-            Teacher, name, material=material, batch_size=batch_size, n_lessons=n_lessons,
+            StandardTeacher, name, material=material, batch_size=batch_size, n_lessons=n_lessons,
         ), is_base)
     
     def add_teacher_trigger(self, name: str, trigger_inviter: observers.TriggerInviter):

@@ -1,4 +1,3 @@
-
 import dataclasses
 import typing
 from pandas.core import base
@@ -11,7 +10,25 @@ from . import events
 from torch.utils import data as torch_data
 
 
-class Teacher(ABC):
+class IMessage(ABC):
+
+    @abstractmethod
+    def receive(self, recepient):
+        pass
+
+    @abstractmethod
+    def get_response(self, recepient=None):
+        pass
+
+
+class IMessageReceiver(ABC):
+
+    @abstractmethod
+    def send(self, message: IMessage):
+        pass
+
+
+class Teacher(IMessageReceiver):
 
     @property
     def name(self) -> str:
@@ -22,7 +39,7 @@ class Teacher(ABC):
         pass
 
 
-class Observer(ABC):
+class Observer(IMessageReceiver):
     
     @property
     def name(self) -> str:
@@ -74,8 +91,8 @@ class Course(ABC):
     lesson_started_event = events.TeachingEvent[str]()
     lesson_finished_event = events.TeachingEvent[str]()
     advance_event = events.TeachingEvent[str]()
-    # invokes Course and name of teacher
     teacher_trigger_event = events.TeachingEvent()
+    message_posted_event = events.TeachingEvent[typing.Tuple[typing.Set[str], IMessage]]()
 
     EVENT_MAP = {
         "result_updated": result_updated_event,
@@ -83,7 +100,8 @@ class Course(ABC):
         "finished": finished_event,
         "lesson_started": lesson_started_event,
         "lesson_finished": lesson_finished_event,
-        "advanced": advance_event
+        "advanced": advance_event,
+        "message_posted": message_posted_event
     }
 
     def listen_to(self, event_key: str, f: typing.Callable[[str], typing.NoReturn]):
@@ -129,6 +147,27 @@ class Course(ABC):
     def evaluate(self) -> Evaluation:
         pass
     
+    @abstractmethod
+    def send_message(self, recepient: typing.Union[str, typing.List[str]], content: IMessage):
+        """Send a message to another teacher or observer
+
+        Args:
+            recepient (typing.Union[str, typing.List[str]]): Name(s) of the recepients
+            content (IMessage): The message sent
+        """
+        pass
+
+    @abstractmethod
+    def post_message(self, label: typing.Union[str, typing.Set[str]], content: IMessage):
+        """Post a message for anyone to read
+
+        Args:
+            label (typing.Union[str, typing.Set[str]]): Label(s) for the message
+            content (IMessage): The message posted
+        """
+        pass
+    
+    # TODO: Remove - Use "send message or post message"
     def trigger_teacher(self, teacher_name: str):
         self.teacher_trigger_event.invoke(self, teacher_name)
 
@@ -318,7 +357,7 @@ class StandardCourse(Course):
         lecture.cur_lesson += 1
         lecture.cur_iteration = 0
         lecture.n_lesson_iterations = n_lesson_iterations
-        self.lesson_finished_event.invoke(teacher.name)
+        self.lesson_started_event.invoke(teacher.name)
 
     def start(self, teacher: Teacher, n_lessons: int, n_lesson_iterations: int=0):
         if teacher.name not in self._lectures[-1]:
@@ -342,7 +381,7 @@ class StandardCourse(Course):
         lecture = self._verify_get_cur_lecture(teacher)
         lecture.cur_iteration += 1
         lecture.cur_lesson_iteration += 1
-        self.finished_event.invoke(teacher.name)
+        self.advance_event.invoke(teacher.name)
 
     def get_student(self, teacher: Teacher):
         return self._student
@@ -359,29 +398,64 @@ class StandardCourse(Course):
         self._lectures.append({})
     
     def set_teachers(self, base_teachers: typing.List[Teacher], sub_teachers: typing.List[Teacher], audience: typing.List[Observer]):
-        self._base_teachers = {teacher.name for teacher in base_teachers}
-        self._sub_teachers = {teacher.name for teacher in sub_teachers}
-        self._audience = {observer.name for observer in audience}
+        self._base_teachers = {teacher.name: teacher for teacher in base_teachers}
+        self._sub_teachers = {teacher.name: teacher for teacher in sub_teachers}
+        self._audience = {observer.name: observer for observer in audience}
     
     def get_results(self, teacher_name: str, section_id: int=-1, lecture_id: int=-1):
         return self._lectures[section_id][teacher_name][lecture_id].results
+    
+    def get_base(self, name: str):
+        if name in self._base_teachers:
+            return self._base_teachers[name]
 
+    def get_sub(self, name: str):
+        if name in self._sub_teachers:
+            return self._sub_teachers[name]
+
+    def get_observer(self, name: str):
+        if name in self._observers:
+            return self._observers[name]
+
+    def get_staff_member(self, name: str):
+        return self.get_base(name) or self.get_sub(name) or self.get_observer(name)
+
+    def send_message(self, recepients: typing.Union[str, typing.List[str]], message: IMessage):
+        if isinstance(recepients, str):
+            recepients = [recepients]
+        
+        for recepient_name in recepients:
+            recepient = self.get_staff_member(recepient_name)
+            if recepient is None:
+                raise ValueError(f"Recepient {recepient_name} is not in the staff")
+            recepient.send(message)            
+
+    def post_message(self, labels: typing.Union[str, typing.Set[str]], message: IMessage):
+        
+        if isinstance(labels) == str:
+            labels = set([labels])
+        self.message_posted_event.invoke(labels, message)
+    
 
 class StandardGoal(Goal):
 
-    def __init__(self, course: StandardCourse, is_maximization: bool, teacher_name: str, field: str):
+    def __init__(self, course: StandardCourse, to_maximize: bool, teacher_name: str, goal_field: str):
 
         self._course = course
-        self._is_maximization = is_maximization
+        self._to_maximize = to_maximize
         self._teacher_name = teacher_name
-        self._field = field
+        self._field = goal_field
+    
+    @property
+    def to_maximize(self) -> bool:
+        return self._to_maximize
     
     def evaluate(self) -> Evaluation:
 
         lecture_num = -1
         lesson_num = -1
         results: pd.DataFrame = self._course.get_results(self._teacher_name, lecture_num, lesson_num)
-        return Evaluation(self._is_maximization, results[self._field].mean(axis=0))
+        return Evaluation(self._to_maximize, results[self._field].mean(axis=0))
 
 
 class StandardTeacher(object):
@@ -411,6 +485,10 @@ class StandardTeacher(object):
     @property
     def name(self) -> str:
         return self._name
+    
+    def send(self, message: IMessage):
+        # TODO: Implement
+        pass
 
     def teach(self):
         """[Run the teacher]
@@ -560,14 +638,11 @@ class StandardDojo(Dojo):
 
         base_teachers = [teacher_inviter.invite(course) for teacher_inviter in self._base]
         sub_teachers = [teacher_inviter.invite(course) for teacher_inviter in self._sub]
+        observers = [observer_inviter.invite(course) for observer_inviter in self._audience]
 
         course.set_teachers(
-            base_teachers, sub_teachers, [observer for observer in self._audience]
+            base_teachers, sub_teachers, observers
         )
-
-        for observer_inviter in self._audience:
-            observer_inviter.invite(course, sub_teachers)
-        
         for teacher in base_teachers:
             teacher.teach()
         

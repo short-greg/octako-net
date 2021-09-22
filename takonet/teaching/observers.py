@@ -1,4 +1,4 @@
-from takonet.teaching.dojos import Lecture, Observer, Course
+from takonet.teaching.dojos import Lecture, Observer, Course, ObserverInviter, IMessage
 import typing
 import tqdm
 
@@ -14,7 +14,7 @@ class ProgressBar(Observer):
             name (str): [Name of progress bar]
             listen_to (typing.List[StandardTeacher]): [List of teacher to track progress for]
         """
-        super().__init__(name)
+        super().__init__()
         self.pbar = None
         self._course = course
         self._teachers = {}
@@ -24,6 +24,10 @@ class ProgressBar(Observer):
         course.lesson_started_event.add_listener(self.enter)
         course.result_updated_event.add_listener(self.update)
         course.lesson_finished_event.add_listener(self.exit)
+
+    def send(self, message: IMessage):
+        # TODO: Implement
+        pass
 
     @property
     def name(self):
@@ -109,11 +113,9 @@ class FinishedCondition(object):
 
 
 class Trigger(Observer):
-
     def __init__(
-        self, name: str, teacher_name: str, condition: TriggerCondition, 
-        
-        course: Course, listen_to_event: str, 
+        self, name: str, teacher_name: str, condition: TriggerCondition, listen_to_event: str,
+        course: Course
     ):
         """[summary]
 
@@ -135,13 +137,17 @@ class Trigger(Observer):
     def name(self):
         return self._name
     
+    def send(self, message: IMessage):
+        # TODO: Implement
+        pass
+    
     def on_trigger(self, name: str):
         lecture = self._course.get_cur_lecture(name)
         if self._condition.check(lecture):
             self._course.trigger_teacher(self._teacher_name)
 
 
-class TriggerInviter(object):
+class TriggerInviter(ObserverInviter):
 
     RESULT_UPDATED = 'result_updated'
     LESSON_STARTED = 'lesson_started'
@@ -161,10 +167,14 @@ class TriggerInviter(object):
             condition (TriggerCondition, optional): [description]. Defaults to None.
             observing_event ([type], optional): [description]. Defaults to None.
         """
-        self._name = name
+        self._observer_name = name
         self._teacher_name = teacher_name
         self._condition = condition or LessonFinishedCondition()
         self._observing_event = observing_event or self.LESSON_FINISHED
+    
+    @property
+    def observer_name(self):
+        return self._observer_name
 
     def set_finished_condition(self):
 
@@ -216,4 +226,4 @@ class TriggerInviter(object):
     
     def invite(self, course: Course):
 
-        return Trigger(self._name, self._teacher_name, self._condition, self._observing_event, course)
+        return Trigger(self._observer_name, self._teacher_name, self._condition, self._observing_event, course)
