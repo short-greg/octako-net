@@ -66,6 +66,14 @@ class Lecture:
     lesson_finished: bool = False
     results: pd.DataFrame = None
 
+    def state_dict(self):
+        # TODO: Implement
+        pass
+
+    def load_state_dict(self, state_dict):
+        # TODO: Implement
+        pass
+
     def __post_init__(self):
         self.results = self.results or pd.DataFrame()
 
@@ -110,12 +118,20 @@ class Course(ABC):
         
         self.EVENT_MAP[event_key].add_listener(f, listen_to_filter)
 
+    def state_dict(self):
+        # TODO: Implement
+        pass
+
+    def load_state_dict(self, state_dict):
+        # TODO: Implement
+        pass
+
     @abstractmethod
     def update_results(self, teacher: Teacher):
         pass
 
     @abstractmethod
-    def advance(self, teacher: Teacher):
+    def advance_lesson(self, teacher: Teacher):
         pass
 
     @abstractmethod
@@ -123,7 +139,7 @@ class Course(ABC):
         pass
 
     @abstractmethod
-    def start(self, teacher: Teacher, n_lessons: int):
+    def start_lecture(self, teacher: Teacher, n_lessons: int):
         pass
 
     @abstractmethod
@@ -131,7 +147,7 @@ class Course(ABC):
         pass
 
     @abstractmethod
-    def finish(self, teacher: Teacher):
+    def finish_lecture(self, teacher: Teacher):
         pass
 
     @abstractmethod
@@ -178,8 +194,16 @@ class Course(ABC):
     # def trigger_teacher(self, teacher_name: str):
     #    self.teacher_trigger_event.invoke(teacher_name, teacher_name)
 
+    # @abstractmethod
+    # def advance_lecture(self):
+    #    pass
+
     @abstractmethod
-    def advance_lecture(self):
+    def start(self):
+        pass
+
+    @abstractmethod
+    def resume(self):
         pass
 
 
@@ -367,7 +391,7 @@ class StandardCourse(Course):
         lecture.n_lesson_iterations = n_lesson_iterations
         self.lesson_started_event.invoke(teacher.name, teacher.name)
 
-    def start(self, teacher: Teacher, n_lessons: int, n_lesson_iterations: int=0):
+    def start_lecture(self, teacher: Teacher, n_lessons: int, n_lesson_iterations: int=0):
         current_lecture = self._lectures[-1]
         if teacher.name not in current_lecture:
             self._lectures[-1][teacher.name] = [Lecture(teacher.name, n_lessons, n_lesson_iterations)]
@@ -381,12 +405,12 @@ class StandardCourse(Course):
         lecture.lesson_finished = True
         self.lesson_finished_event.invoke(teacher.name, teacher.name)
 
-    def finish(self, teacher: Teacher):
+    def finish_lecture(self, teacher: Teacher):
         lecture = self._verify_get_cur_lecture(teacher)
         lecture.finished = True
         self.finished_event.invoke(teacher.name, teacher.name)
 
-    def advance(self, teacher: Teacher):        
+    def advance_lesson(self, teacher: Teacher):        
         lecture = self._verify_get_cur_lecture(teacher)
         lecture.cur_iteration += 1
         lecture.cur_lesson_iteration += 1
@@ -403,8 +427,7 @@ class StandardCourse(Course):
     def evaluate(self) -> Evaluation:
         return self._goal.evaluate()
 
-    def advance_lecture(self):
-        self._lectures.append({})
+    # def advance_lecture(self):
     
     def set_teachers(self, base_teachers: typing.List[Teacher], sub_teachers: typing.List[Teacher], audience: typing.List[Observer]):
         self._base_teachers = {teacher.name: teacher for teacher in base_teachers}
@@ -448,6 +471,26 @@ class StandardCourse(Course):
             labels = set([labels])
         self.message_posted_event.invoke(labels, message)
     
+    def state_dict(self):
+        # TODO: Implement
+        pass
+
+    def load_state_dict(self, state_dict):
+        # TODO: Implement
+        pass
+
+    # TODO: Consider if I really want start/resume in here or in the dojo
+    def start(self):
+        for i, teacher in enumerate(self._base_teachers):
+            teacher.teach()
+            last_iteration = i == len(self._base_teachers) - 1
+            if not last_iteration:
+                self._lectures.append({})
+    
+    def resume(self):
+        # TODO: Implement
+        pass
+
 
 class StandardGoal(Goal):
 
@@ -502,6 +545,14 @@ class StandardTeacher(object):
         # TODO: Implement
         pass
 
+    def state_dict(self):
+        # TODO: Implement
+        pass
+
+    def load_state_dict(self, state_dict):
+        # TODO: Implement
+        pass
+
     def teach(self):
         """[Run the teacher]
 
@@ -519,7 +570,7 @@ class StandardTeacher(object):
             shuffle=to_shuffle
         )
         
-        self._course.start(self, self._n_lessons)
+        self._course.start_lecture(self, self._n_lessons)
         for _ in range(self._n_lessons):
             student = self._course.get_student(self)
             
@@ -532,11 +583,11 @@ class StandardTeacher(object):
                     item_results = student.test(x, t)
                 item_results = {k: res.detach().cpu().numpy() for k, res in item_results.items()}
                 self._course.update_results(self, item_results)
-                self._course.advance(self)
+                self._course.advance_lesson(self)
             
             self._course.finish_lesson(self)
     
-        self._course.finish(self)
+        self._course.finish_lecture(self)
 
 
 class StandardTeacherInviter(TeacherInviter):
@@ -644,8 +695,8 @@ class StandardDojo(Dojo):
     def summarize(self) -> str:
         return ""
     
-    def teach(self, learner: learners.Learner) -> StandardCourse:
-        
+    def _load_course(self, learner: learners.Learner) -> StandardCourse:
+
         course = StandardCourse(learner, self._goal_setter)
 
         base_teachers = [teacher_inviter.invite(course) for teacher_inviter in self._base]
@@ -655,14 +706,19 @@ class StandardDojo(Dojo):
         course.set_teachers(
             base_teachers, sub_teachers, observers
         )
-        for i, teacher in enumerate(base_teachers):
-            teacher.teach()
-            last_iteration = i == len(base_teachers) - 1
-            if not last_iteration:
-                course.advance_lecture()
+        return course
+    
+    # TODO: Remove "teach"
+    def teach(self, learner: learners.Learner) -> StandardCourse:
+        course = self._load_course(learner)
+        course.start()
         
         return course
     
-    def resume_course(self, state_dict: dict):
+    # TODO: Remove "resume course"
+    def resume_course(self, learner: learners.Learner, state_dict: dict):
         # TODO: Implement
-        pass
+        course = self._load_course(learner)
+        course.load_state_dict(state_dict)
+        course.resume()
+        return course

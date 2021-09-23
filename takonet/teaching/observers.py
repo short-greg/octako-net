@@ -63,6 +63,14 @@ class ProgressBar(Observer):
         
         self.pbar = None
 
+    def state_dict(self):
+        # TODO: Implement
+        pass
+
+    def load_state_dict(self, state_dict):
+        # TODO: Implement
+        pass
+
 
 class TriggerCondition(object):
     """[Checks to see if the trigger should be executed.]
@@ -142,6 +150,14 @@ class Trigger(Observer):
         if self._condition.check(lecture):
             teacher = self._course.get_teacher(self._teacher_name)
             teacher.teach()
+    
+    def state_dict(self):
+        # TODO: Implement
+        pass
+
+    def load_state_dict(self, state_dict):
+        # TODO: Implement
+        pass
 
 
 class TriggerInviter(ObserverInviter):
