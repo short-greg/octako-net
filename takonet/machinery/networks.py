@@ -6,6 +6,7 @@ import copy
 import dataclasses
 import itertools
 from abc import ABC, abstractmethod
+from functools import singledispatch
 
 
 """
@@ -45,9 +46,9 @@ class Operation:
     out_size: torch.Size
 
 
-class NodeVisitor(ABC):
+class NodeVisitor(object):
 
-    @abstractmethod
+    @singledispatch
     def visit(self, node):
         pass
 
@@ -251,10 +252,6 @@ class In(Node):
         )
 
 
-# TODO
-# 3) write in add_interface
-# 4) add "scalar input" rather than tensor
-
 class Network(nn.Module):
     """
     Network of nodes. Use for building complex machines.
@@ -277,8 +274,12 @@ class Network(nn.Module):
         self._node_outputs = {}
 
     @property
-    def outputs(self):
-        return copy.copy(self._outs)
+    def output_names(self):
+        return copy.copy(self._default_outs)
+
+    @property
+    def input_names(self):
+        return copy.copy(self._default_ins)
     
     def add_input(self, in_: In) -> typing.Iterable[Port]:
         if in_.name in self._nodes:
@@ -287,14 +288,6 @@ class Network(nn.Module):
         self._nodes[in_.name] = in_
         self._in_names.append(in_.name)
         return in_.ports
-
-    # def add_scalar_input(self, name, data_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
-        
-    #     assert isinstance(default_value, data_type) 
-    #     assert name not in self._nodes
-    #     in_ = ScalarIn(name, default_value, labels, annotation)
-    #     self._nodes[name] = in_
-    #     return in_.ports
     
     def set_default_interface(self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]):
         
@@ -312,16 +305,6 @@ class Network(nn.Module):
                 self._default_outs.append(out)
             else:
                 self._default_outs.append(out.module)
-    
-    # # TODO: REMOVE
-    # def set_outputs(self, ports: typing.List[Port]):
-
-    #     self._outs = []
-
-    #     for port in ports:
-    #         if port.module not in self._nodes:
-    #             raise KeyError(f'Node with name {port.module} does not exist')
-    #         self._outs.append(port)
     
     def add_subnetwork(self, name, network):
         if name in self._networks:
@@ -642,6 +625,72 @@ class Network(nn.Module):
         result_dict = self.probe(self._default_outs, inputs)
         result = [result_dict[out] for out in self._default_outs]
         return result
+
+
+class AppendNameVisitor(NodeVisitor):
+
+    def __init__(self):
+        self._network = None
+        self._append_name = ''
+        
+    @singledispatch
+    def visit(self, node: Node):
+        pass
+
+    @visit.register
+    def _(self, node: In):
+        self._network.add_input(node)
+
+    @visit.register
+    def _(self, node: OperationNode):
+        self._network.add_node(node)
+
+    def visit_network(self, network: Network, append_name: str):
+        self._network = Network()
+        self._append_name = append_name
+        self._in_names = []
+        network.send_forward(self)
+        self._network.set_default_interface(
+            network.input_names, network.output_names
+        )
+        return self._network
+
+
+class MergeVisitor(NodeVisitor):
+
+    def __init__(self):
+        self._network = None
+        self._append_name = ''
+        
+    @singledispatch
+    def visit(self, node: Node):
+        pass
+
+    @visit.register
+    def _(self, node: In):
+        # TODO: Think what to do in this case
+        if self._network is None:
+            pass
+        self._network.add_input(node)
+
+    @visit.register
+    def _(self, node: OperationNode):
+        if self._network is None:
+            pass
+        self._network.add_node(node)
+
+    def visit_networks(self, networks: typing.List[Network]):
+        self._network = Network()
+        input_names = []
+        outputs = []
+        for network in networks:
+            network.send_forward(self)
+            input_names.extend(network.input_names)
+            outputs.extend(network.output_names)
+        self._network.set_default_interface(
+            input_names, outputs
+        )
+        return self._network
 
 
 def merge(networks: typing.Dict[str, Network]) -> Network:
