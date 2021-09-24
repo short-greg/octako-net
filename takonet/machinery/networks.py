@@ -5,6 +5,7 @@ import typing
 import copy
 import dataclasses
 import itertools
+from abc import ABC, abstractmethod
 
 
 """
@@ -42,6 +43,13 @@ class Operation:
 
     op: nn.Module
     out_size: torch.Size
+
+
+class NodeVisitor(ABC):
+
+    @abstractmethod
+    def visit(self, node):
+        pass
 
 
 class Node(nn.Module):
@@ -90,6 +98,9 @@ class Node(nn.Module):
         raise NotImplementedError
     
     def clone(self):
+        raise NotImplementedError
+
+    def accept(self, visitor: NodeVisitor):
         raise NotImplementedError
 
 
@@ -238,7 +249,7 @@ class In(Node):
             self._annotation
 
         )
-        
+
 
 # TODO
 # 3) write in add_interface
@@ -263,6 +274,7 @@ class Network(nn.Module):
         self._default_ins: typing.List[str] = [] # [in_.name for in_ in self._ins]
         self._default_outs: typing.List[str] = []
         self._networks = []
+        self._node_outputs = {}
 
     @property
     def outputs(self):
@@ -367,7 +379,12 @@ class Network(nn.Module):
             in_ = [in_]
 
         for port in in_:
-            assert port.module in self._nodes
+            if port.module not in self._nodes:
+                raise ValueError(f"There is no node named for input {port.module} in the network.")
+            
+            self._node_outputs[port.module].append(name)
+        
+        self._node_outputs[name] = []
 
         # assert (is_input and not len(inputs) > 0) or (not is_input and len(inputs) > 0)
         node = OperationNode(name, op.op, in_, op.out_size, labels)
@@ -458,6 +475,31 @@ class Network(nn.Module):
                 break
         all_true = not (False in is_inputs)
         return all_true and not other_found
+    
+    def send_forward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
+
+        if from_nodes is None:
+            from_nodes = self._in_names
+        
+        for node_name in from_nodes:
+            node: Node = self._nodes[node_name]
+            node.accept(visitor)
+
+            if to_nodes is None or node_name not in to_nodes:
+                self.send_forward(visitor, self._node_outputs[node], to_nodes)
+    
+    def send_backward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
+        
+        if from_nodes is None:
+            from_nodes = self._default_outs
+        
+        for node_name in from_nodes:
+            node: Node = self._nodes[node_name]
+            node.accept(visitor)
+
+            if to_nodes is None or node_name not in to_nodes:
+                self.send_backward(visitor, node.inputs, to_nodes)
+
     
     def _probe_helper(
         self, node: Node, excitations: typing.Dict[str, torch.Tensor]
