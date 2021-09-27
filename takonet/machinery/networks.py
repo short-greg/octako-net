@@ -1,4 +1,4 @@
-from torch._C import Value
+from collections import namedtuple
 import torch.nn as nn
 import torch
 import typing
@@ -16,25 +16,61 @@ They are a collection of modules connected together in a graph.
 
 """
 
+@dataclasses.dataclass
+class ModRef(object):
+    module: str
+
+    def select(self, by: typing.Dict):
+        
+        return by.get(self.module)
+
+
+@dataclasses.dataclass
+class IndexRef(ModRef):
+    index: int
+    def select(self, by: typing.Dict):
+        result = super().select(by)
+        if result is None:
+            return None
+
+        return result[self.index]
+
 
 @dataclasses.dataclass
 class Port:
     """A port into or out of a node. Used for connecting nodes together.
     """
     
-    module: str
+    ref: ModRef
     size: torch.Size
-    index: int = None
 
-    def select(self, excitations: typing.Dict[str, torch.Tensor], index: int=None):
+    @property
+    def module(self):
+        return self.ref.module
 
-        excitation = excitations.get(self.module, None)
-        if excitation is None: return None;
+    def select(self, by: typing.Dict):
 
-        if self.index is None:
-            return excitation
-        
-        return excitation[self.index]
+        return self.ref.select(by)
+
+
+@dataclasses.dataclass
+class NetworkPort(Port):
+    """A port into or out of a node. Used for connecting nodes together.
+    """
+    
+    network: str
+
+    @property
+    def module(self):
+        return self.network
+
+    def select(self, by: typing.Dict):
+
+        sub_by = by.get(self.network)
+        if self.network is None:
+            return None
+
+        return self.ref.select(sub_by)
 
 
 @dataclasses.dataclass
@@ -57,13 +93,11 @@ class Node(nn.Module):
 
     def __init__(
         self, name: str, 
-        out_size: typing.Union[torch.Size, typing.List[torch.Size]],
         labels: typing.List[str]=None,
         annotation: str=None
     ):
         super().__init__()
         self.name: str = name
-        self._out_size = out_size
         self._labels = labels
         self._annotation = annotation or ''
     
@@ -104,25 +138,29 @@ class Node(nn.Module):
     def accept(self, visitor: NodeVisitor):
         raise NotImplementedError
 
+    def probe(self, by: typing.Dict, to_cache: True):
+        raise NotImplementedError
 
-class LabelFilter(object):
 
-    def __init__(self, target_labels: typing.Set[str], require_all: bool=False):
+# TODO: use the visitor
+# class LabelFilter(object):
 
-        self._target_labels = target_labels
-        self._filter_func = self._require_all_filter if require_all else self._require_one_filter
+#     def __init__(self, target_labels: typing.Set[str], require_all: bool=False):
+
+#         self._target_labels = target_labels
+#         self._filter_func = self._require_all_filter if require_all else self._require_one_filter
     
-    def _require_one_filter(self, node: Node):
+#     def _require_one_filter(self, node: Node):
 
-        return len(self._target_labels.intersection(node.labels))
+#         return len(self._target_labels.intersection(node.labels))
 
-    def _require_all_filter(self, node: Node):
+#     def _require_all_filter(self, node: Node):
 
-        return len(self._target_labels.difference(node.labels)) == 0
+#         return len(self._target_labels.difference(node.labels)) == 0
     
-    def filter(self, sequence):
+#     def filter(self, sequence):
 
-        return filter(self._filter_func, sequence)
+#         return filter(self._filter_func, sequence)
 
 
 class OperationNode(Node):
@@ -138,8 +176,9 @@ class OperationNode(Node):
         labels: typing.List[str]=None,
         annotation: str=None
     ):
-        super().__init__(name, out_size, labels, annotation)
+        super().__init__(name, labels, annotation)
         self.operation: nn.Module = operation
+        self._out_size = out_size
         self._inputs: typing.List[Port] = inputs
 
     @property
@@ -156,9 +195,9 @@ class OperationNode(Node):
         """
 
         if type(self._out_size) == list:
-            return [Port(self.name, sz, i) for i, sz in enumerate(self._out_size)]
+            return [Port(IndexRef(self.name, i), sz) for i, sz in enumerate(self._out_size)]
 
-        return Port(self.name, self._out_size, None),
+        return Port(ModRef(self.name), self._out_size),
     
     @property
     def inputs(self) -> typing.List[Port]:
@@ -179,9 +218,19 @@ class OperationNode(Node):
 
         )
     
-    def forward(self, *args):
+    def forward(self, *args, **kwargs):
 
-        return self.operation(*args)
+        return self.operation(*args, **kwargs)
+
+    def probe(self, by: typing.Dict, to_cache=True):
+        
+        if self.name in by:
+            return by[self.name]
+
+        result = self.operation(*[in_.select(by) for in_ in self._inputs])
+        if to_cache:
+            by[self.name] = result
+        return result
 
 
 class In(Node):
@@ -194,8 +243,9 @@ class In(Node):
             name ([type]): [Name of the in node]
             out_size (torch.Size): [The size of the in node]
         """
-        super().__init__(name, out_size=sz, labels=labels, annotation=annotation)
+        super().__init__(name, labels=labels, annotation=annotation)
         self._value_type = value_type
+        self._out_size = sz
         self._default_value = default_value
 
     def to(self, device):
@@ -207,7 +257,7 @@ class In(Node):
     @property
     def ports(self) -> typing.Iterable[Port]:
 
-        return Port(self.name, self._out_size, None),
+        return Port(ModRef(self.name), self._out_size),
     
     def forward(x):
 
@@ -224,6 +274,18 @@ class In(Node):
             typing.List[str]: Names of the nodes input into the node
         """
         return []
+
+    def clone(self):
+        return In(
+            self.name, self._out_size, self._value_type, self._default_value, self._labels,
+            self._annotation
+
+        )
+    
+    def probe(self, by: typing.Dict):
+        # TODO: Possibly check the value in by
+        return by.get(self.name, self._default_value)
+
 
     @staticmethod
     def from_tensor(name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.Set[str]=None, annotation: str=None):
@@ -242,13 +304,6 @@ class In(Node):
 
         return In(
             name, torch.Size([]), default_type, default_value, labels, annotation
-        )
-
-    def clone(self):
-        return In(
-            self.name, self._out_size, self._value_type, self._default_value, self._labels,
-            self._annotation
-
         )
 
 
@@ -459,7 +514,7 @@ class Network(nn.Module):
         all_true = not (False in is_inputs)
         return all_true and not other_found
     
-    def send_forward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
+    def traverse_forward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
 
         if from_nodes is None:
             from_nodes = self._in_names
@@ -469,9 +524,9 @@ class Network(nn.Module):
             node.accept(visitor)
 
             if to_nodes is None or node_name not in to_nodes:
-                self.send_forward(visitor, self._node_outputs[node], to_nodes)
+                self.traverse_forward(visitor, self._node_outputs[node], to_nodes)
     
-    def send_backward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
+    def traverse_backward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
         
         if from_nodes is None:
             from_nodes = self._default_outs
@@ -481,11 +536,11 @@ class Network(nn.Module):
             node.accept(visitor)
 
             if to_nodes is None or node_name not in to_nodes:
-                self.send_backward(visitor, node.inputs, to_nodes)
+                self.traverse_backward(visitor, node.inputs, to_nodes)
 
     
     def _probe_helper(
-        self, node: Node, excitations: typing.Dict[str, torch.Tensor]
+        self, node: Node, by: typing.Dict[str, torch.Tensor], to_cache=True
     ):
         """Helper function to get the output for a "probe"
 
@@ -499,32 +554,33 @@ class Network(nn.Module):
         Returns:
             torch.Tensor: Output of a node
         """
-        if node.name in excitations:
-            return excitations[node.name]
+        if node.name in by:
+            return by[node.name]
 
         inputs = []
         for port in node.inputs:
             module_name = port.module
-            excitation = port.select(excitations)
+            excitation = port.select(by)
 
             if excitation is not None:
                 inputs.append(excitation)
                 continue
             try:
-                self._probe_helper(self._nodes[module_name], excitations)
+                self._probe_helper(self._nodes[module_name], by)
                 inputs.append(
-                    port.select(excitations)
+                    port.select(by)
                 )
             # TODO: Create a better report for this
             except KeyError:
                 raise KeyError(f'Input or Node {module_name} does not exist')
 
-        cur_result = node(*inputs)
-        excitations[node.name] = cur_result
+        # cur_result = node(*inputs)
+        cur_result = node.probe(by, to_cache)
+        # excitations[node.name] = cur_result
         return cur_result
 
     def probe(
-        self, outputs: typing.List[str], by: typing.Dict[str, torch.Tensor]
+        self, outputs: typing.List[str], by: typing.Dict[str, torch.Tensor], to_cache=True
     ) -> typing.List[torch.Tensor]:
         """Probe the network for its inputs
 
@@ -549,59 +605,59 @@ class Network(nn.Module):
         
         return result
     
-    def _extract_helper(self, node: Node, network, input_names: typing.List[str], inputs: typing.Dict[str, In]):
+    # def _extract_helper(self, node: Node, network, input_names: typing.List[str], inputs: typing.Dict[str, In]):
 
-        for port in node.inputs:
-            sub_node = self._nodes[port.module]
-            if sub_node not in network._nodes:
-                if port.module not in input_names:
-                    network._nodes[port.module] = sub_node
-                    self._extract_helper(self, input_names)
-                else:
-                    node = node.clone()
-                    # TODO: Incorrect.. Can be multiple input ports
-                    node.ports
+    #     for port in node.inputs:
+    #         sub_node = self._nodes[port.module]
+    #         if sub_node not in network._nodes:
+    #             if port.module not in input_names:
+    #                 network._nodes[port.module] = sub_node
+    #                 self._extract_helper(self, input_names)
+    #             else:
+    #                 node = node.clone()
+    #                 # TODO: Incorrect.. Can be multiple input ports
+    #                 node.ports
 
-    def extract(self, output_names: typing.List[str], inputs: typing.Dict[str, In]):
-        # TODO: FINISH
+    # def extract(self, output_names: typing.List[str], inputs: typing.Dict[str, In]):
+    #     # TODO: FINISH
 
-        input_names = [name for name, in_ in inputs]
+    #     input_names = [name for name, in_ in inputs]
         
-        if len(set(output_names)) != len(output_names):
-            raise ValueError(f'There are duplicate names in {output_names}')
+    #     if len(set(output_names)) != len(output_names):
+    #         raise ValueError(f'There are duplicate names in {output_names}')
         
-        if len(set(input_names)) != len(input_names):
-            raise ValueError(f'There are duplicate names in {input_names}')
+    #     if len(set(input_names)) != len(input_names):
+    #         raise ValueError(f'There are duplicate names in {input_names}')
 
-        if not self.are_inputs(output_names, input_names):
-            raise ValueError(f'{input_names} are not inputs for {output_names}')
+    #     if not self.are_inputs(output_names, input_names):
+    #         raise ValueError(f'{input_names} are not inputs for {output_names}')
 
-        network = Network([node for _, node in inputs.items()])
+    #     network = Network([node for _, node in inputs.items()])
         
-        for output_name in output_names:
-            node = self._nodes[output_name]
+    #     for output_name in output_names:
+    #         node = self._nodes[output_name]
             
     def get_node(self, key) -> Node:
 
         return self._nodes[key]
     
-    def merge_in(self, network, label: str):
-        """Merge a network into this network
+    # def merge_in(self, network, label: str):
+    #     """Merge a network into this network
 
-        Args:
-            network ([Network]): Network to merge in
-            label (str): Label to assign the nodes in the network merged in
-        """
-        network: Network = network
+    #     Args:
+    #         network ([Network]): Network to merge in
+    #         label (str): Label to assign the nodes in the network merged in
+    #     """
+    #     network: Network = network
 
-        for name, node in network:
-            node: Node = node.clone()
-            node.add_label(label)
+    #     for name, node in network:
+    #         node: Node = node.clone()
+    #         node.add_label(label)
             
-            if type(node) == In:
-                self.add_input(node)
-            else:
-                self._nodes[name] = node
+    #         if type(node) == In:
+    #             self.add_input(node)
+    #         else:
+    #             self._nodes[name] = node
 
     def __iter__(self) -> typing.Tuple[str, Node]:
         """Iterate over all nodes
@@ -627,70 +683,350 @@ class Network(nn.Module):
         return result
 
 
-class AppendNameVisitor(NodeVisitor):
+class NetworkNode(Node):
+    """
+    """
+
+    def __init__(
+        self, name: str, network_name: str, network: Network, 
+        labels: typing.List[str]=None,
+        annotation: str=None
+    ):
+        super().__init__(name, labels, annotation)
+        self._network: Network = network
+        self._network_name = network_name
+
+    @property
+    def ports(self) -> typing.Iterable[Port]:
+        """
+        example: 
+        # For a node with two ports
+        x, y = node.ports
+        # You may use one port as the input to one module and the
+        # other port for another module
+
+        Returns:
+            typing.Iterable[Port]: [The output ports for the node]
+        """
+        #  self._network.get_ports()
+        # get default output ports
+
+    @property
+    def inputs(self) -> typing.List[Port]:
+        return self._network.input_names
+    
+    @property
+    def input_nodes(self) -> typing.List[str]:
+        """
+        Returns:
+            typing.List[str]: Names of the nodes input into the node
+        """
+        return self._network.get_input_names()
+    
+    def clone(self):
+        return NetworkNode(
+            self.name, self._network_name, self._network, 
+            self._labels, self._annotation
+        )
+
+    def accept(self, visitor: NodeVisitor):
+        visitor.visit(self)
+
+    def probe(self, by: typing.Dict, to_cache=True):
+        
+        if self.name not in by:
+            by[self.name] = {}
+        
+        sub_by = by[self.name]
+        for key, maps_from in self._inputs.items():
+            maps_from: Port = maps_from
+            sub_by[key] = maps_from.select(by)
+        
+        return self._network.probe(self._outputs, sub_by, to_cache)
+
+
+class NetworkInterface(OperationNode):
+
+    def __init__(
+        self, name: str, network_name: str, network: Network, 
+        outputs: typing.List[str],
+        inputs: typing.Dict[str, Port],
+        # out_size: typing.Union[torch.Size, typing.List[torch.Size]],
+        labels: typing.List[str]=None,
+        annotation: str=None
+    ):
+        super().__init__(name, labels, annotation)
+        self._network: Network = network
+        self._network_name = network_name
+        self._outputs = outputs
+        self._inputs: typing.Dict[str, Port] = inputs
+
+    @property
+    def ports(self) -> typing.Iterable[Port]:
+        """
+        example: 
+        # For a node with two ports
+        x, y = node.ports
+        # You may use one port as the input to one module and the
+        # other port for another module
+
+        Returns:
+            typing.Iterable[Port]: [The output ports for the node]
+        """
+        ports = []
+        for name in self._outputs:
+            ports.extend(self._network.get_ports(name))
+        return ports
+
+    @property
+    def inputs(self) -> typing.List[Port]:
+        ports = []
+        for name in self._inputs:
+            ports.extend(self._network.get_ports(name))
+        return ports
+    
+    @property
+    def input_nodes(self) -> typing.List[str]:
+        """
+        Returns:
+            typing.List[str]: Names of the nodes input into the node
+        """
+        return self._inputs
+    
+    def clone(self):
+        return NetworkNode(
+            self.name, self._network_name, self._network, 
+            self._outputs, self._inputs, self._labels, self._annotation
+        )
+
+    def accept(self, visitor: NodeVisitor):
+        visitor.visit(self)
+
+    # TODO: Think if this is how i want to do it.. will need to make sure the
+    # network name is not used for a node
+    @property
+    def by_key(self):
+        return '__' + self._network_name
+
+    def probe(self, by: typing.Dict, to_cache=True):
+        
+        if self.name not in by:
+            by[self.by_key] = {}
+        
+        sub_by = by[self.by_key]
+        for key, maps_from in self._inputs.items():
+            maps_from: Port = maps_from
+            sub_by[key] = maps_from.select(by)
+        
+        return self._network.probe(self._outputs, sub_by, to_cache)
+
+
+
+class NodeProcessor(ABC):
+    
+    @abstractmethod
+    def process_input_node(self, node: In) -> In:
+        pass
+
+    @abstractmethod
+    def process_operation_node(self, node: OperationNode) -> OperationNode:
+        pass
+
+
+class UpdateNodeName(NodeProcessor):
+
+    def __init__(self, prepend_with='', append_with=''):
+
+        self._prepend_with = prepend_with
+        self._append_with = append_with
+        self.process_input_node = self._update_name
+        self.process_operation_node = self._update_name
+
+    def _update_name(self, node: Node):
+
+        name = self._prepend_with + node.name + self._append_with
+        node = node.clone()
+        node.name = name
+        return node
+
+
+class NullNodeProcessor(NodeProcessor):
 
     def __init__(self):
+        pass
+
+    def process_input_node(self, node: In):
+        return node.clone()
+    
+    def process_operation_node(self, node: Node):
+        return node.clone()
+
+class NetInterface(typing.NamedTuple):
+
+    inputs: typing.List[typing.Union[Port, str]]
+    outputs: typing.List[typing.Union[Port, str]]
+
+
+class NetworkBuilder(object):
+
+    def __init__(self, node_processor: NodeProcessor):
         self._network = None
-        self._append_name = ''
+    
+        self._operation_nodes: typing.Dict[str, OperationNode] = None
+        self._node_processor = node_processor
+        # self._prepend_name = prepend_name
+        self._added_nodes: typing.Set[str] = None
+        self.reset()
+    
+    def reset(self):
+
+        self._network = None
+        self._operation_nodes: typing.Dict[str, OperationNode] = {}
+        self._added_nodes: typing.Set[str] = set()
+    
+    def add_input(self, node: In):
+        node = self._node_processor.process_input_node(node)
+        # node.name = self._prepend_name(node.name)
+        self._network.add_input(node.clone())
+        self._added_nodes[node.name] = node
+
+    def add_operation(self, node: OperationNode):
+        self._operation_nodes[node.name] = node
+    
+    def _build_network(self, cur_node: OperationNode):
+
+        if cur_node in self._added_nodes:
+            return
+
+        for port in cur_node.inputs:
+            self._build_network(self._operation_nodes[port.module])
+            
+            node = self._node_processor.process_operation_node(cur_node)
+            self._network.add_node(
+                node.name, node.operation, node.inputs, node.labels,
+                node.annotation
+            )
+            self._added_nodes.add(cur_node.name)
+    
+    def get_result(self, default_interface: NetInterface=None):
+        self._network = Network()
+        for name, node in self._operation_nodes.items():
+            self._build_network(node)
         
+        if default_interface:
+            self._network.set_default_interface(default_interface)
+        
+        return self._network
+
+
+class NameAppendVisitor(NodeVisitor):
+
+    def __init__(self, prepend_with='', append_with=''):
+
+        node_processor = UpdateNodeName(prepend_with, append_with)
+        self._builder = NetworkBuilder(node_processor)
+    
     @singledispatch
     def visit(self, node: Node):
         pass
 
     @visit.register
     def _(self, node: In):
-        self._network.add_input(node)
+        self._builder.add_input(node)
 
     @visit.register
     def _(self, node: OperationNode):
-        self._network.add_node(node)
+        self._builder.add_operation(node)
 
-    def visit_network(self, network: Network, append_name: str):
-        self._network = Network()
-        self._append_name = append_name
-        self._in_names = []
-        network.send_forward(self)
-        self._network.set_default_interface(
-            network.input_names, network.output_names
-        )
-        return self._network
+    @property
+    def get_result(self, default_interface: NetInterface=None):
+        return self._builder.get_result(default_interface)
+    
+    def reset(self):
+        self._builder.reset()
+
+    def visit_network(self, network: Network, default_interface: NetInterface=None):
+        self.reset()
+        network.traverse_forward(self)
+        return self._builder.get_result(default_interface)
 
 
 class MergeVisitor(NodeVisitor):
 
     def __init__(self):
-        self._network = None
-        self._append_name = ''
-        
+
+        node_processor = NullNodeProcessor()
+        self._builder = NetworkBuilder(node_processor)
+    
     @singledispatch
     def visit(self, node: Node):
         pass
 
     @visit.register
     def _(self, node: In):
-        # TODO: Think what to do in this case
-        if self._network is None:
-            pass
-        self._network.add_input(node)
+        self._builder.add_input(node)
 
     @visit.register
     def _(self, node: OperationNode):
-        if self._network is None:
-            pass
-        self._network.add_node(node)
+        self._builder.add_operation(node)
 
-    def visit_networks(self, networks: typing.List[Network]):
-        self._network = Network()
+    @property
+    def get_result(self, default_interface: NetInterface=None):
+        return self._build_network.get_result(default_interface)
+
+    def visit_networks(
+        self, networks: typing.List[Network]
+    ):
+        self.reset()
         input_names = []
-        outputs = []
+        output_names = []
+
         for network in networks:
-            network.send_forward(self)
+            network.traverse_forward(self)
             input_names.extend(network.input_names)
-            outputs.extend(network.output_names)
-        self._network.set_default_interface(
-            input_names, outputs
+            output_names.extend(network.output_names)
+
+        return self._builder.get_result(
+            NetInterface(input_names, output_names)
         )
-        return self._network
+
+
+# # TODO: Redesign the above so I can use mergevisitor
+# class MergeVisitor(NodeVisitor):
+
+#     def __init__(self):
+#         self._network = None
+#         self._append_name = ''
+        
+#     @singledispatch
+#     def visit(self, node: Node):
+#         pass
+
+#     @visit.register
+#     def _(self, node: In):
+#         # TODO: Think what to do in this case
+#         if self._network is None:
+#             pass
+#         self._network.add_input(node)
+
+#     @visit.register
+#     def _(self, node: OperationNode):
+#         if self._network is None:
+#             pass
+#         self._network.add_node(node)
+
+#     def visit_networks(self, networks: typing.List[Network]):
+#         self._network = Network()
+#         input_names = []
+#         outputs = []
+#         for network in networks:
+#             network.send_forward(self)
+#             input_names.extend(network.input_names)
+#             outputs.extend(network.output_names)
+#         self._network.set_default_interface(
+#             input_names, outputs
+#         )
+#         return self._network
 
 
 def merge(networks: typing.Dict[str, Network]) -> Network:
