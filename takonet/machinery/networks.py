@@ -153,27 +153,6 @@ class Node(nn.Module):
         raise NotImplementedError
 
 
-# TODO: use the visitor
-# class LabelFilter(object):
-
-#     def __init__(self, target_labels: typing.Set[str], require_all: bool=False):
-
-#         self._target_labels = target_labels
-#         self._filter_func = self._require_all_filter if require_all else self._require_one_filter
-    
-#     def _require_one_filter(self, node: Node):
-
-#         return len(self._target_labels.intersection(node.labels))
-
-#     def _require_all_filter(self, node: Node):
-
-#         return len(self._target_labels.difference(node.labels)) == 0
-    
-#     def filter(self, sequence):
-
-#         return filter(self._filter_func, sequence)
-
-
 class OperationNode(Node):
     """
     A node in a network. It performs an operation and specifies which 
@@ -634,60 +613,10 @@ class Network(nn.Module):
             result[output] = cur_result
         
         return result
-    
-    # def _extract_helper(self, node: Node, network, input_names: typing.List[str], inputs: typing.Dict[str, In]):
-
-    #     for port in node.inputs:
-    #         sub_node = self._nodes[port.module]
-    #         if sub_node not in network._nodes:
-    #             if port.module not in input_names:
-    #                 network._nodes[port.module] = sub_node
-    #                 self._extract_helper(self, input_names)
-    #             else:
-    #                 node = node.clone()
-    #                 # TODO: Incorrect.. Can be multiple input ports
-    #                 node.ports
-
-    # def extract(self, output_names: typing.List[str], inputs: typing.Dict[str, In]):
-    #     # TODO: FINISH
-
-    #     input_names = [name for name, in_ in inputs]
-        
-    #     if len(set(output_names)) != len(output_names):
-    #         raise ValueError(f'There are duplicate names in {output_names}')
-        
-    #     if len(set(input_names)) != len(input_names):
-    #         raise ValueError(f'There are duplicate names in {input_names}')
-
-    #     if not self.are_inputs(output_names, input_names):
-    #         raise ValueError(f'{input_names} are not inputs for {output_names}')
-
-    #     network = Network([node for _, node in inputs.items()])
-        
-    #     for output_name in output_names:
-    #         node = self._nodes[output_name]
             
     def get_node(self, key) -> Node:
 
         return self._nodes[key]
-    
-    # def merge_in(self, network, label: str):
-    #     """Merge a network into this network
-
-    #     Args:
-    #         network ([Network]): Network to merge in
-    #         label (str): Label to assign the nodes in the network merged in
-    #     """
-    #     network: Network = network
-
-    #     for name, node in network:
-    #         node: Node = node.clone()
-    #         node.add_label(label)
-            
-    #         if type(node) == In:
-    #             self.add_input(node)
-    #         else:
-    #             self._nodes[name] = node
 
     def __iter__(self) -> typing.Tuple[str, Node]:
         """Iterate over all nodes
@@ -1017,106 +946,6 @@ class MergeVisitor(NodeVisitor):
         return self._builder.get_result(
             NetInterface(input_names, output_names)
         )
-
-
-# # TODO: Redesign the above so I can use mergevisitor
-# class MergeVisitor(NodeVisitor):
-
-#     def __init__(self):
-#         self._network = None
-#         self._append_name = ''
-        
-#     @singledispatch
-#     def visit(self, node: Node):
-#         pass
-
-#     @visit.register
-#     def _(self, node: In):
-#         # TODO: Think what to do in this case
-#         if self._network is None:
-#             pass
-#         self._network.add_input(node)
-
-#     @visit.register
-#     def _(self, node: OperationNode):
-#         if self._network is None:
-#             pass
-#         self._network.add_node(node)
-
-#     def visit_networks(self, networks: typing.List[Network]):
-#         self._network = Network()
-#         input_names = []
-#         outputs = []
-#         for network in networks:
-#             network.send_forward(self)
-#             input_names.extend(network.input_names)
-#             outputs.extend(network.output_names)
-#         self._network.set_default_interface(
-#             input_names, outputs
-#         )
-#         return self._network
-
-
-# def merge(networks: typing.Dict[str, Network]) -> Network:
-#     """Merge networks together. Names of nodes must not overlap
-
-#     Args:
-#         networks (typing.Dict[str, Network]): Networks to merge together {label: Network}
-
-#     Returns:
-#         Network
-#     """
-    
-#     result = Network()
-#     for label, network in networks.items():
-#         result.merge_in(network, label)
-#     return result
-
-
-# class NetworkInterface(nn.Module):
-#     """
-#     """
-
-#     def __init__(
-#         self, network: Network, ports_to_probe: typing.List[Port], 
-#         by: typing.List[str]
-#     ):
-#         """An interface to the network.
-#         It specifies ports to probe and what to probe them by
-
-#         Args:
-#             network (Network): 
-#             ports_to_probe (typing.List[Port]): List of ports to probe
-#             by (typing.List[str]): The list of nodes to use as inputs. Defaults to None.  
-#         """
-
-#         super().__init__()
-#         self._network = network
-#         self._by = by or network.get_input_names(self._to_probe) 
-#         assert network.are_inputs([port.module for port in ports_to_probe], self._by)
-
-#         self._ports_to_probe: typing.List[Port] = ports_to_probe
-#         self._to_probe = [port.module for port in ports_to_probe]
-        
-#         assert self._network.are_inputs(self._to_probe, self._by)
-#         self._input_map = {i: v for i, v in enumerate(network.get_input_names(self._to_probe))}
-
-#     def forward(self, *inputs):
-
-#         x_dict = {
-#             self._input_map[i]: in_ for i, in_ in enumerate(inputs)
-#         }
-#         excitations = self._network.probe(
-#             self._to_probe, by=x_dict
-#         )
-#         out = []
-#         for port in self._ports_to_probe:
-#             out = port.select(excitations)
-#         return out        
-            
-#     def get_input_names(self):
-
-#         return self._network.get_input_names(self._to_probe)
 
 
 class ListAdapter(nn.Module):
