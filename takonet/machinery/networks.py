@@ -16,6 +16,7 @@ They are a collection of modules connected together in a graph.
 
 """
 
+
 @dataclasses.dataclass
 class ModRef(object):
     module: str
@@ -315,7 +316,7 @@ class Network(nn.Module):
     
         self._default_ins: typing.List[str] = [] # [in_.name for in_ in self._ins]
         self._default_outs: typing.List[str] = []
-        self._networks = []
+        self._sub_networks = []
         self._node_outputs = {}
 
     @property
@@ -352,7 +353,7 @@ class Network(nn.Module):
                 self._default_outs.append(out.module)
     
     def is_name_taken(self, name):
-        return name in self._networks or name in self._nodes
+        return name in self._sub_networks or name in self._nodes
     
     def _validate_node_or_network_name(self, name):
         if self.is_name_taken(name):
@@ -360,7 +361,7 @@ class Network(nn.Module):
 
     def add_subnetwork(self, name, network, labels: typing.List[str]=None, annotation: str=None):
         self._validate_node_or_network_name(name)
-        self._networks[name] = SubNetwork(name, network, labels, annotation)
+        self._sub_networks[name] = SubNetwork(name, network, labels, annotation)
 
     def add_network_interface(
         self, name: str, network_name: str, 
@@ -369,7 +370,7 @@ class Network(nn.Module):
     ):
         inputs: typing.List[Link] = inputs
         self._validate_node_or_network_name(name)
-        interface = NetworkInterface(name, self._networks[network_name], outputs, inputs, labels, annotation)
+        interface = NetworkInterface(name, self._sub_networks[network_name], outputs, inputs, labels, annotation)
         self._nodes[name] = interface.name
 
         input_ports = [in_.from_ for in_ in inputs]
@@ -609,7 +610,6 @@ class Network(nn.Module):
         for output in outputs:
             node = self._nodes[output.module]
             cur_result = self._probe_helper(node, excitations)
-            output.select()
             result[output] = cur_result
         
         return result
@@ -666,7 +666,6 @@ class Link:
         # Placeholder method
         pass
     
-
 
 class SubNetwork(object):
     """
