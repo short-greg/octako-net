@@ -379,42 +379,6 @@ class Network(nn.Module):
         if t is None or isinstance(node, t):
             return node
 
-    # def _validate_node_or_network_name(self, name):
-    #     if self.is_name_taken(name):
-    #         raise KeyError('Network or node with {} already exists.'.format(name))
-    
-    # @property
-    # def sub_networks(self) -> typing.List:
-    #     return list(self._sub_networks.values())
-
-    # def add_network_interface(
-    #     self, name: str, network_name: str, 
-    #     outputs: typing.List[Port], inputs: typing.List,
-    #     labels: typing.List[str]=None, annotation: str=None
-    # ):
-    #     inputs: typing.List[Link] = inputs
-    #     self._validate_node_or_network_name(name)
-    #     interface = NetworkInterface(name, self._sub_networks[network_name], outputs, inputs, labels, annotation)
-    #     self._nodes[name] = interface.name
-
-    #     input_ports = [in_.from_ for in_ in inputs]
-    #     self._set_node_outputs(input_ports, name)
-
-    #     return interface.ports
-
-    # def add_input(self, in_: In) -> typing.Iterable[Port]:
-    #     if in_.name in self._nodes:
-    #         raise ValueError(f'There is already a node with the name {in_.name} ')
-
-    #     self._nodes[in_.name] = in_
-    #     self._in_names.append(in_.name)
-    #     self._node_outputs[in_.name] = []
-    #     return in_.ports
-    
-    # def add_subnetwork(self, name, network, labels: typing.List[str]=None, annotation: str=None):
-    #     self._validate_node_or_network_name(name)
-    #     self._sub_networks[name] = SubNetwork(name, network, labels, annotation)
-
     def add_op(
         self, name: str, op: Operation, in_: typing.Union[Port, typing.List[Port]], 
         labels: typing.List[str]=None
@@ -440,25 +404,6 @@ class Network(nn.Module):
         # assert (is_input and not len(inputs) > 0) or (not is_input and len(inputs) > 0)
         node = OpNode(name, op.op, in_, op.out_size, labels)
         return self.add_node(node)
-    
-    # def _set_node_outputs(self, in_ports: typing.List[Port], name): 
-
-    #     for port in in_ports:
-    #         if port.module not in self._nodes:
-    #             raise ValueError(
-    #                 f"There is no node named for input {port.module} in the network.")
-            
-    #         self._node_outputs[port.module].append(name)
-        
-    #     self._node_outputs[name] = []
-    
-    # def get_input_ports(self) -> typing.List[Port]:
-    #     ports = []
-
-    #     for in_ in [self._nodes[in_name] for in_name in self._in_names]:
-            
-    #         ports.extend(in_.ports)
-    #     return ports
     
     def get_ports(self, names: typing.Union[str, typing.List[str]], flat=True) -> typing.List[Port]:
 
