@@ -1,5 +1,4 @@
 from collections import namedtuple
-from torch._C import Value
 import torch.nn as nn
 import torch
 import typing
@@ -9,6 +8,8 @@ import itertools
 from abc import ABC, abstractmethod
 from functools import singledispatch
 
+
+# TODO: Rewrite tests and get everything working
 
 """
 Classes related to Networks.
@@ -325,7 +326,7 @@ class Network(nn.Module):
         self._default_ins: typing.List[str] = []
         self._default_outs: typing.List[str] = []
         self._cache_names_used: typing.Set[str] = set()
-        for in_ in inputs:
+        for in_ in inputs or []:
             self.add_node(in_)
 
     @property
@@ -372,7 +373,7 @@ class Network(nn.Module):
         
         self._nodes[node.name] = node
         self._node_outputs[node.name] = []
-        return node.inputs
+        return node.ports
 
     def get_node(self, name: str, t: typing.Type=None):
         node = self._nodes.get(name)
@@ -408,7 +409,7 @@ class Network(nn.Module):
     def get_ports(self, names: typing.Union[str, typing.List[str]], flat=True) -> typing.List[Port]:
 
         if isinstance(names, str):
-            names = [names]
+            return self._nodes[names].ports
         
         ports = []
         for name in names:
@@ -571,7 +572,6 @@ class Network(nn.Module):
             except KeyError:
                 raise KeyError(f'Input or Node {module_name} does not exist')
 
-        # cur_result = node(*inputs)
         cur_result = node.probe(by, to_cache)
         # excitations[node.name] = cur_result
         return cur_result
@@ -641,7 +641,7 @@ class Link:
         to_dict[self.to_.module] = map_val
 
 
-class SubNetwork(Node):
+class SubNetwork(object):
     """
     """
 
@@ -659,10 +659,6 @@ class SubNetwork(Node):
     def get_ports(self, node_name: str) -> typing.List[Port]:
 
         return self._network.get_ports(node_name)
-
-    def get_input_ports(self) -> typing.List[Port]:
-
-        return self._network.get_input_ports()
 
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -845,7 +841,6 @@ class NetworkBuilder(object):
         self._sub_networks: typing.Dict[str, SubNetwork] = {}
         self._node_processor = node_processor
         self._added_nodes: typing.Set[str] = set()
-        self._inputs: typing.List[In] = []
     
         self.reset()
     
@@ -864,19 +859,21 @@ class NetworkBuilder(object):
     
     def _build_network(self, cur_node: Node):
 
-        if cur_node in self._added_nodes:
+        if cur_node.name in self._added_nodes:
             return
 
         for input_node in cur_node.input_nodes:
-
+            print(input_node)
             self._build_network(self._nodes[input_node])
-            node = self._node_processor.process_node(cur_node)
-            self._network.add_node(node)
-            self._added_nodes.add(cur_node.name)
-    
+            
+        node = self._node_processor.process_node(cur_node)
+        self._added_nodes.add(cur_node.name)
+        self._network.add_node(node)
+
     def get_result(self, default_interface: NetPorts=None):
-        self._network = Network(self._inputs)
+        self._network = Network()
         for name, node in self._nodes.items():
+            print('Building ', node.name)
             self._build_network(node)
         
         if default_interface:

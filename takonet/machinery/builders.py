@@ -68,6 +68,35 @@ class FeedForwardBuilder(object):
         ), torch.Size([-1, out_features]))
 
 
+
+class AutoencoderBuilder(object):
+    """
+
+    linear(builder.linear, 16, 2)
+    linear(16, 2)
+    activation(builder.relu)
+    """
+
+    def __init__(self):
+        
+        self._base_builder = FeedForwardBuilder()
+
+    def normalizer(self, normalizer_factory: typing.Callable[[], Operation]) -> typing.Tuple[Operation, Operation]:
+        return normalizer_factory(), normalizer_factory()
+    
+    def activation(self, activation_factory: typing.Callable[[], Operation]) -> typing.Tuple[Operation, Operation]:
+        return activation_factory(), activation_factory()
+
+    def linear(self, linear_factory: typing.Callable[[int, int], Operation], in_features: int, out_features: int) -> typing.Tuple[Operation, Operation]:
+        return linear_factory(in_features, out_features), linear_factory(out_features, in_features) 
+    
+    def convolution_2d(self):
+        pass
+
+    def convolution_1d(self):
+        pass
+
+
 class ReductionType(Enum):
 
     MeanReduction = objectives.MeanReduction
