@@ -96,6 +96,26 @@ class AutoencoderBuilder(object):
     def convolution_1d(self):
         pass
 
+    def max_pool_1d(self, kernel_size, stride, padding, in_size: torch.Size):
+        pass
+
+    def max_pool_2d(self, kernel_size: int, stride: int, padding: int, in_size: torch.Size):
+        # compute the out_size
+        
+        return self._base_builder.max_pool_2d(
+            kernel_size, stride, padding
+        ), Operation(
+            nn.MaxUnpool2d(kernel_size, stride, padding), 
+        )
+    
+    def scaler_prerpocessor(self, scaler_cls):
+        pass
+
+    def normalizer_preprocessor(self, normalizer_cls):
+        # 
+        pass
+
+
 
 class ReductionType(Enum):
 
