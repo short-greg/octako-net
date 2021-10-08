@@ -1,11 +1,15 @@
 from enum import Enum
 from os import stat
+
+from torch._C import T
+from torch.functional import norm
 from takonet.modules.activations import NullActivation, Scaler
 from torch import nn
 import torch
 from takonet.modules import objectives
 from .networks import Operation
 import typing
+from . import utils
 
 
 """
@@ -18,6 +22,7 @@ They provide explicit functions like "relu" and also non-explicit functions
 like "activation". The user can set activation to be any type of activation
 as long as the interface is correct.
 """
+
 
 
 class FeedForwardBuilder(object):
@@ -67,6 +72,61 @@ class FeedForwardBuilder(object):
             in_features, out_features, 
         ), torch.Size([-1, out_features]))
 
+    def convolution_2d(
+        self, in_features: int, out_features: int, 
+        k: typing.Union[int, typing.Tuple[int, int]], 
+        stride: typing.Union[int, typing.Tuple[int, int]], 
+        in_size: torch.Size,
+        padding: typing.Union[int, typing.Tuple[int, int]]=0, 
+    ):
+        out_sizes = utils.calc_conv_out(in_size, k, stride, padding)
+        out_size = torch.Size([-1, out_features, *out_sizes])
+        return Operation(
+            nn.Conv2d(in_features, out_features, k, stride, padding=padding),
+            out_size
+        )
+    
+    def convolution_transpose_2d(
+        self, in_features: int, out_features: int, 
+        k: typing.Union[int, typing.Tuple[int, int]], 
+        stride: typing.Union[int, typing.Tuple[int, int]], 
+        in_size: torch.Size,
+        padding: typing.Union[int, typing.Tuple[int, int]]=0, 
+    ):
+        out_sizes = utils.calc_conv_transpose_out(in_size, k, stride, padding)
+        out_size = torch.Size([-1, out_features, *out_sizes])
+        return Operation(
+            nn.ConvTranspose2d(in_features, out_features, k, stride, padding=padding),
+            out_size
+        )
+
+    def maxpool_2d(
+        self, in_features: int, 
+        k: typing.Union[int, typing.Tuple[int, int]], 
+        stride: typing.Union[int, typing.Tuple[int, int]], 
+        in_size: torch.Size,
+        padding: typing.Union[int, typing.Tuple[int, int]]=0, 
+    ):
+        out_sizes = utils.calc_pool_out(in_size, k, stride, padding)
+        out_size = torch.Size([-1, in_features, *out_sizes])
+        return Operation(
+            nn.MaxPool2d(k, stride, padding=padding),
+            out_size
+        )
+
+    def maxunpool_2d(
+        self, in_features: int, 
+        k: typing.Union[int, typing.Tuple[int, int]], 
+        stride: typing.Union[int, typing.Tuple[int, int]], 
+        in_size: torch.Size,
+        padding: typing.Union[int, typing.Tuple[int, int]]=0, 
+    ):
+        out_sizes = utils.calc_unpool_out(in_size, k, stride, padding)
+        out_size = torch.Size([-1, in_features, *out_sizes])
+        return Operation(
+            nn.MaxUnpool2d(k, stride, padding=padding),
+            out_size
+        )
 
 
 class AutoencoderBuilder(object):
@@ -89,32 +149,47 @@ class AutoencoderBuilder(object):
 
     def linear(self, linear_factory: typing.Callable[[int, int], Operation], in_features: int, out_features: int) -> typing.Tuple[Operation, Operation]:
         return linear_factory(in_features, out_features), linear_factory(out_features, in_features) 
-    
-    def convolution_2d(self):
-        pass
 
-    def convolution_1d(self):
-        pass
+    def conv_2d(
+        self, conv_factory: typing.Callable, deconv_factory: typing.Callable, in_features: int, out_features: int, 
+        k: typing.Union[int, typing.Tuple[int, int]], 
+        stride: typing.Union[int, typing.Tuple[int, int]], 
+        in_size: torch.Size,
+        padding: typing.Union[int, typing.Tuple[int, int]]=0, 
+    ):
+        out_size = utils.to_int(utils.calc_conv_out(in_size, k, stride, padding))
+        recovered_in_size = utils.to_int(utils.calc_conv_transpose_out(out_size, k, stride, padding))
 
-    def max_pool_1d(self, kernel_size, stride, padding, in_size: torch.Size):
-        pass
-
-    def max_pool_2d(self, kernel_size: int, stride: int, padding: int, in_size: torch.Size):
-        # compute the out_size
+        if recovered_in_size != in_size:
+            raise ValueError("Cannot reconstruct with present parameters")
         
-        return self._base_builder.max_pool_2d(
-            kernel_size, stride, padding
-        ), Operation(
-            nn.MaxUnpool2d(kernel_size, stride, padding), 
-        )
-    
-    def scaler_prerpocessor(self, scaler_cls):
-        pass
+        return conv_factory(
+            in_features, out_features, k, stride, padding=padding, in_size=in_size
+        ), deconv_factory(in_features, out_features, k, stride, padding=padding, in_size=out_size)
 
-    def normalizer_preprocessor(self, normalizer_cls):
-        # 
-        pass
+    def pool_2d(
+        self, pool_factory: typing.Callable, unpool_factory: typing.Callable, 
+        k: typing.Union[int, typing.Tuple[int, int]], 
+        stride: typing.Union[int, typing.Tuple[int, int]], 
+        in_size: torch.Size,
+        padding: typing.Union[int, typing.Tuple[int, int]]=0, 
+    ):
+        out_size = utils.to_int(utils.calc_pool_out(in_size, k, stride, padding))
+        recovered_in_size = utils.to_int(utils.calc_unpool_out(out_size, k, stride, padding))
 
+        if recovered_in_size != in_size:
+            raise ValueError("Cannot reconstruct with present parameters")
+        
+        return pool_factory(
+            k, stride, padding=padding, in_size=in_size
+        ), unpool_factory(k, stride, padding=padding, in_size=out_size)
+
+
+    def processor(self, preprocessor_factory: typing.Callable, postprocessor_factory: typing.Callable, in_size: torch.Size):
+        preprocessor = preprocessor_factory(in_size)
+        postprocessor = postprocessor_factory(preprocessor.op, in_size)
+
+        return preprocessor(in_size), postprocessor(in_size)
 
 
 class ReductionType(Enum):
