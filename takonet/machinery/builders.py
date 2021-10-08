@@ -1,7 +1,6 @@
 from enum import Enum
 from os import stat
 
-from torch._C import T
 from torch.functional import norm
 from takonet.modules.activations import NullActivation, Scaler
 from torch import nn

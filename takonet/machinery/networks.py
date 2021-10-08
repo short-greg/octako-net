@@ -18,6 +18,7 @@ They are a collection of modules connected together in a graph.
 
 """
 
+
 @dataclasses.dataclass
 class ModRef(object):
     module: str
@@ -101,7 +102,7 @@ class Node(nn.Module):
 
     def __init__(
         self, name: str, 
-        labels: typing.List[str]=None,
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
         annotation: str=None
     ):
         super().__init__()
@@ -172,7 +173,7 @@ class OpNode(Node):
         self, name: str, operation: nn.Module, 
         inputs: typing.List[Port],
         out_size: typing.Union[torch.Size, typing.List[torch.Size]],
-        labels: typing.List[str]=None,
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
         annotation: str=None
     ):
         super().__init__(name, labels, annotation)
@@ -238,7 +239,8 @@ class OpNode(Node):
 class In(Node):
     """[Input node in a network.]"""
 
-    def __init__(self, name, sz: torch.Size, value_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
+    def __init__(
+        self, name, sz: torch.Size, value_type: typing.Type, default_value, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
         """[initializer]
 
         Args:
@@ -292,9 +294,8 @@ class In(Node):
         # TODO: Possibly check the value in by
         return by.get(self.name, self._default_value)
 
-
     @staticmethod
-    def from_tensor(name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.Set[str]=None, annotation: str=None):
+    def from_tensor(name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
         if default_value is None:
             sz2 = []
             for el in list(sz):
@@ -311,6 +312,63 @@ class In(Node):
         return In(
             name, torch.Size([]), default_type, default_value, labels, annotation
         )
+
+
+class Parameter(Node):
+    """[Input node in a network.]"""
+
+    def __init__(
+        self, name: str, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+        """[initializer]
+
+        Args:
+            name ([type]): [Name of the in node]
+            out_size (torch.Size): [The size of the in node]
+        """
+        super().__init__(name, labels=labels, annotation=annotation)
+        self._reset_func = reset_func
+        self._out_size = sz
+        self._value = self._reset_func(self._out_size)
+
+    def reset(self):
+        self._value = self._reset_func(self._out_size)
+
+    def to(self, device):
+        self._value = self._value.to(device)
+
+    @property
+    def ports(self) -> typing.Iterable[Port]:
+        return Port(ModRef(self.name), self._out_size),
+    
+    def forward(x):
+
+        return x
+
+    @property
+    def inputs(self) -> typing.List[Port]:
+        return []
+
+    @property
+    def input_nodes(self) -> typing.List[str]:
+        """
+        Returns:
+            typing.List[str]: Names of the nodes input into the node
+        """
+        return []
+
+    def clone(self):
+        return Parameter(
+            self.name, self._out_size, self._reset_func, self._labels,
+            self._annotation
+
+        )
+    
+    @property
+    def cache_names_used(self) -> typing.Set[str]:
+        return set([self.name])
+    
+    def probe(self, by: typing.Dict):
+        return by.get(self.name, self._value)
 
 
 class Network(nn.Module):
@@ -382,7 +440,7 @@ class Network(nn.Module):
 
     def add_op(
         self, name: str, op: Operation, in_: typing.Union[Port, typing.List[Port]], 
-        labels: typing.List[str]=None
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
     ) -> typing.List[Port]:
         """[summary]
 
@@ -647,7 +705,7 @@ class SubNetwork(object):
 
     def __init__(
         self, name: str, network: Network, 
-        labels: typing.List[str]=None,
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
         annotation: str=None
     ):
         super().__init__()
@@ -716,7 +774,7 @@ class InterfaceNode(Node):
         self, name: str, sub_network: SubNetwork, 
         outputs: typing.List[Port],
         inputs: typing.List[Link],
-        labels: typing.List[str]=None,
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
         annotation: str=None
     ):
         super().__init__(name, labels, annotation)
