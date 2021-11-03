@@ -2,10 +2,10 @@ from enum import Enum
 from os import stat
 
 from torch.functional import norm
-from takonet.modules.activations import NullActivation, Scaler
+from octako.modules.activations import NullActivation, Scaler
 from torch import nn
 import torch
-from takonet.modules import objectives
+from octako.modules import objectives
 from .networks import Operation
 import typing
 from . import utils

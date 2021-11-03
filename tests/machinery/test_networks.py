@@ -1,8 +1,8 @@
 import pytest
-from takonet.machinery import networks
+from octako.machinery import networks
 import torch.nn as nn
 import torch
-from takonet.machinery.networks import In, Link, ModRef, Network, NetworkBuilder, InterfaceNode, Node, NullNodeProcessor, Operation, OpNode, Port, SubNetwork, UpdateNodeName
+from octako.machinery.networks import In, Link, ModRef, Network, NetworkBuilder, InterfaceNode, Node, NullNodeProcessor, Operation, OpNode, Port, SubNetwork, UpdateNodeName
 
 
 class TestNode:

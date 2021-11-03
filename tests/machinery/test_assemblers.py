@@ -1,7 +1,7 @@
-from takonet.machinery import assemblers
+from octako.machinery import assemblers
 import torch.nn as nn
 import torch
-from takonet.machinery import builders
+from octako.machinery import builders
 
 
 class TestFeedForwardAssembler:

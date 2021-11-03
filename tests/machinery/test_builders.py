@@ -1,7 +1,7 @@
 import pytest
-from takonet.machinery import builders, networks
+from octako.machinery import builders, networks
 import torch
-from takonet.machinery.networks import In
+from octako.machinery.networks import In
 
 
 class TestFeedForwardBuilder:

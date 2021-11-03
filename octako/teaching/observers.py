@@ -1,4 +1,4 @@
-from takonet.teaching.dojos import Lecture, Observer, Course, ObserverInviter, IMessage
+from octako.teaching.dojos import Lecture, Observer, Course, ObserverInviter, IMessage
 import typing
 import tqdm
 

@@ -2,7 +2,7 @@ import dataclasses
 import typing
 from pandas.core import base
 
-from takonet.machinery import learners
+from octako.machinery import learners
 from abc import ABC, abstractmethod
 import pandas as pd
 from . import events
