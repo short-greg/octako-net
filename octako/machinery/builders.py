@@ -29,20 +29,23 @@ class FeedForwardBuilder(object):
     """
 
     def __init__(self):
-        self._activation: typing.Callable[[], Operation] = self.relu
-        self._normalizer: typing.Callable[[int], Operation] = self.batch_normalizer
-        self._dense: typing.Callable[[int, int], Operation] = self.linear
-        self._out_activation: typing.Callable[[], Operation] = self.sigmoid
+        # TODO: check if the stuff below is being used
+        pass
+        
+        # self._activation: typing.Callable[[], Operation] = self.relu
+        # self._normalizer: typing.Callable[[int], Operation] = self.batch_normalizer
+        # self._dense: typing.Callable[[int, int], Operation] = self.linear
+        # self._out_activation: typing.Callable[[], Operation] = self.sigmoid
 
-        self.ACTIVATION_MAP = dict(
-            sigmoid=self.sigmoid,
-            relu=self.relu,
-            tanh=self.tanh,
-            null=self.null
-        )
+        # self.ACTIVATION_MAP = dict(
+        #     sigmoid=self.sigmoid,
+        #     relu=self.relu,
+        #     tanh=self.tanh,
+        #     null=self.null
+        # )
 
-    def activation_type(self, activation_type: str):
-        return self.ACTIVATION_MAP[activation_type]
+    # def activation_type(self, activation_type: str):
+    #     return self.ACTIVATION_MAP[activation_type]
     
     def relu(self, in_size: torch.Size) -> Operation:
         return Operation(nn.ReLU(), in_size)

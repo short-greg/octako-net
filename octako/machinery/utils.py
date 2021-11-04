@@ -120,3 +120,7 @@ def calc_maxunpool_out(in_size, ks, strides, paddings):
 
 def to_int(size):
     return map(int, size)
+
+
+def coalesce(x, y):
+    return y if x is None else x

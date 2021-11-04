@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+
+from octako.machinery import utils
 from . import builders
 from .networks import In, Operation
 import typing
@@ -123,9 +125,10 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
             reset_defaults (bool, optional): Reset to default parameters if not None. Defaults to False.
         """
         super().reset(reset_defaults)
-        self._input_size = input_size or self._input_size
-        self._layer_sizes = layer_sizes or self._layer_sizes
-        self._out_size = out_size or self._out_size
+        
+        self._input_size = utils.coalesce(input_size, self._input_size)
+        self._layer_sizes = utils.coalesce(layer_sizes, self._layer_sizes)
+        self._out_size = utils.coalesce(out_size, self._out_size)
 
     def build(self) -> Network:
         """Build the network based on the parameters
@@ -135,7 +138,7 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
         """
 
         network = Network()
-        network_in, = network.add_input(
+        network_in, = network.add_node(
             In.from_tensor(self._input_name, torch.Size([-1, self._input_size]))
         )
         cur_in = network_in
