@@ -437,32 +437,6 @@ class Network(nn.Module):
         node = self._nodes.get(name)
         if t is None or isinstance(node, t):
             return node
-
-    def add_op(
-        self, name: str, op: Operation, in_: typing.Union[Port, typing.List[Port]], 
-        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
-    ) -> typing.List[Port]:
-        """[summary]
-
-        Args:
-            name (str): The name of the node
-            op (Operation): Operation for the node to perform
-            in_ (typing.Union[Port, typing.List[Port]]): The ports feeding into the node
-            labels (typing.List[str], optional): Labels for the node to be used for searching. Defaults to None. 
-
-        Raises:
-            KeyError: If the name for the node already exists in the network.
-
-        Returns:
-            typing.List[Port]: The ports feeding out of the node
-        """
-
-        if isinstance(in_, Port):
-            in_ = [in_]
-
-        # assert (is_input and not len(inputs) > 0) or (not is_input and len(inputs) > 0)
-        node = OpNode(name, op.op, in_, op.out_size, labels)
-        return self.add_node(node)
     
     def get_ports(self, names: typing.Union[str, typing.List[str]], flat=True) -> typing.List[Port]:
 
@@ -480,7 +454,13 @@ class Network(nn.Module):
 
         return ports
     
-    # TODO: Update the below
+    def nodes_by_label(self, labels: typing.Iterable[str]):
+
+        for node in self._nodes:
+            node: Node = node
+            
+            if len(set(node.labels).intersection(labels)) == len(labels):
+                yield node
     
     def _get_input_names_helper(self, node: Node, use_input: typing.List[bool]):
 
@@ -664,6 +644,10 @@ class Network(nn.Module):
 
         return self._nodes[key]
 
+    def __getitem__(self, name: str):
+
+        return self._nodes[name]
+
     def __iter__(self) -> typing.Tuple[str, Node]:
         """Iterate over all nodes
 
@@ -733,16 +717,6 @@ class SubNetwork(object):
             typing.List[str]: Names of the nodes input into the node
         """
         return []
-    
-    def get_interface(self, 
-        name: str,  outputs: typing.List[Port],
-        inputs: typing.List[Link], labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
-        annotation: str=None 
-    ):
-        """
-        Convenience method to get an interface, though tightly couples the subnet to the interface node
-        """
-        return InterfaceNode(name, self, outputs, inputs, labels, annotation)
     
     def clone(self):
         return SubNetwork(
@@ -857,3 +831,85 @@ class InterfaceNode(Node):
             by[self.name] = result
         
         return result
+
+
+class NetworkConstructor(object):
+    """
+    Convenience class for building networks
+
+    """
+
+    def __init__(self, network: Network):
+
+        self._network = network
+        self._subnets: typing.Dict[str, Network] = {}
+    
+    def add_subnets(self, **kwargs: typing.Dict[str, Network]): # name: str, network: Network):
+        
+        for name, network in kwargs.items():
+            if name in self._subnets:
+                raise ValueError(f"Subnet by name {name} already exists")
+        
+            self._subnets[name] = SubNetwork(name, network)
+    
+    @property
+    def net(self):
+        return self._network
+    
+    def sub(self, key: str):
+        return self._subnets[key]
+    
+    def __getitem__(self, name: str):
+        return self._network[name]
+
+    def add_op(
+        self, name: str, op: Operation, in_: typing.Union[Port, typing.List[Port]], 
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
+    ) -> typing.List[Port]:
+        """[summary]
+
+        Args:
+            name (str): The name of the node
+            op (Operation): Operation for the node to perform
+            in_ (typing.Union[Port, typing.List[Port]]): The ports feeding into the node
+            labels (typing.List[str], optional): Labels for the node to be used for searching. Defaults to None. 
+
+        Raises:
+            KeyError: If the name for the node already exists in the network.
+
+        Returns:
+            typing.List[Port]: The ports feeding out of the node
+        """
+
+        if isinstance(in_, Port):
+            in_ = [in_]
+
+        node = OpNode(name, op.op, in_, op.out_size, labels)
+        return self._network.add_node(node)
+
+    def add_subnet_interface(self, name: str, subnet_name: str, in_links: typing.List[Link], out_ports: typing.List[Port]):
+        subnet = self._subnets[subnet_name]
+        node = InterfaceNode(name, subnet, out_ports, in_links)
+        return self._network.add_node(node)
+    
+    def add_input(self, name, sz: torch.Size, value_type: typing.Type, default_value, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+        
+        node = In(name, sz, value_type, default_value, labels, annotation)
+        return self._network.add_node(node)
+
+    def add_parameter(
+        self, name: str, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], 
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None
+    ):
+        node = Parameter(name, sz, reset_func, labels, annotation)
+        return self._network.add_node(node)
+    
+    def set_default_interface(self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]):
+        self._network.set_default_interface(
+            ins, outs
+        )
+
+    @classmethod
+    def build_new(cls, inputs: typing.List[In]=None):
+
+        return NetworkConstructor(Network(inputs))
