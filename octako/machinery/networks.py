@@ -657,7 +657,7 @@ class Network(nn.Module):
             Node: a node in the network
         """
         for k, v in self._nodes.items():
-            return k, v
+            yield k, v
 
     def forward(self, *args, **kwargs) -> typing.List[torch.Tensor]:
         """The standard 'forward' method for the network.
