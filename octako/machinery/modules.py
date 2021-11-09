@@ -1,6 +1,7 @@
 import typing
 import torch
 import torch.nn as nn
+import functools
 
 
 class Lambda(nn.Module):
@@ -23,6 +24,17 @@ class View(nn.Module):
 
     def forward(self, x: torch.Tensor):
         return x.view(self._sz)
+
+
+class CompoundLoss(nn.Module):
+
+    def __init__(self, weights: list):
+        super().__init__()
+        self._weights = weights
+
+    def forward(self, xs: typing.List[torch.Tensor]):
+        weighted = [x * w for x, w in zip(xs, self._weights)]
+        return sum(weighted)
 
 
 class BatchFlatten(nn.Module):

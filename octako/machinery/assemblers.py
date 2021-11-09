@@ -7,6 +7,7 @@ import typing
 import torch
 import typing
 from .networks import In, Network
+from .modules import CompoundLoss, View, Concat
 from dataclasses import dataclass
 
 
@@ -186,8 +187,129 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
 # set_output_interface() <- set the interface in here
 # add_input
 
+class SimpleLossAssembler(IAssembler):
 
-class FeedForwardLossAssembler(IAssembler):
+    default_loss_name = 'loss'
+    default_target_name = 'target'
+    default_label = 'Loss'
+    default_input_name = 'input'
+
+    def __init__(self, input_size: torch.Size, target_size: torch.Size):
+
+        self._target_size = target_size
+        self.loss_name = self.default_loss_name
+        self.target_name = self.default_target_name
+        self.input_name = self.default_input_name
+        self.label: str = self.default_label
+        self._input_size = input_size
+    
+    def set_loss(self, loss: typing.Callable[[int, float], Operation]):
+        self._loss = loss
+        return self
+    
+    def build(self, base_network: BaseNetwork=None) -> Network:
+
+        if not base_network:
+            constructor = NetworkConstructor(Network())
+            t, = constructor.add_tensor_input(
+                self.target_name, self._target_size,
+                labels=[self.label]
+            )
+            in_, = constructor.add_tensor_input(
+                self.input_name, self._input_size,
+                labels=[self.label]
+            )
+        else:
+            constructor = base_network.constructor
+            in_, t = base_network.ports
+
+        constructor.add_op(
+            self.loss_name, self._loss(in_.size), [in_, t],
+            labels=[self.label]
+        )
+
+        return constructor.net
+
+
+class SimpleRegularizerAssembler(IAssembler):
+
+    default_loss_name = 'regularizer'
+    default_label = 'Regularizer'
+    default_input_name = 'input'
+
+    def __init__(self, input_size: torch.Size):
+
+        self.loss_name = self.default_loss_name
+        self.input_name = self.default_input_name
+        self.label: str = self.default_label
+        self._input_size = input_size
+    
+    def set_regularizer(self, loss: typing.Callable[[int, float], Operation]):
+        self._loss = loss
+        return self
+    
+    def build(self, base_network: BaseNetwork=None) -> Network:
+
+        if not base_network:
+            constructor = NetworkConstructor(Network())
+            in_, = constructor.add_tensor_input(
+                self.input_name, self._input_size,
+                labels=[self.label]
+            )
+        else:
+            constructor = base_network.constructor
+            in_, t = base_network.ports
+
+        constructor.add_op(
+            self.loss_name, self._loss(in_.size), [in_, t],
+            labels=[self.label]
+        )
+
+        return constructor.net
+
+
+class ScalarSumAssembler(IAssembler):
+
+    default_label = 'Loss Sum'
+    default_input_name_base = 'input'
+    sum_name = 'sum'
+
+    def __init__(
+        self, input_count: int
+    ):
+        self._input_count = input_count
+        self.input_name = self.default_input_name_base
+        self.label: str = self.default_label
+        self._weights = [1.0] * input_count
+    
+    def set_weight(self, index: int, weight: float):
+        self._weights[index] = weight
+        return self
+    
+    def build(self, base_network: BaseNetwork=None) -> Network:
+
+        if not base_network:
+            ports = []
+            constructor = NetworkConstructor(Network())
+            for i in self._input_count:
+                in_, = constructor.add_tensor_input(
+                    self.input_name + '_' + i, torch.Size([]),
+                    labels=[self.label]
+                )
+                ports.append(in_)
+        else:
+            constructor = base_network.constructor
+            ports = base_network.ports
+
+        constructor.add_op(
+            self.sum_name, CompoundLoss(self._weights), ports,
+            labels=[self.label]
+        )
+
+        return constructor.net
+
+
+class CompoundFeedForwardLossAssembler(IAssembler):
 
     default_loss_name = 'loss'
     default_validation_name = 'validation'
@@ -301,7 +423,7 @@ class FeedForwardLossAssembler(IAssembler):
 
         network = self._feedforward_assembler.build()
 
-        t, = network.add_input(
+        t, = network.add_node(
             In.from_tensor(self._target_name, torch.Size([-1, self._target_size]))
         )
         t, = network.add_node('process target', self._target_processor(t.size), t)
