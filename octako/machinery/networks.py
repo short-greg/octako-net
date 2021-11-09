@@ -639,12 +639,12 @@ class Network(nn.Module):
             result[output] = cur_result
         
         return result
-            
+    
+    # TODO: Depracate
     def get_node(self, key) -> Node:
-
         return self._nodes[key]
 
-    def __getitem__(self, name: str):
+    def __getitem__(self, name: str) -> Node:
 
         return self._nodes[name]
 
@@ -859,7 +859,7 @@ class NetworkConstructor(object):
     def sub(self, key: str):
         return self._subnets[key]
     
-    def __getitem__(self, name: str):
+    def __getitem__(self, name: str) -> Node:
         return self._network[name]
 
     def add_op(

@@ -102,3 +102,19 @@ class Selector(nn.Module):
         for i in self._to_select:
             result.append(inputs[i])
         return result
+
+
+class Concat(nn.Module):
+
+    def __init__(self, dim: int=1):
+        super().__init__()
+        self._dim = dim
+    
+    def forward(self, *x: torch.Tensor):
+        return torch.cat(x, dim=self._dim)
+
+
+class Stack(nn.Module):
+    
+    def forward(self, *x: torch.Tensor):
+        return torch.stack(x)
