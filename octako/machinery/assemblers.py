@@ -41,7 +41,7 @@ class BaseNetwork(object):
     """
 
     network: Network
-    connections: typing.Union[Port, typing.List[Port]]
+    ports: typing.List[Port]
 
 
 class FeedForwardAssembler(IAssembler):
