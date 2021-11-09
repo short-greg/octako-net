@@ -294,8 +294,8 @@ class In(Node):
         # TODO: Possibly check the value in by
         return by.get(self.name, self._default_value)
 
-    @staticmethod
-    def from_tensor(name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+    @classmethod
+    def from_tensor(cls, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
         if default_value is None:
             sz2 = []
             for el in list(sz):
@@ -304,12 +304,12 @@ class In(Node):
                 else:
                     sz2.append(el)
             default_value = torch.zeros(*sz2)
-        return In(name, sz, torch.Tensor, default_value, labels, annotation)
+        return cls(name, sz, torch.Tensor, default_value, labels, annotation)
     
-    @staticmethod
-    def from_scalar(name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
+    @classmethod
+    def from_scalar(cls, name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
 
-        return In(
+        return cls(
             name, torch.Size([]), default_type, default_value, labels, annotation
         )
 
@@ -896,6 +896,23 @@ class NetworkConstructor(object):
         
         node = In(name, sz, value_type, default_value, labels, annotation)
         return self._network.add_node(node)
+
+    def add_tensor_input(self, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+        
+        node = In.from_tensor(name, sz, default_value, labels, annotation)
+        return self._network.add_node(node)
+
+    def add_scalar_input(self, name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
+
+        node = In.from_scalar(name, default_type, default_value, labels, annotation)
+        return self._network.add_node(node)
+
+    @staticmethod
+    def from_scalar(name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
+
+        return In(
+            name, torch.Size([]), default_type, default_value, labels, annotation
+        )
 
     def add_parameter(
         self, name: str, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], 
