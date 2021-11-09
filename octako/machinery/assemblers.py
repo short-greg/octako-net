@@ -2,11 +2,12 @@ from abc import ABC, abstractmethod
 
 from octako.machinery import utils
 from . import builders
-from .networks import In, Operation
+from .networks import In, Operation, Port
 import typing
 import torch
 import typing
 from .networks import In, Network
+from dataclasses import dataclass
 
 
 class IAssembler(ABC):
@@ -31,6 +32,16 @@ class IAssembler(ABC):
             reset_defaults (bool, optional): Whether to reset parameters to default values. Defaults to False.
         """
         raise NotImplementedError
+
+
+@dataclass
+class BaseNetwork(object):
+    """
+    Base network to build off of. Can be used in the build() method
+    """
+
+    network: Network
+    connections: typing.Union[Port, typing.List[Port]]
 
 
 class FeedForwardAssembler(IAssembler):
