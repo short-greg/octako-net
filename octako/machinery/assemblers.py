@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 from octako.machinery import utils
 from . import builders
-from .networks import In, Operation, Port
+from .networks import In, NetworkConstructor, Operation, Port
 import typing
 import torch
 import typing
@@ -40,7 +40,7 @@ class BaseNetwork(object):
     Base network to build off of. Can be used in the build() method
     """
 
-    network: Network
+    constructor: NetworkConstructor
     ports: typing.List[Port]
 
 
