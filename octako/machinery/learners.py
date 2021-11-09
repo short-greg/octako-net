@@ -4,7 +4,7 @@ import torch
 from . import networks
 import torch.optim
 import torch.nn
-from .assemblers import FeedForwardAssembler, FeedForwardLossAssembler
+from .assemblers import FeedForwardAssembler, CompoundFeedForwardLossAssembler
 from abc import ABC, abstractmethod
 
 """Classes related to learning machines
@@ -147,9 +147,9 @@ class BinaryClassifier(Learner):
 
         self._network_assembler = network_assembler
         loss_builder: LossBuilder = LossBuilder()
-        self._loss_assembeler: FeedForwardLossAssembler = FeedForwardLossAssembler()
+        # self._loss_assembeler: CompoundFeedForwardLossAssembler = CompoundFeedForwardLossAssembler()
 
-        self._loss_assembler = FeedForwardLossAssembler(
+        self._loss_assembler = CompoundFeedForwardLossAssembler(
             1, loss_builder, self._network_assembler
         )
         self._loss_assembler.set_loss(loss_builder.bce)
@@ -221,7 +221,7 @@ class Multiclass(Learner):
         loss_builder: LossBuilder = LossBuilder()
         self._loss_builder = loss_builder
 
-        self._loss_assembler = FeedForwardLossAssembler(
+        self._loss_assembler = CompoundFeedForwardLossAssembler(
             1, self._loss_builder, self._network_assembler
         )
         self._loss_assembler.set_loss(loss_builder.cross_entropy)
@@ -294,7 +294,7 @@ class Regressor(Learner):
         self._loss_builder = loss_builder
         self._n_out = n_out
 
-        self._loss_assembler = FeedForwardLossAssembler(
+        self._loss_assembler = CompoundFeedForwardLossAssembler(
             n_out, self._loss_builder, self._network_assembler
         )
 
