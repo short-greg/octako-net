@@ -645,8 +645,10 @@ class Network(nn.Module):
         return self._nodes[key]
 
     def __getitem__(self, name: str) -> Node:
-
         return self._nodes[name]
+    
+    def __contains__(self, name: str) -> bool:
+        return name in self._nodes
 
     def __iter__(self) -> typing.Tuple[str, Node]:
         """Iterate over all nodes
