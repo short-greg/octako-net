@@ -907,13 +907,6 @@ class NetworkConstructor(object):
         node = In.from_scalar(name, default_type, default_value, labels, annotation)
         return self._network.add_node(node)
 
-    @staticmethod
-    def from_scalar(name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
-
-        return In(
-            name, torch.Size([]), default_type, default_value, labels, annotation
-        )
-
     def add_parameter(
         self, name: str, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], 
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None
