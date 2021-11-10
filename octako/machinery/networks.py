@@ -6,7 +6,7 @@ import copy
 import dataclasses
 import itertools
 from abc import ABC, abstractmethod
-from functools import singledispatch
+from functools import singledispatch, singledispatchmethod
 
 
 # TODO: Rewrite tests and get everything working
@@ -154,6 +154,40 @@ class Node(nn.Module):
 
     def probe(self, by: typing.Dict, to_cache: True):
         raise NotImplementedError
+
+
+class NodeSet(object):
+
+    def __init__(self, nodes: typing.List[Node]):
+
+        self._nodes = nodes
+        self._node_dict: typing.Dict[str, Node] = {node.name: node for node in nodes}
+
+    @property
+    def ports(self):
+
+        result = []
+        for node in self._nodes:
+            result.extend(node.ports)
+        return result
+
+    @singledispatchmethod
+    def __getitem__(self, key: typing.Union[str, int, list]):
+        raise TypeError("Key passed in must be of type string, int or list")
+
+    @__getitem__.register
+    def _(self, key: str):
+        return self._node_dict[key]
+    
+    @__getitem__.register
+    def _(self, key: list):
+        return NodeSet(
+            [self[k] for k in key]
+        )
+
+    @__getitem__.register
+    def _(self, key: int):
+        return self._nodes[key]
 
 
 class NodeVisitor(object):
@@ -644,9 +678,18 @@ class Network(nn.Module):
     def get_node(self, key) -> Node:
         return self._nodes[key]
 
-    def __getitem__(self, name: str) -> Node:
+    @singledispatchmethod
+    def __getitem__(self, name):
         return self._nodes[name]
     
+    @__getitem__.register
+    def _(self, name: list):
+        return NodeSet([self._nodes[val] for val in name])
+
+    @__getitem__.register
+    def _(self, name: str):
+        return self._nodes[name]
+
     def __contains__(self, name: str) -> bool:
         return name in self._nodes
 
@@ -861,7 +904,7 @@ class NetworkConstructor(object):
     def sub(self, key: str):
         return self._subnets[key]
     
-    def __getitem__(self, name: str) -> Node:
+    def __getitem__(self, name: typing.Union[str, typing.List]) -> Node:
         return self._network[name]
 
     def add_op(

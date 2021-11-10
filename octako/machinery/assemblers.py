@@ -44,6 +44,11 @@ class BaseNetwork(object):
     constructor: NetworkConstructor
     ports: typing.List[Port]
 
+    def __post_init__(self):
+
+        if isinstance(self.ports, Port):
+            self.ports = [self.ports]
+
 
 class FeedForwardAssembler(IAssembler):
     """Assembler for building a feedforward network
@@ -196,12 +201,14 @@ class SimpleLossAssembler(IAssembler):
 
     def __init__(self, input_size: torch.Size, target_size: torch.Size):
 
+        self._builder = builders.LossBuilder()
         self._target_size = target_size
         self.loss_name = self.default_loss_name
         self.target_name = self.default_target_name
         self.input_name = self.default_input_name
         self.label: str = self.default_label
         self._input_size = input_size
+        self._loss = self._builder.mse
     
     def reset(self, input_size: torch.Size=None, target_size: torch.Size=None):
 
@@ -245,10 +252,12 @@ class SimpleRegularizerAssembler(IAssembler):
 
     def __init__(self, input_size: torch.Size):
 
+        self._builder = builders.LossBuilder()
         self.loss_name = self.default_loss_name
         self.input_name = self.default_input_name
         self.label: str = self.default_label
         self._input_size = input_size
+        self._loss = self._builder.l2_reg
     
     def set_regularizer(self, loss: typing.Callable[[int, float], Operation]):
         self._loss = loss
