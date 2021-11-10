@@ -203,6 +203,12 @@ class SimpleLossAssembler(IAssembler):
         self.label: str = self.default_label
         self._input_size = input_size
     
+    def reset(self, input_size: torch.Size=None, target_size: torch.Size=None):
+
+        # TODO: reset the defaults
+        self._input_size = utils.coalesce(input_size, self._input_size)
+        self._target_size = utils.coalesce(target_size, self._target_size)
+
     def set_loss(self, loss: typing.Callable[[int, float], Operation]):
         self._loss = loss
         return self
@@ -248,6 +254,14 @@ class SimpleRegularizerAssembler(IAssembler):
         self._loss = loss
         return self
     
+    def reset(self, input_size: torch.Size=None, reset_default: bool=False):
+
+        if reset_default:
+            self.input_name = self.default_input_name
+            self.loss_name = self.default_loss_name
+            self.label = self.default_label
+        self._input_size = utils.coalesce(input_size, self._input_size)
+    
     def build(self, base_network: BaseNetwork=None) -> Network:
 
         if not base_network:
@@ -286,6 +300,14 @@ class ScalarSumAssembler(IAssembler):
         self._weights[index] = weight
         return self
     
+    def reset(self, input_count: int=None, reset_default: bool=False):
+
+        if reset_default:
+            self.input_name = self.default_input_name_base
+            self.label = self.default_label
+        self._input_count = utils.coalesce(input_count, self._input_count)
+        self._weights = [1.0] * input_count
+
     def build(self, base_network: BaseNetwork=None) -> Network:
 
         if not base_network:
