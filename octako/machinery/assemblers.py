@@ -185,21 +185,16 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
         return network
 
 
-# TODO:
-# 1) see if any updates needed for loss builder
-# 2) add in add_input?
-# network([In()]) <- can "add inputs here"
-# set_output_interface() <- set the interface in here
-# add_input
-
 class SimpleLossAssembler(IAssembler):
 
     default_loss_name = 'loss'
     default_target_name = 'target'
     default_label = 'Loss'
     default_input_name = 'input'
+    DEFAULT_INPUT_SIZE = torch.Size([1,1])
+    DEFAULT_TARGET_SIZE = torch.Size([1,1])
 
-    def __init__(self, input_size: torch.Size, target_size: torch.Size):
+    def __init__(self, input_size: torch.Size=DEFAULT_INPUT_SIZE, target_size: torch.Size=DEFAULT_TARGET_SIZE):
 
         self._builder = builders.LossBuilder()
         self._target_size = target_size
@@ -208,13 +203,29 @@ class SimpleLossAssembler(IAssembler):
         self.input_name = self.default_input_name
         self.label: str = self.default_label
         self._input_size = input_size
-        self._loss = self._builder.mse
+        self.set_loss(self._builder.mse)
     
     def reset(self, input_size: torch.Size=None, target_size: torch.Size=None):
 
         # TODO: reset the defaults
         self._input_size = utils.coalesce(input_size, self._input_size)
         self._target_size = utils.coalesce(target_size, self._target_size)
+    
+    @property
+    def input_size(self):
+        return self._input_size
+
+    @input_size.setter
+    def input_size(self, input_size: torch.Size):
+        self._input_size = input_size
+
+    @property
+    def target_size(self):
+        return self._target_size
+
+    @input_size.setter
+    def target_size(self, target_size: torch.Size):
+        self._target_size = target_size
 
     def set_loss(self, loss: typing.Callable[[int, float], Operation]):
         self._loss = loss
@@ -250,7 +261,9 @@ class SimpleRegularizerAssembler(IAssembler):
     default_label = 'Regularizer'
     default_input_name = 'input'
 
-    def __init__(self, input_size: torch.Size):
+    DEFAULT_INPUT_SIZE = torch.Size([1,1])
+
+    def __init__(self, input_size: torch.Size=DEFAULT_INPUT_SIZE):
 
         self._builder = builders.LossBuilder()
         self.loss_name = self.default_loss_name
@@ -259,10 +272,18 @@ class SimpleRegularizerAssembler(IAssembler):
         self._input_size = input_size
         self._loss = self._builder.l2_reg
     
-    def set_regularizer(self, loss: typing.Callable[[int, float], Operation]):
-        self._loss = loss
+    def set_regularizer(self, regularizer: typing.Callable[[int, float], Operation]):
+        self._regularizer = regularizer
         return self
     
+    @property
+    def input_size(self):
+        return self._input_size
+
+    @input_size.setter
+    def input_size(self, input_size: torch.Size):
+        self._input_size = input_size
+
     def reset(self, input_size: torch.Size=None, reset_default: bool=False):
 
         if reset_default:
