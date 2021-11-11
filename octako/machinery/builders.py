@@ -1,7 +1,10 @@
 from enum import Enum
+import functools
+import itertools
 from os import stat
 
 from torch.functional import norm
+from octako.machinery import modules
 from octako.modules.activations import NullActivation, Scaler
 from torch import nn
 import torch
@@ -129,7 +132,24 @@ class FeedForwardBuilder(object):
             nn.MaxUnpool2d(k, stride, padding=padding),
             out_size
         )
+    
+    def batch_view(self, *x: int):
+        
+        return Operation(
+            modules.View(torch.Size(x), keepbatch=True), torch.Size([-1, *x])
+        )
 
+    def flatten(self):
+        
+        return Operation(
+            modules.Flatten(keepbatch=False), torch.Size([-1])
+        )
+
+    def batch_flatten(self, sz: torch.Size):
+        
+        return Operation(
+            modules.Flatten(keepbatch=True), torch.Size([-1, itertools.product(sz[1:])])
+        )
 
 class AutoencoderBuilder(object):
     """

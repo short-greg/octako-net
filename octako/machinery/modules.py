@@ -37,10 +37,17 @@ class CompoundLoss(nn.Module):
         return sum(weighted)
 
 
-class BatchFlatten(nn.Module):
+class Flatten(nn.Module):
+
+    def __init__(self, keepbatch: bool=False):
+        super().__init__()
+        self._keepbatch = keepbatch
 
     def forward(self, x: torch.Tensor):
-        return x.view(x.size(0), -1)
+        if self._keepbatch:
+            return x.view(x.size(0), -1)
+        else:
+            return x.view(-1)
 
 
 class ListAdapter(nn.Module):
