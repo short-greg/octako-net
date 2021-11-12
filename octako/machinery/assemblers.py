@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 
+from torch._C import contiguous_format
+
 from octako.machinery import utils
 from . import builders
 from .networks import In, NetworkConstructor, Operation, Port
@@ -153,36 +155,39 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
         Returns:
             Network:
         """
-
-        network = Network()
-        network_in, = network.add_node(
-            In.from_tensor(self._input_name, torch.Size([-1, self._input_size]))
+        constructor = NetworkConstructor(Network())
+        in_ = constructor.add_tensor_input(
+            self._input_name, torch.Size([-1, self._input_size])
         )
-        cur_in = network_in
+        base_network = self.append(BaseNetwork(constructor.net, in_))
+        constructor.net.set_default_interface(
+            in_, base_network.ports
+        )
+        return constructor.net
+
+    def append(self, base_network: BaseNetwork) -> BaseNetwork:
+
+        constructor = base_network.constructor
+        cur_in, = base_network.ports
         for i, layer_size in enumerate(self._layer_sizes):
 
-            cur_in, = network.add_node(
+            cur_in, = constructor.add_op(
                 f"{self._dense_name}_{i}", self._dense(cur_in.size[1], layer_size),
                 cur_in
             )
 
-            cur_in, = network.add_node(
+            cur_in, = constructor.add_op(
                 f"{self._activation_name}_{i}", self._activation(cur_in.size), cur_in,
             )
-        cur_in, = network.add_node(
+        cur_in, = constructor.add_op(
             f'{self._dense_name}_out', self._dense(cur_in.size[1], self._out_size), cur_in
         )
 
-        cur_in, = network.add_node(
+        cur_in = constructor.add_op(
             self._output_name, self._out_activation(cur_in.size), cur_in
         )
-
-        network.set_default_interface(
-            [network_in], [cur_in]
-        )
-        # network.set_outputs([cur_in])
         
-        return network
+        return BaseNetwork(constructor, cur_in)
 
 
 class SimpleLossAssembler(IAssembler):
@@ -205,11 +210,16 @@ class SimpleLossAssembler(IAssembler):
         self._input_size = input_size
         self.set_loss(self._builder.mse)
     
-    def reset(self, input_size: torch.Size=None, target_size: torch.Size=None):
+    def reset(self, input_size: torch.Size=None, target_size: torch.Size=None, reset_defaults: bool=False):
 
-        # TODO: reset the defaults
         self._input_size = utils.coalesce(input_size, self._input_size)
         self._target_size = utils.coalesce(target_size, self._target_size)
+
+        if reset_defaults:
+            self.label = self.default_label
+            self.input_name = self.default_input_name
+            self.target_name = self.default_target_name
+            self.loss_name = self.default_loss_name
     
     @property
     def input_size(self):
@@ -231,28 +241,30 @@ class SimpleLossAssembler(IAssembler):
         self._loss = loss
         return self
     
-    def build(self, base_network: BaseNetwork=None) -> Network:
+    def build(self) -> Network:
+        constructor = NetworkConstructor(Network())
+        t, = constructor.add_tensor_input(
+            self.target_name, self._target_size,
+            labels=[self.label]
+        )
+        in_, = constructor.add_tensor_input(
+            self.input_name, self._input_size,
+            labels=[self.label]
+        )
+        base_network = self.append(BaseNetwork(constructor, [in_, t]))
+        constructor.net.set_default_interface([in_, t], base_network.ports)
 
-        if not base_network:
-            constructor = NetworkConstructor(Network())
-            t, = constructor.add_tensor_input(
-                self.target_name, self._target_size,
-                labels=[self.label]
-            )
-            in_, = constructor.add_tensor_input(
-                self.input_name, self._input_size,
-                labels=[self.label]
-            )
-        else:
-            constructor = base_network.constructor
-            in_, t = base_network.ports
+    def append(self, base_network: BaseNetwork) -> BaseNetwork:
 
-        constructor.add_op(
+        constructor = base_network.constructor
+        in_, t = base_network.ports
+
+        out = constructor.add_op(
             self.loss_name, self._loss(in_.size), [in_, t],
             labels=[self.label]
         )
 
-        return constructor.net
+        return BaseNetwork(constructor, out)
 
 
 class SimpleRegularizerAssembler(IAssembler):
@@ -292,24 +304,26 @@ class SimpleRegularizerAssembler(IAssembler):
             self.label = self.default_label
         self._input_size = utils.coalesce(input_size, self._input_size)
     
-    def build(self, base_network: BaseNetwork=None) -> Network:
+    def build(self) -> Network:
+        constructor = NetworkConstructor(Network())
+        in_ = constructor.add_tensor_input(
+            self.input_name, self._input_size,
+            labels=[self.label]
+        )
+        network, out_ = self.append(BaseNetwork(constructor, in_))
+        network.set_default_interface(in_, out_)
+        return network
 
-        if not base_network:
-            constructor = NetworkConstructor(Network())
-            in_, = constructor.add_tensor_input(
-                self.input_name, self._input_size,
-                labels=[self.label]
-            )
-        else:
-            constructor = base_network.constructor
-            in_, t = base_network.ports
+    def append(self, base_network: BaseNetwork) -> typing.Tuple[Network, Port]:
 
-        constructor.add_op(
+        constructor = base_network.constructor
+        in_, t = base_network.ports
+    
+        out = constructor.add_op(
             self.loss_name, self._loss(in_.size), [in_, t],
             labels=[self.label]
         )
-
-        return constructor.net
+        return constructor.net, out
 
 
 class ScalarSumAssembler(IAssembler):
@@ -338,28 +352,34 @@ class ScalarSumAssembler(IAssembler):
         self._input_count = utils.coalesce(input_count, self._input_count)
         self._weights = [1.0] * input_count
 
-    def build(self, base_network: BaseNetwork=None) -> Network:
+    def build(self) -> Network:
+        constructor = NetworkConstructor(Network())
+        ports = []
+        for i in self._input_count:
+            in_, = constructor.add_tensor_input(
+                self.input_name + '_' + i, torch.Size([]),
+                labels=[self.label]
+            )
+            ports.append(in_)
+        base_network = self.append(BaseNetwork(constructor, in_))
+        constructor.net.set_default_interface(in_, base_network.ports)
+        return constructor.net
 
-        if not base_network:
-            ports = []
-            constructor = NetworkConstructor(Network())
-            for i in self._input_count:
-                in_, = constructor.add_tensor_input(
-                    self.input_name + '_' + i, torch.Size([]),
-                    labels=[self.label]
-                )
-                ports.append(in_)
-        else:
-            constructor = base_network.constructor
-            ports = base_network.ports
+    def append(self, base_network: BaseNetwork) -> BaseNetwork:
 
-        constructor.add_op(
+        constructor = base_network.constructor
+        ports = base_network.ports
+
+        out = constructor.add_op(
             self.sum_name, CompoundLoss(self._weights), ports,
             labels=[self.label]
         )
 
-        return constructor.net
+        return BaseNetwork(constructor, out)
 
+
+# TODO: Depracate - Doesn't build networks as I
+# have designed currently
 
 class CompoundFeedForwardLossAssembler(IAssembler):
 
@@ -472,15 +492,24 @@ class CompoundFeedForwardLossAssembler(IAssembler):
         Returns:
             Network:
         """
+        pass
 
-        network = self._feedforward_assembler.build()
+        # network.set_default_interface(
+        #     network[self._input_name],
+        #     [loss, validation]
+        # )
+
+    def append(self, base_network: BaseNetwork) -> BaseNetwork:
+
+        constructor = base_network.constructor
+
+        network, (y,) = self._feedforward_assembler.append(base_network)
 
         t, = network.add_node(
             In.from_tensor(self._target_name, torch.Size([-1, self._target_size]))
         )
         t, = network.add_node('process target', self._target_processor(t.size), t)
-        y, = network.get_ports(self._output_name)
-
+        
         loss, = network.add_node(
             self._loss_name, self._loss(y.size), [y, t]
         )
@@ -489,9 +518,4 @@ class CompoundFeedForwardLossAssembler(IAssembler):
             self._validation_name, self._validator(y.size), [y, t]
         )
 
-        network.set_default_interface(
-            network.get_ports(self._input_name),
-            [loss, validation]
-        )
-
-        return network
+        return BaseNetwork(constructor, [loss, validation])

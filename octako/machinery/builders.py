@@ -151,6 +151,7 @@ class FeedForwardBuilder(object):
             modules.Flatten(keepbatch=True), torch.Size([-1, itertools.product(sz[1:])])
         )
 
+
 class AutoencoderBuilder(object):
     """
 

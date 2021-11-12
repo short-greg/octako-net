@@ -18,11 +18,14 @@ class Lambda(nn.Module):
 
 class View(nn.Module):
 
-    def __init__(self, sz: torch.Size):
+    def __init__(self, sz: torch.Size, keepbatch=False):
         super().__init__()
         self._sz = sz
+        self._keepbatch = keepbatch
 
     def forward(self, x: torch.Tensor):
+        if self._keepbatch:
+            return x.view(x.size(0), *self._sz)
         return x.view(self._sz)
 
 

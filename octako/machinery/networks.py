@@ -907,6 +907,9 @@ class NetworkConstructor(object):
     def __getitem__(self, name: typing.Union[str, typing.List]) -> Node:
         return self._network[name]
 
+    def add_node(self, node: Node):
+        self._network.add_node(node)
+
     def add_op(
         self, name: str, op: Operation, in_: typing.Union[Port, typing.List[Port]], 
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
