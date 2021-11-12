@@ -151,6 +151,30 @@ class FeedForwardBuilder(object):
             modules.Flatten(keepbatch=True), torch.Size([-1, itertools.product(sz[1:])])
         )
 
+    def max(self, in_sz: torch.Size, dim: int):
+        
+        sz = list(in_sz)
+        out_size = sz[:dim] + sz[dim+1:]
+        return Operation(
+            modules.Lambda(lambda x: torch.max(x, dim=dim)[0]), torch.Size([out_size])
+        )
+
+    def min(self, in_sz: torch.Size, dim: int):
+        
+        sz = list(in_sz)
+        out_size = sz[:dim] + sz[dim+1:]
+        return Operation(
+            modules.Lambda(lambda x: torch.min(x, dim=dim)[0]), torch.Size([out_size])
+        )
+
+    def mean(self, in_sz: torch.Size, dim: int):
+        
+        sz = list(in_sz)
+        out_size = sz[:dim] + sz[dim+1:]
+        return Operation(
+            modules.Lambda(lambda x: torch.mean(x, dim=dim)), torch.Size([out_size])
+        )
+
 
 class AutoencoderBuilder(object):
     """
