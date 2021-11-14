@@ -192,37 +192,21 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
         return BaseNetwork(constructor, cur_in)
 
 
-class SimpleLossAssembler(IAssembler):
-
-    default_loss_name = 'loss'
-    default_target_name = 'target'
-    default_label = 'Loss'
+class ObjectiveAssembler(IAssembler):
+    """Assembler for building a feedforward network
+    """
+    default_label = 'Objective'
+    default_objective_name = 'objective'
     default_input_name = 'input'
     DEFAULT_INPUT_SIZE = torch.Size([1,1])
-    DEFAULT_TARGET_SIZE = torch.Size([1,1])
 
-    def __init__(self, input_size: torch.Size=DEFAULT_INPUT_SIZE, target_size: torch.Size=DEFAULT_TARGET_SIZE):
+    def __init__(self, input_size: torch.Size=DEFAULT_INPUT_SIZE):
 
-        self.BUILDER = builders.LossBuilder()
-        self._target_size = target_size
-        self.loss_name = self.default_loss_name
-        self.target_name = self.default_target_name
+        self.label = self.default_label
+        self.objective_name = self.default_objective_name
         self.input_name = self.default_input_name
-        self.label: str = self.default_label
         self._input_size = input_size
-        self.set_loss(self.BUILDER.mse)
-    
-    def reset(self, input_size: torch.Size=None, target_size: torch.Size=None, reset_defaults: bool=False):
 
-        self._input_size = utils.coalesce(input_size, self._input_size)
-        self._target_size = utils.coalesce(target_size, self._target_size)
-
-        if reset_defaults:
-            self.label = self.default_label
-            self.input_name = self.default_input_name
-            self.target_name = self.default_target_name
-            self.loss_name = self.default_loss_name
-    
     @property
     def input_size(self):
         return self._input_size
@@ -231,16 +215,57 @@ class SimpleLossAssembler(IAssembler):
     def input_size(self, input_size: torch.Size):
         self._input_size = input_size
 
+    def set_input_name(self, name: str):
+        """Set input layer name of the network
+        """
+        self._input_name = name
+        return self
+
+    def set_output_name(self, name: str):
+        """Set output layer name of the network
+        """
+        self._output_name = name
+        return self
+
+    def reset(self,input_size: torch.Size=None,  reset_defaults=False):
+        self._input_size = utils.coalesce(input_size, self._input_size)
+        if reset_defaults:
+            self.label = self.default_label
+            self._objective_name = self.default_objective_name
+            self._input_name = self.default_input_name
+
+
+class TargetObjectiveAssembler(ObjectiveAssembler):
+
+    default_target_name = 'target'
+    DEFAULT_TARGET_SIZE = torch.Size([1,1])
+
+    def __init__(self, input_size: torch.Size=ObjectiveAssembler.DEFAULT_INPUT_SIZE, target_size: torch.Size=DEFAULT_TARGET_SIZE):
+
+        super().__init__(input_size)
+        self.BUILDER = builders.LossBuilder()
+        self._target_size = target_size
+        self.target_name = self.default_target_name
+        self.set_objective(self.BUILDER.mse)
+    
+    def reset(self, input_size: torch.Size=None, target_size: torch.Size=None, reset_defaults: bool=False):
+
+        super().reset(input_size)
+        self._target_size = utils.coalesce(target_size, self._target_size)
+
+        if reset_defaults:
+            self.target_name = self.default_target_name
+
     @property
     def target_size(self):
         return self._target_size
 
-    @input_size.setter
+    @target_size.setter
     def target_size(self, target_size: torch.Size):
         self._target_size = target_size
 
-    def set_loss(self, loss: typing.Callable[[int, float], Operation], **kwargs):
-        self._loss = partial(loss, **kwargs)
+    def set_objective(self, objective: typing.Callable[[int, float], Operation], **kwargs):
+        self._objective = partial(objective, **kwargs)
         return self
     
     def build(self) -> Network:
@@ -262,50 +287,25 @@ class SimpleLossAssembler(IAssembler):
         in_, t = base_network.ports
 
         out = constructor.add_op(
-            self.loss_name, self._loss(in_.size), [in_, t],
+            self.objective_name, self._loss(in_.size), [in_, t],
             labels=[self.label]
         )
 
         return BaseNetwork(constructor, out)
 
 
-class SimpleRegularizerAssembler(IAssembler):
+class RegularizerObjectiveAssembler(ObjectiveAssembler):
+    
+    def __init__(self, input_size: torch.Size=ObjectiveAssembler.DEFAULT_INPUT_SIZE):
 
-    default_loss_name = 'regularizer'
-    default_label = 'Regularizer'
-    default_input_name = 'input'
-
-    DEFAULT_INPUT_SIZE = torch.Size([1,1])
-
-    def __init__(self, input_size: torch.Size=DEFAULT_INPUT_SIZE):
-
+        super().__init__(input_size)
         self.BUILDER = builders.LossBuilder()
-        self.loss_name = self.default_loss_name
-        self.input_name = self.default_input_name
-        self.label: str = self.default_label
-        self._input_size = input_size
-        self._loss = self.BUILDER.l2_reg
+        self.set_objective(self.BUILDER.l2_reg)
 
-    def set_regularizer(self, regularizer: typing.Callable[[int, float], Operation], **kwargs):
+    def set_objective(self, regularizer: typing.Callable[[int, float], Operation], **kwargs):
         self._regularizer = partial(regularizer, **kwargs)
         return self
 
-    @property
-    def input_size(self):
-        return self._input_size
-
-    @input_size.setter
-    def input_size(self, input_size: torch.Size):
-        self._input_size = input_size
-
-    def reset(self, input_size: torch.Size=None, reset_default: bool=False):
-
-        if reset_default:
-            self.input_name = self.default_input_name
-            self.loss_name = self.default_loss_name
-            self.label = self.default_label
-        self._input_size = utils.coalesce(input_size, self._input_size)
-    
     def build(self) -> Network:
         constructor = NetworkConstructor(Network())
         in_ = constructor.add_tensor_input(
@@ -322,7 +322,7 @@ class SimpleRegularizerAssembler(IAssembler):
         in_, t = base_network.ports
     
         out = constructor.add_op(
-            self.loss_name, self._loss(in_.size), [in_, t],
+            self.objective_name, self._loss(in_.size), [in_, t],
             labels=[self.label]
         )
         return constructor.net, out
@@ -339,14 +339,14 @@ class CompoundLossAssembler(IAssembler):
         self.label: str = self.default_label
         builder = builders.LossBuilder()
         self._aggregator = builder.sum
-        self._loss_assemblers: typing.List[typing.Tuple[SimpleLossAssembler, float]] = []
-        self._regularizer_assemblers: typing.List[typing.Tuple[SimpleRegularizerAssembler, float]] = []
+        self._loss_assemblers: typing.List[typing.Tuple[TargetObjectiveAssembler, float]] = []
+        self._regularizer_assemblers: typing.List[typing.Tuple[RegularizerObjectiveAssembler, float]] = []
     
-    def add_loss_assembler(self, loss_assembler: SimpleLossAssembler, weight: float=1.0):
+    def add_loss_assembler(self, loss_assembler: TargetObjectiveAssembler, weight: float=1.0):
 
         self._loss_assemblers.append((loss_assembler, weight))
 
-    def add_regularizer_assembler(self, regularizer_assembler: SimpleRegularizerAssembler, weight: float=1.0):
+    def add_regularizer_assembler(self, regularizer_assembler: RegularizerObjectiveAssembler, weight: float=1.0):
 
         self._regularizer_assemblers.append((regularizer_assembler, weight))
     
@@ -411,146 +411,3 @@ class CompoundLossAssembler(IAssembler):
         )
 
         return BaseNetwork(constructor, out)
-
-
-# TODO: Depracate - Doesn't build networks as I
-# have designed currently
-
-# class CompoundFeedForwardLossAssembler(IAssembler):
-
-#     default_loss_name = 'loss'
-#     default_validation_name = 'validation'
-#     default_regularization_name = 'regularization'
-
-#     def __init__(self, target_size: int, loss_builder: builders.LossBuilder, feed_forward_assembler: FeedForwardAssembler):
-#         super().__init__()
-#         self._validation_name = self.default_validation_name
-#         self._loss_name = self.default_loss_name
-#         self._regularization_name = self.default_regularization_name
-#         self._feedforward_assembler = feed_forward_assembler
-#         self._target_name = 't'
-#         self._target_size = target_size
-#         self._loss_builder = loss_builder
-#         self._output_name = 'y'
-#         self._feedforward_assembler.set_output_name(self._output_name)
-#         self._input_name = 'x'
-#         self._feedforward_assembler.set_output_name(self._input_name)
-#         self._scale_target = False
-
-#         base_builder = builders.LossBuilder()
-#         self._validator = base_builder.mse
-#         self._target_processor = base_builder.null_processor
-#         self._regularizer = base_builder.l2_reg
-#         self._loss = base_builder.mse
-
-#     def set_loss_name(self, name: str):
-#         self._loss_name = name
-#         return self
-
-#     def set_validation_name(self, name: str):
-#         self._validation_name = name
-#         return self
-
-#     def set_regularization_name(self, name: str):
-#         self._regularization_name = name
-#         return self
-
-#     def set_input_name(self, name: str):
-#         """Set input layer name of the network
-#         """
-#         self._input_name = name
-#         self._feedforward_assembler.set_output_name(self._input_name)
-#         return self
-
-#     def set_output_name(self, name: str):
-#         """Set output layer name of the network
-#         """
-#         self._output_name = name
-#         self._feedforward_assembler.set_output_name(name)
-#         return self
-
-#     def set_target_name(self, name: str):
-#         """Set name of the target input
-#         """
-#         self._target_name = name
-#         return self
-
-#     # def loss(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0):
-#     #     return self._loss(in_size, weight)
-
-#     def set_loss(self, loss: typing.Callable[[int, float], Operation]):
-#         self._loss = loss
-#         return self
-
-#     def set_regularizer(self, regularizer: typing.Callable[[int, float], Operation]):
-#         self._regularizer = regularizer
-#         return self
-    
-#     def set_validator(self, validator: typing.Callable[[int], Operation]):
-#         self._validator = validator
-#         return self
-
-#     def set_target_processor(self, target_processor:  typing.Callable[[torch.Size], Operation]):
-#         self._target_processor = target_processor
-#         return self
-
-#     @property
-#     def loss_names(self):
-#         return [self._loss_name]
-
-#     def reset(
-#         self, feedforward_assembler: FeedForwardAssembler=None, reset_defaults=False
-#     ):
-#         """Reset parameters of the network
-
-#         Args:
-#             input_size (int, optional): Update the input size if not None. Defaults to None.
-#             layer_sizes (typing.List[int], optional): Update the layer sizes if not None. Defaults to None.
-#             out_size (int, optional): Update the out size if not None. Defaults to None.
-#             reset_defaults (bool, optional): Reset to default parameters if not None. Defaults to False.
-#         """
-#         super().reset(reset_defaults)
-
-#         if feedforward_assembler is not None:
-#             self._feedforward_assembler = feedforward_assembler
-#         else:
-#             self._feedforward_assembler.reset(reset_defaults)
-
-#         if reset_defaults:
-#             self._validation_name = self.default_validation_name
-#             self._loss_name = self.default_loss_name
-#             self._regularization_name = self.default_regularization_name
-
-#     def build(self) -> Network:
-#         """Build the network based on the parameters
-
-#         Returns:
-#             Network:
-#         """
-#         pass
-
-#         # network.set_default_interface(
-#         #     network[self._input_name],
-#         #     [loss, validation]
-#         # )
-
-#     def append(self, base_network: BaseNetwork) -> BaseNetwork:
-
-#         constructor = base_network.constructor
-
-#         network, (y,) = self._feedforward_assembler.append(base_network)
-
-#         t, = network.add_node(
-#             In.from_tensor(self._target_name, torch.Size([-1, self._target_size]))
-#         )
-#         t, = network.add_node('process target', self._target_processor(t.size), t)
-        
-#         loss, = network.add_node(
-#             self._loss_name, self._loss(y.size), [y, t]
-#         )
-
-#         validation, = network.add_node(
-#             self._validation_name, self._validator(y.size), [y, t]
-#         )
-
-#         return BaseNetwork(constructor, [loss, validation])
