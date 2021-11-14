@@ -307,3 +307,17 @@ class LossBuilder(object):
     
     def null_processor(self, in_size: torch.Size):
         return Operation(NullActivation(), in_size)
+    
+    def sum(self, weights: typing.List[float]):
+        return Operation(
+            modules.Lambda(
+                lambda x: torch.sum(
+                    x * torch.as_tensor(weights, dtype=x.dtype, device=x.device))
+                ))
+
+    def mean(self, weights: typing.List[float]):
+        return Operation(
+            modules.Lambda(
+                lambda x: torch.mean(
+                    x * torch.as_tensor(weights, dtype=x.dtype, device=x.device))
+                ))
