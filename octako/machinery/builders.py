@@ -2,7 +2,6 @@ from enum import Enum
 import functools
 import itertools
 from os import stat
-
 from torch.functional import norm
 from octako.machinery import modules
 from octako.modules.activations import NullActivation, Scaler
@@ -247,57 +246,57 @@ class ReductionType(Enum):
     BatchMeanReduction = objectives.BatchMeanReduction
 
 
-class LossBuilder(object):
+class ObjectiveBuilder(object):
     """Builder for creating loss function modules
     """
 
     def __init__(self):
         self._regularizer: typing.Callable[[int, float]] = self.l2_reg
         self._loss: typing.Callable[[int, float]] = self.mse
-        self._validator: typing.Callable[[int, float], Operation] = self.binary_classifier
+        self._validator: typing.Callable[[int, float], Operation] = self.binary_val
         self._target_processor: typing.Callable[[torch.Size], Operation] = self.null_processor
 
-    def mse(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
+    def mse(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         # TODO: Add in a weight
         return Operation(
-            nn.MSELoss(reduction=reducer.as_str()), reducer.get_out_size(in_size)
+            nn.MSELoss(reduction=reducer_cls.as_str()), reducer_cls.get_out_size(in_size)
         )
 
-    def bce(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
+    def bce(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         return Operation(
-            nn.BCELoss(reduction=reducer.as_str()), reducer.get_out_size(in_size)
+            nn.BCELoss(reduction=reducer_cls.as_str()), reducer_cls.get_out_size(in_size)
         )
 
-    def cross_entropy(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
+    def cross_entropy(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         return Operation(
-            nn.CrossEntropyLoss(reduction=reducer.as_str()), reducer.get_out_size(in_size)
+            nn.CrossEntropyLoss(reduction=reducer_cls.as_str()), reducer_cls.get_out_size(in_size)
         )
 
-    def l1_reg(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor], reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
+    def l1_reg(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         return Operation(
-            objectives.L1Reg(reduction=reducer, weight=weight), reducer.get_out_size(in_size)
+            objectives.L1Reg(reduction_cls=reducer_cls), reducer_cls.get_out_size(in_size)
         )
 
-    def l2_reg(self, in_size: torch.Size, weight: typing.Union[float, torch.Tensor]=1.0, reducer: objectives.ObjectiveReduction=objectives.MeanReduction):
+    def l2_reg(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
 
         return Operation(
-            objectives.L2Reg(reduction=reducer, weight=weight), reducer.get_out_size(in_size)
+            objectives.L2Reg(reduction_cls=reducer_cls), reducer_cls.get_out_size(in_size)
         )
     
-    def binary_classifier(self, in_size: torch.Size, reducer: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction):
+    def binary_val(self, in_size: torch.Size, reducer_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction):
 
         return Operation(
-            objectives.BinaryClassificationFitness(reduction_cls=reducer), reducer.get_out_size(in_size)
+            objectives.BinaryClassificationFitness(reduction_cls=reducer_cls), reducer_cls.get_out_size(in_size)
         )
 
-    def multiclassifier(self, in_size: torch.Size, reducer: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction):
+    def multiclass_val(self, in_size: torch.Size, reducer_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction):
 
         return Operation(
-            objectives.ClassificationFitness(reduction_cls=reducer), reducer.get_out_size(in_size)
+            objectives.ClassificationFitness(reduction_cls=reducer_cls), reducer_cls.get_out_size(in_size)
         )
 
     def scale(self, in_size: torch.Size):
@@ -309,15 +308,17 @@ class LossBuilder(object):
         return Operation(NullActivation(), in_size)
     
     def sum(self, weights: typing.List[float]):
+        def _sum(*args):
+            return sum([x * w for x, w in zip(args, weights)])
+
         return Operation(
-            modules.Lambda(
-                lambda x: torch.sum(
-                    x * torch.as_tensor(weights, dtype=x.dtype, device=x.device))
-                ))
+            modules.Lambda(_sum), torch.Size([]))
+
 
     def mean(self, weights: typing.List[float]):
+
+        def _mean(*args):
+            return sum([x * w for x, w in zip(args, weights)]) / len(args)
+
         return Operation(
-            modules.Lambda(
-                lambda x: torch.mean(
-                    x * torch.as_tensor(weights, dtype=x.dtype, device=x.device))
-                ))
+            modules.Lambda(_mean), torch.Size([]))

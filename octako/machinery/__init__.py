@@ -4,3 +4,4 @@ from . import learners
 from . import networks
 from . import visitors
 from . import modules
+from . import utils

@@ -129,7 +129,6 @@ class Node(nn.Module):
     def ports(self) -> typing.Iterable[Port]:
         raise NotImplementedError
     
-
     @property
     def cache_names_used(self):
         raise NotImplementedError
@@ -324,7 +323,7 @@ class In(Node):
     def cache_names_used(self) -> typing.Set[str]:
         return set([self.name])
     
-    def probe(self, by: typing.Dict):
+    def probe(self, by: typing.Dict, to_cache: bool=True):
         # TODO: Possibly check the value in by
         return by.get(self.name, self._default_value)
 
@@ -337,7 +336,10 @@ class In(Node):
                     sz2.append(1)
                 else:
                     sz2.append(el)
-            default_value = torch.zeros(*sz2)
+            if len(sz2) != 0:
+                default_value = torch.zeros(*sz2)
+            else:
+                default_value = torch.tensor([])
         return cls(name, sz, torch.Tensor, default_value, labels, annotation)
     
     @classmethod
@@ -401,7 +403,7 @@ class Parameter(Node):
     def cache_names_used(self) -> typing.Set[str]:
         return set([self.name])
     
-    def probe(self, by: typing.Dict):
+    def probe(self, by: typing.Dict, to_cache: bool=True):
         return by.get(self.name, self._value)
 
 
@@ -669,7 +671,7 @@ class Network(nn.Module):
 
         for output in outputs:
             node = self._nodes[output]
-            cur_result = self._probe_helper(node, excitations)
+            cur_result = self._probe_helper(node, excitations, to_cache)
             result[output] = cur_result
         
         return result
@@ -710,6 +712,8 @@ class Network(nn.Module):
         """
 
         # TODO: UPDATE THIS FORWARD FUNCTION 
+        if (len(args) != len(self._default_ins)):
+            raise ValueError(f"Number of args {len(args)} does not match the number of inputs {len(self._default_ins)}'")
         inputs = {self._default_ins[i]: x for i, x in enumerate(args)}
         inputs.update(kwargs)
         result_dict = self.probe(self._default_outs, inputs)

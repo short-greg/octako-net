@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 from functools import partial
 from itertools import chain
 
-from torch._C import R, contiguous_format
-
+from torch.nn.modules import loss
 from octako.machinery import utils
 from . import builders
 from .networks import In, NetworkConstructor, Operation, Port
@@ -11,7 +10,6 @@ import typing
 import torch
 import typing
 from .networks import In, Network
-from .modules import CompoundLoss, View, Concat
 from dataclasses import dataclass
 
 
@@ -94,6 +92,7 @@ class FeedForwardAssembler(IAssembler):
 class DenseFeedForwardAssembler(FeedForwardAssembler):
     """Assembler for building a standard feedforward network with dense layers
     """
+    BUILDER = builders.FeedForwardBuilder()
 
     def __init__(
         self, input_size: int, layer_sizes: typing.List[int], 
@@ -108,7 +107,6 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
             out_size (int): [description]
         """
         super().__init__()
-        self.BUILDER = builders.FeedForwardBuilder()
         self._input_size = input_size
         self._layer_sizes = layer_sizes
         self._out_size = out_size
@@ -161,7 +159,7 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
         in_ = constructor.add_tensor_input(
             self._input_name, torch.Size([-1, self._input_size])
         )
-        base_network = self.append(BaseNetwork(constructor.net, in_))
+        base_network = self.append(BaseNetwork(constructor, in_))
         constructor.net.set_default_interface(
             in_, base_network.ports
         )
@@ -192,7 +190,7 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
         return BaseNetwork(constructor, cur_in)
 
 
-class ObjectiveAssembler(IAssembler):
+class AbstractObjectiveAssembler(IAssembler):
     """Assembler for building a feedforward network
     """
     default_label = 'Objective'
@@ -215,35 +213,28 @@ class ObjectiveAssembler(IAssembler):
     def input_size(self, input_size: torch.Size):
         self._input_size = input_size
 
-    def set_input_name(self, name: str):
-        """Set input layer name of the network
-        """
-        self._input_name = name
-        return self
+    def prepend_names(self, prepend_with: str):
 
-    def set_output_name(self, name: str):
-        """Set output layer name of the network
-        """
-        self._output_name = name
-        return self
+        self.objective_name = f'{prepend_with}_{self.objective_name}'
+        self.input_name = f'{prepend_with}_{self.input_name}'
 
-    def reset(self,input_size: torch.Size=None,  reset_defaults=False):
+    def reset(self,input_size: torch.Size=None, reset_defaults=False):
         self._input_size = utils.coalesce(input_size, self._input_size)
         if reset_defaults:
             self.label = self.default_label
-            self._objective_name = self.default_objective_name
-            self._input_name = self.default_input_name
+            self.objective_name = self.default_objective_name
+            self.input_name = self.default_input_name
 
 
-class TargetObjectiveAssembler(ObjectiveAssembler):
+class TargetObjectiveAssembler(AbstractObjectiveAssembler):
 
     default_target_name = 'target'
     DEFAULT_TARGET_SIZE = torch.Size([1,1])
+    BUILDER = builders.ObjectiveBuilder()
 
-    def __init__(self, input_size: torch.Size=ObjectiveAssembler.DEFAULT_INPUT_SIZE, target_size: torch.Size=DEFAULT_TARGET_SIZE):
+    def __init__(self, input_size: torch.Size=AbstractObjectiveAssembler.DEFAULT_INPUT_SIZE, target_size: torch.Size=DEFAULT_TARGET_SIZE):
 
         super().__init__(input_size)
-        self.BUILDER = builders.LossBuilder()
         self._target_size = target_size
         self.target_name = self.default_target_name
         self.set_objective(self.BUILDER.mse)
@@ -256,6 +247,10 @@ class TargetObjectiveAssembler(ObjectiveAssembler):
         if reset_defaults:
             self.target_name = self.default_target_name
 
+    def prepend_names(self, prepend_with: str):
+        super().prepend_names(prepend_with)
+        self.target_name = f'{prepend_with}_{self.target_name}'
+
     @property
     def target_size(self):
         return self._target_size
@@ -264,7 +259,7 @@ class TargetObjectiveAssembler(ObjectiveAssembler):
     def target_size(self, target_size: torch.Size):
         self._target_size = target_size
 
-    def set_objective(self, objective: typing.Callable[[int, float], Operation], **kwargs):
+    def set_objective(self, objective: typing.Callable[[torch.Size, float], Operation], **kwargs):
         self._objective = partial(objective, **kwargs)
         return self
     
@@ -280,6 +275,7 @@ class TargetObjectiveAssembler(ObjectiveAssembler):
         )
         base_network = self.append(BaseNetwork(constructor, [in_, t]))
         constructor.net.set_default_interface([in_, t], base_network.ports)
+        return constructor.net
 
     def append(self, base_network: BaseNetwork) -> BaseNetwork:
 
@@ -287,22 +283,23 @@ class TargetObjectiveAssembler(ObjectiveAssembler):
         in_, t = base_network.ports
 
         out = constructor.add_op(
-            self.objective_name, self._loss(in_.size), [in_, t],
+            self.objective_name, self._objective(in_.size), [in_, t],
             labels=[self.label]
         )
 
         return BaseNetwork(constructor, out)
 
 
-class RegularizerObjectiveAssembler(ObjectiveAssembler):
+class RegularizerObjectiveAssembler(AbstractObjectiveAssembler):
     
-    def __init__(self, input_size: torch.Size=ObjectiveAssembler.DEFAULT_INPUT_SIZE):
+    BUILDER = builders.ObjectiveBuilder()
+
+    def __init__(self, input_size: torch.Size=AbstractObjectiveAssembler.DEFAULT_INPUT_SIZE):
 
         super().__init__(input_size)
-        self.BUILDER = builders.LossBuilder()
         self.set_objective(self.BUILDER.l2_reg)
 
-    def set_objective(self, regularizer: typing.Callable[[int, float], Operation], **kwargs):
+    def set_objective(self, regularizer: typing.Callable[[torch.Size, float], Operation], **kwargs):
         self._regularizer = partial(regularizer, **kwargs)
         return self
 
@@ -312,20 +309,20 @@ class RegularizerObjectiveAssembler(ObjectiveAssembler):
             self.input_name, self._input_size,
             labels=[self.label]
         )
-        network, out_ = self.append(BaseNetwork(constructor, in_))
-        network.set_default_interface(in_, out_)
-        return network
+        base_network = self.append(BaseNetwork(constructor, in_))
+        constructor.net.set_default_interface(in_, base_network.ports)
+        return constructor.net
 
-    def append(self, base_network: BaseNetwork) -> typing.Tuple[Network, Port]:
+    def append(self, base_network: BaseNetwork) -> BaseNetwork:
 
         constructor = base_network.constructor
-        in_, t = base_network.ports
+        in_, = base_network.ports
     
         out = constructor.add_op(
-            self.objective_name, self._loss(in_.size), [in_, t],
+            self.objective_name, self._regularizer(in_.size), [in_],
             labels=[self.label]
         )
-        return constructor.net, out
+        return BaseNetwork(constructor.net, out)
 
 
 class CompoundLossAssembler(IAssembler):
@@ -337,17 +334,19 @@ class CompoundLossAssembler(IAssembler):
     def __init__(self):
         self.input_name = self.default_input_name_base
         self.label: str = self.default_label
-        builder = builders.LossBuilder()
+        builder = builders.ObjectiveBuilder()
         self._aggregator = builder.sum
         self._loss_assemblers: typing.List[typing.Tuple[TargetObjectiveAssembler, float]] = []
         self._regularizer_assemblers: typing.List[typing.Tuple[RegularizerObjectiveAssembler, float]] = []
     
-    def add_loss_assembler(self, loss_assembler: TargetObjectiveAssembler, weight: float=1.0):
+    def add_loss_assembler(self, key: str, loss_assembler: TargetObjectiveAssembler, weight: float=1.0):
 
+        loss_assembler.prepend_names(key)
         self._loss_assemblers.append((loss_assembler, weight))
 
-    def add_regularizer_assembler(self, regularizer_assembler: RegularizerObjectiveAssembler, weight: float=1.0):
+    def add_regularizer_assembler(self, key: str, regularizer_assembler: RegularizerObjectiveAssembler, weight: float=1.0):
 
+        regularizer_assembler.prepend_names(key)
         self._regularizer_assemblers.append((regularizer_assembler, weight))
     
     def reset(self, reset_default: bool=False):
@@ -367,25 +366,26 @@ class CompoundLossAssembler(IAssembler):
     def build(self) -> Network:
         constructor = NetworkConstructor(Network())
         ports = []
-        for i in range(len(self._loss_assemblers)):
+
+        for i, (assembler, _) in enumerate(self._loss_assemblers):
             in_, = constructor.add_tensor_input(
-                self.input_name + '_loss_' + i, torch.Size([]),
+                f'{self.input_name}_loss_inp_{i}', assembler.input_size,
                 labels=[self.label]
             )
             target, = constructor.add_tensor_input(
-                self.input_name + '_' + i, torch.Size([]),
+                f'{self.input_name}_loss_tar_{i}', assembler.target_size,
                 labels=[self.label]
             )
-            ports.append(in_, target)
-        for i, _ in range(len(self._regularizer_assemblers)):
+            ports.extend([in_, target])
+        for i, (assembler, _) in enumerate(self._regularizer_assemblers):
             in_, = constructor.add_tensor_input(
-                self.input_name + '_regularizer_' + i, torch.Size([]),
+                f'{self.input_name}_reg_inp_{i}', assembler.input_size,
                 labels=[self.label]
             )
             ports.append(in_)
 
         base_network = self.append(BaseNetwork(constructor, ports))
-        constructor.net.set_default_interface(in_, base_network.ports)
+        constructor.net.set_default_interface(ports, base_network.ports)
         return constructor.net
 
     def append(self, base_network: BaseNetwork) -> BaseNetwork:
@@ -395,18 +395,21 @@ class CompoundLossAssembler(IAssembler):
 
         weights = []
         i = 0
+        objective_ports = []
         for loss_assembler, weight in self._loss_assemblers:
-            loss_assembler.append(BaseNetwork(constructor, ports[i:i+2]))
+            base = loss_assembler.append(BaseNetwork(constructor, ports[i:i+2]))
+            objective_ports.extend(base.ports)
             weights.append(weight)
             i += 2
 
         for regularizer_assembler, weight in self._regularizer_assemblers:
-            regularizer_assembler.append(BaseNetwork(constructor, ports[i:i+1]))
+            base = regularizer_assembler.append(BaseNetwork(constructor, ports[i:i+1]))
+            objective_ports.extend(base.ports)
             weights.append(weight)
             i += 1
-
+        
         out = constructor.add_op(
-            self.sum_name, self._aggregator(weights), ports,
+            self.sum_name, self._aggregator(weights), objective_ports,
             labels=[self.label]
         )
 

@@ -1,10 +1,10 @@
-from .builders import LossBuilder
+from .builders import ObjectiveBuilder
 import typing
 import torch
 from . import networks
 import torch.optim
 import torch.nn
-from .assemblers import FeedForwardAssembler, CompoundFeedForwardLossAssembler
+from .assemblers import FeedForwardAssembler
 from abc import ABC, abstractmethod
 
 """Classes related to learning machines
@@ -129,6 +129,7 @@ class MinibatchTestingAlgorithm(TestingAlgorithm):
             [self._agg_loss_name, self._validation_name, *self._loss_names], by={self._x_name: x, self._target_name: t}
         )
 
+# TODO: UPpdate the learners witht he new losses
 
 class BinaryClassifier(Learner):
 
@@ -146,7 +147,7 @@ class BinaryClassifier(Learner):
         self._validation_name = 'Classification'
 
         self._network_assembler = network_assembler
-        loss_builder: LossBuilder = LossBuilder()
+        loss_builder: ObjectiveBuilder = ObjectiveBuilder()
         # self._loss_assembeler: CompoundFeedForwardLossAssembler = CompoundFeedForwardLossAssembler()
 
         self._loss_assembler = CompoundFeedForwardLossAssembler(
@@ -218,7 +219,7 @@ class Multiclass(Learner):
         self._n_classes = n_classes
 
         self._network_assembler = network_assembler
-        loss_builder: LossBuilder = LossBuilder()
+        loss_builder: ObjectiveBuilder = ObjectiveBuilder()
         self._loss_builder = loss_builder
 
         self._loss_assembler = CompoundFeedForwardLossAssembler(
@@ -290,7 +291,7 @@ class Regressor(Learner):
         self._validation_name = 'validation'
 
         self._network_assembler = network_assembler
-        loss_builder: LossBuilder = LossBuilder()
+        loss_builder: ObjectiveBuilder = ObjectiveBuilder()
         self._loss_builder = loss_builder
         self._n_out = n_out
 

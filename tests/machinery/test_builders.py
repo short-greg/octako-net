@@ -71,7 +71,7 @@ class TestLossBuilder:
             In('x', torch.Size([-1, 2])),
             In('t', torch.Size([-1, 2]))
         ])
-        builder = builders.LossBuilder()
+        builder = builders.ObjectiveBuilder()
         x, t = network.get_input_ports()
         mse, = network.add_node(
             'mse', builder.mse(x.size), [x, t]
@@ -87,7 +87,7 @@ class TestLossBuilder:
             In('x', torch.Size([-1, 2])),
             In('t', torch.Size([-1, 2]))
         ])
-        builder = builders.LossBuilder()
+        builder = builders.ObjectiveBuilder()
         x, t = network.get_input_ports()
         mse, = network.add_node(
             'mse', builder.mse(x.size, reduction_type=builders.ReductionType.NullReduction), [x, t]
@@ -102,7 +102,7 @@ class TestLossBuilder:
         network = networks.Network(
             [In('x', torch.Size([-1, 2]))]
         )
-        builder = builders.LossBuilder()
+        builder = builders.ObjectiveBuilder()
         x, = network.get_input_ports()
         reg, = network.add_node(
             'reg', builder.build_regularizer(x.size, reg_type=builders.RegularizerType.L2Reg), x
