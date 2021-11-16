@@ -35,6 +35,10 @@ class IAssembler(ABC):
             reset_defaults (bool, optional): Whether to reset parameters to default values. Defaults to False.
         """
         raise NotImplementedError
+    
+    @abstractmethod
+    def set_names(self):
+        pass
 
 
 @dataclass
@@ -63,30 +67,35 @@ class FeedForwardAssembler(IAssembler):
     default_activation_name = 'activation'
 
     def __init__(self):
-        self._input_name = self.default_input_name
-        self._output_name = self.default_output_name
-        self._activation_name = self.default_activation_name
-        self._dense_name = self.default_dense_name
-        self._network_name = self.default_network_name
+        self.input_name: str = self.default_input_name
+        self.output_name: str = self.default_output_name
+        self.activation_name: str = self.default_activation_name
+        self.dense_name: str = self.default_dense_name
+        self.network_name: str = self.default_network_name
+
+    def set_names(self, input_: str=None, output: str=None):
+        self.input_name = utils.coalesce(input_, self.input_name)
+        self.output_name = utils.coalesce(output, self.output_name)
+        return self
 
     def set_input_name(self, name: str):
         """Set input layer name of the network
         """
-        self._input_name = name
+        self.input_name = name
         return self
 
     def set_output_name(self, name: str):
         """Set output layer name of the network
         """
-        self._output_name = name
+        self.output_name = name
         return self
 
     def reset(self, reset_defaults=False):
         if reset_defaults:
-            self._input_name = self.default_input_name
-            self._output_name = self.default_output_name
-            self._network_name = self.default_network_name
-            self._activation_name = self.default_activation_name
+            self.input_name = self.default_input_name
+            self.output_name = self.default_output_name
+            self.network_name = self.default_network_name
+            self.activation_name = self.default_activation_name
 
 
 class DenseFeedForwardAssembler(FeedForwardAssembler):
@@ -114,7 +123,7 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
         self._normalizer = self.BUILDER.batch_normalizer
         self._dense = self.BUILDER.linear
         self._out_activation = self.BUILDER.sigmoid
-    
+
     def set_activation(self, activation: typing.Callable[[], Operation], **kwargs):
         self._activation = partial(activation, **kwargs)
         return self
@@ -205,6 +214,12 @@ class AbstractObjectiveAssembler(IAssembler):
         self.input_name = self.default_input_name
         self._input_size = input_size
 
+    def set_names(self, input_: str=None, objective: str=None, label: str=None):
+        self.objective_name = utils.coalesce(objective, self.objective_name)
+        self.label = utils.coalesce(label, self.label)
+        self.input_name = utils.coalesce(input_, self.input_name)
+        return self
+
     @property
     def input_size(self):
         return self._input_size
@@ -226,7 +241,7 @@ class AbstractObjectiveAssembler(IAssembler):
             self.input_name = self.default_input_name
 
 
-class TargetObjectiveAssembler(AbstractObjectiveAssembler):
+class TargetAssembler(AbstractObjectiveAssembler):
 
     default_target_name = 'target'
     DEFAULT_TARGET_SIZE = torch.Size([1,1])
@@ -238,7 +253,12 @@ class TargetObjectiveAssembler(AbstractObjectiveAssembler):
         self._target_size = target_size
         self.target_name = self.default_target_name
         self.set_objective(self.BUILDER.mse)
-    
+
+    def set_names(self, input_: str=None, target: str=None, objective: str=None, label: str=None):
+        super().__init__(input_, objective, label)
+        self.target_name = utils.coalesce(target, self.target_name)
+        return self
+
     def reset(self, input_size: torch.Size=None, target_size: torch.Size=None, reset_defaults: bool=False):
 
         super().reset(input_size)
@@ -290,7 +310,7 @@ class TargetObjectiveAssembler(AbstractObjectiveAssembler):
         return BaseNetwork(constructor, out)
 
 
-class RegularizerObjectiveAssembler(AbstractObjectiveAssembler):
+class RegularizerAssembler(AbstractObjectiveAssembler):
     
     BUILDER = builders.ObjectiveBuilder()
 
@@ -325,6 +345,13 @@ class RegularizerObjectiveAssembler(AbstractObjectiveAssembler):
         return BaseNetwork(constructor.net, out)
 
 
+@dataclass
+class WeightedObjective(object):
+    objective: AbstractObjectiveAssembler
+    name: str
+    weight: float=1.0
+
+
 class CompoundLossAssembler(IAssembler):
 
     default_label = 'Loss Sum'
@@ -336,15 +363,20 @@ class CompoundLossAssembler(IAssembler):
         self.label: str = self.default_label
         builder = builders.ObjectiveBuilder()
         self._aggregator = builder.sum
-        self._loss_assemblers: typing.List[typing.Tuple[TargetObjectiveAssembler, float]] = []
-        self._regularizer_assemblers: typing.List[typing.Tuple[RegularizerObjectiveAssembler, float]] = []
+        self._loss_assemblers: typing.List[typing.Tuple[TargetAssembler, float]] = []
+        self._regularizer_assemblers: typing.List[typing.Tuple[RegularizerAssembler, float]] = []
     
-    def add_loss_assembler(self, key: str, loss_assembler: TargetObjectiveAssembler, weight: float=1.0):
+    def set_names(self, input_base: str=None, label: str=None):
+        self.label = utils.coalesce(label, self.label)
+        self.input_name_base = utils.coalesce(input_base, self.input_name_base)
+        return self
+
+    def add_loss_assembler(self, key: str, loss_assembler: TargetAssembler, weight: float=1.0):
 
         loss_assembler.prepend_names(key)
         self._loss_assemblers.append((loss_assembler, weight))
 
-    def add_regularizer_assembler(self, key: str, regularizer_assembler: RegularizerObjectiveAssembler, weight: float=1.0):
+    def add_regularizer_assembler(self, key: str, regularizer_assembler: RegularizerAssembler, weight: float=1.0):
 
         regularizer_assembler.prepend_names(key)
         self._regularizer_assemblers.append((regularizer_assembler, weight))

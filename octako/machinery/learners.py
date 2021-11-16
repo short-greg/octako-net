@@ -4,8 +4,10 @@ import torch
 from . import networks
 import torch.optim
 import torch.nn
-from .assemblers import FeedForwardAssembler
+from .assemblers import BaseNetwork, DenseFeedForwardAssembler, FeedForwardAssembler, IAssembler, TargetAssembler, TargetObjectiveAssembler, CompoundLossAssembler, TrainingNetworkAssembler, WeightedObjective
 from abc import ABC, abstractmethod
+
+from octako.machinery import builders
 
 """Classes related to learning machines
 
@@ -129,9 +131,39 @@ class MinibatchTestingAlgorithm(TestingAlgorithm):
             [self._agg_loss_name, self._validation_name, *self._loss_names], by={self._x_name: x, self._target_name: t}
         )
 
+#TODO: create this assembler
+class TeachingNetworkAssembler(IAssembler):
+
+    OBJECTIVE_BUILDER = builders.ObjectiveBuilder
+
+    def __init__(self, network_assembler, taget_size: torch.Size):
+        pass
+
+    def set_names(self, input_: str=None, target: str=None, loss: str=None, validation: str=None):
+        pass
+
+    def set_loss(self, objective):
+        pass
+
+    def set_validation(self, objective):
+        pass
+
+    def build(self):
+        pass
+
+    def append(self):
+        pass
+
+
 # TODO: UPpdate the learners witht he new losses
 
 class BinaryClassifier(Learner):
+
+    OUT_NAME = 'y'
+    TARGET_NAME = 't'
+    INPUT_NAME = 'x'
+    LOSS_NAME = 'loss'
+    VALIDATION_NAME = 'classification'
 
     def __init__(
         self, network_assembler: FeedForwardAssembler, 
@@ -140,42 +172,46 @@ class BinaryClassifier(Learner):
         optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
         device='cpu'
     ):
-        self._out_name = 'y'
-        self._target_name = 't'
-        self._input_name = 'x'
-        self._loss_name = 'loss'
-        self._validation_name = 'Classification'
+        self._device = device
+        self._network = self._assemble_network(network_assembler)
 
-        self._network_assembler = network_assembler
-        loss_builder: ObjectiveBuilder = ObjectiveBuilder()
-        # self._loss_assembeler: CompoundFeedForwardLossAssembler = CompoundFeedForwardLossAssembler()
-
-        self._loss_assembler = CompoundFeedForwardLossAssembler(
-            1, loss_builder, self._network_assembler
-        )
-        self._loss_assembler.set_loss(loss_builder.bce)
-        self._loss_assembler.set_validator(loss_builder.binary_classifier)
-
-        self._loss_assembler.set_input_name("x").set_output_name(self._out_name).set_loss_name(
-            self._loss_name
-        ).set_validation_name(
-            self._validation_name
-        ).set_target_name(self._target_name)
-    
-        self._network = self._loss_assembler.build()
-        self._network.to(device)
         self._learning_algorithm = learning_algorithm_cls(
-            optim_factory, self._network, self._input_name, self._target_name, 
-            self._loss_name, self._validation_name, self._loss_assembler.loss_names
+            optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 
+            self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
         )
         self._testing_algorithm = testing_algorithm_cls(
-            self._network, self._input_name, self._target_name, self._loss_name, self._validation_name, self._loss_assembler.loss_names
+            self._network, self.INPUT_NAME, self.TARGET_NAME, self.LOSS_NAME, self.VALIDATION_NAME, self._loss_assembler.loss_names
         )
-        
         self._classification_interface = networks.NetworkInterface(
-            self._network, self._network.get_ports(self._validation_name), by=[self._input_name, self._target_name]
+            self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
         )
-        self._device = device
+
+    def _assemble_network(self, network_assembler: DenseFeedForwardAssembler):
+
+        target_size = torch.Size([-1])
+        network_assembler = network_assembler.set_names(
+            input_=self.INPUT_NAME, output=self.OUT_NAME
+        )
+        constructor = networks.NetworkConstructor(network_assembler.build())
+        in_, out = constructor[[self.INPUT_NAME, self.OUT_NAME]].ports
+        target = constructor.add_tensor_input(self.TARGET_NAME, out.size, labels=["target"])
+
+        out, = constructor.add_op("Flatten Out", builders.FeedForwardBuilder().flatten(), out, labels=["classifier"])
+        loss_assembler: TargetAssembler = TargetAssembler(out.size, target_size).set_names(
+            input_=self.OUT_NAME, target=self.TARGET_NAME, objective=self.LOSS_NAME
+        ).set_objective(TargetAssembler.BUILDER.bce)
+        
+        validation_assembler: TargetAssembler = TargetAssembler(out.size, target_size).set_names(
+            input_=self.OUT_NAME, target=self.TARGET_NAME, objective=self.LOSS_NAME
+        ).set_objective(TargetAssembler.BUILDER.binary_val)
+
+        base_network = BaseNetwork(constructor, [out, target])
+        loss_assembler.append(base_network)
+        validation_assembler.append(base_network)
+
+        network = constructor.net
+        network.to(self._device)
+        return network
 
     @property
     def fields(self):
@@ -204,6 +240,12 @@ class BinaryClassifier(Learner):
 
 class Multiclass(Learner):
 
+    OUT_NAME = 'y'
+    TARGET_NAME = 't'
+    INPUT_NAME = 'x'
+    LOSS_NAME = 'loss'
+    VALIDATION_NAME = 'classification'
+
     def __init__(
         self, network_assembler: FeedForwardAssembler, n_classes: int,
         learning_algorithm_cls: typing.Type[LearningAlgorithm],
@@ -211,44 +253,48 @@ class Multiclass(Learner):
         optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
         device='cpu'
     ):
-        self._out_name = 'y'
-        self._target_name = 't'
-        self._input_name = 'x'
-        self._loss_name = 'loss'
-        self._validation_name = 'Classification'
-        self._n_classes = n_classes
-
-        self._network_assembler = network_assembler
-        loss_builder: ObjectiveBuilder = ObjectiveBuilder()
-        self._loss_builder = loss_builder
-
-        self._loss_assembler = CompoundFeedForwardLossAssembler(
-            1, self._loss_builder, self._network_assembler
-        )
-        self._loss_assembler.set_loss(loss_builder.cross_entropy)
-        self._loss_assembler.set_validator(loss_builder.multiclassifier)
-
-        self._loss_assembler.set_input_name("x").set_output_name(self._out_name).set_loss_name(
-            self._loss_name
-        ).set_validation_name(
-            self._validation_name
-        ).set_target_name(self._target_name)
-    
-        self._network = self._loss_assembler.build()
-        self._network.to(device)
+        self._device = device
+        self._network = self._assemble_network(network_assembler)
 
         self._learning_algorithm = learning_algorithm_cls(
-            optim_factory, self._network, self._input_name, self._target_name, 
-            self._loss_name, self._validation_name, self._loss_assembler.loss_names
+            optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 
+            self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
         )
         self._testing_algorithm = testing_algorithm_cls(
-            self._network, self._input_name, self._target_name, self._loss_name, self._validation_name, self._loss_assembler.loss_names
+            self._network, self.INPUT_NAME, self.TARGET_NAME, self.LOSS_NAME, self.VALIDATION_NAME, self._loss_assembler.loss_names
         )
         
         self._classification_interface = networks.NetworkInterface(
-            self._network, self._network.get_ports(self._validation_name), by=[self._input_name, self._target_name]
+            self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
         )
         self._device = device
+
+    def _assemble_network(self, network_assembler: DenseFeedForwardAssembler):
+
+        # Can probably put this in the base class
+        target_size = torch.Size([-1])
+        network_assembler = network_assembler.set_names(
+            input_=self.INPUT_NAME, output=self.OUT_NAME
+        )
+        constructor = networks.NetworkConstructor(network_assembler.build())
+        in_, out = constructor[[self.INPUT_NAME, self.OUT_NAME]].ports
+        target = constructor.add_tensor_input(self.TARGET_NAME, out.size, labels=["target"])
+
+        loss_assembler: TargetAssembler = TargetAssembler(out.size, target_size).set_names(
+            input_=self.OUT_NAME, target=self.TARGET_NAME, objective=self.LOSS_NAME
+        ).set_objective(TargetAssembler.BUILDER.cross_entropy)
+        
+        validation_assembler: TargetAssembler = TargetAssembler(out.size, target_size).set_names(
+            input_=self.OUT_NAME, target=self.TARGET_NAME, objective=self.LOSS_NAME
+        ).set_objective(TargetAssembler.BUILDER.multiclass_val)
+
+        base_network = BaseNetwork(constructor, [out, target])
+        loss_assembler.append(base_network)
+        validation_assembler.append(base_network)
+
+        network = constructor.net
+        network.to(self._device)
+        return network
 
     @property
     def fields(self):
@@ -277,50 +323,60 @@ class Multiclass(Learner):
 
 class Regressor(Learner):
 
+    OUT_NAME = 'y'
+    TARGET_NAME = 't'
+    INPUT_NAME = 'x'
+    LOSS_NAME = 'loss'
+    VALIDATION_NAME = 'validation'
+
     def __init__(
-        self, network_assembler: FeedForwardAssembler, n_out: int,
+        self, network_assembler: DenseFeedForwardAssembler, 
         learning_algorithm_cls: typing.Type[LearningAlgorithm],
         testing_algorithm_cls: typing.Type[TestingAlgorithm],
         optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
         device='cpu'
     ):
-        self._out_name = 'y'
-        self._target_name = 't'
-        self._input_name = 'x'
-        self._loss_name = 'loss'
-        self._validation_name = 'validation'
+        # out_size = torch.Size([-1, n_out])
+        self._device = device
+        self._network = self._assemble_network(network_assembler)
 
-        self._network_assembler = network_assembler
-        loss_builder: ObjectiveBuilder = ObjectiveBuilder()
-        self._loss_builder = loss_builder
-        self._n_out = n_out
-
-        self._loss_assembler = CompoundFeedForwardLossAssembler(
-            n_out, self._loss_builder, self._network_assembler
-        )
-
-        self._loss_assembler.set_loss(loss_builder.mse)
-        self._loss_assembler.set_validator(loss_builder.mse)
-        self._loss_assembler.set_input_name("x").set_output_name(self._out_name).set_loss_name(
-            self._loss_name
-        ).set_validation_name(
-            self._validation_name
-        ).set_target_name(self._target_name)
-    
-        self._network = self._network_assembler.build()
-        self._network.to(device)
         self._learning_algorithm = learning_algorithm_cls(
-            optim_factory, self._network, self._input_name, self._target_name, 
-            self._loss_name, self._validation_name, self._loss_assembler.loss_names
+            optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 
+            self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
         )
         self._testing_algorithm = testing_algorithm_cls(
-            self._network, self._input_name, self._target_name, self._loss_name, self._validation_name, self._loss_assembler.loss_names
+            self._network, self.INPUT_NAME, self.TARGET_NAME, self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
         )
+        self._classification_interface = networks.NetworkInterface(
+            self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
+        )
+
+    def _assemble_network(self, network_assembler: DenseFeedForwardAssembler):
+
+        # Can probably put this in the base class
+
+        network_assembler = network_assembler.set_names(
+            input_=self.INPUT_NAME, output=self.OUT_NAME
+        )
+        constructor = networks.NetworkConstructor(network_assembler.build())
+        in_, out = constructor[[self.INPUT_NAME, self.OUT_NAME]].ports
+        target = constructor.add_tensor_input(self.TARGET_NAME, out.size, labels=["target"])
+
+        loss_assembler: TargetAssembler = TargetAssembler(out.size, out.size).set_names(
+            input_=self.OUT_NAME, target=self.TARGET_NAME, objective=self.LOSS_NAME
+        ).set_objective(TargetAssembler.BUILDER.mse)
         
-        self._regression_interface = networks.NetworkInterface(
-            self._network, self._network.get_ports(self._validation_name), by=[self._input_name, self._target_name]
-        )
-        self._device = device
+        validation_assembler: TargetAssembler = TargetAssembler(out.size, out.size).set_names(
+            input_=self.OUT_NAME, target=self.TARGET_NAME, objective=self.LOSS_NAME
+        ).set_objective(TargetAssembler.BUILDER.mse)
+
+        base_network = BaseNetwork(constructor, [out, target])
+        loss_assembler.append(base_network)
+        validation_assembler.append(base_network)
+
+        network = constructor.net
+        network.to(self._device)
+        return network
 
     @property
     def fields(self):
@@ -344,3 +400,87 @@ class Regressor(Learner):
     @property
     def maximize_validation(self):
         return False
+
+
+        # # self._validation_assembler = TargetAssembler(out_size, out_size).set_objective(
+        # #     TargetAssembler.BUILDER.mse  
+        # # )
+        # # .set_names(
+        # #    input=self.OUT_NAME, target=self.TARGET_NAME, objective=self.VALIDATION_NAME
+        # #)
+
+        # self._loss_assembler = TargetAssembler(out_size, out_size).set_objective(
+        #     TargetAssembler.BUILDER.mse
+        # )
+        # # .set_names(
+        # #    input=self.OUT_NAME, target=self.TARGET_NAME, objective=self.VALIDATION_NAME
+        # # )
+
+
+
+        # self._training_assembler = TrainingNetworkAssembler(
+        #     network_assembler,
+        #     loss_assemblers=[WeightedObjective(self._loss_assembler, "MSE", 1.0)],
+        #     validation_assemblers=[WeightedObjective(self._validation_assembler, self.VALIDATION_NAME)]
+        # ).set_names(
+        #     input=self.INPUT_NAME,
+        #     loss=self.LOSS_NAME,
+        #     output=self.OUT_NAME,
+        #     target=self.TARGET_NAME
+        # )
+
+
+        
+        
+        
+        # ).set_names()
+
+
+        # self._out_name = 'y'
+        # self._target_name = 't'
+        # self._input_name = 'x'
+        # self._loss_name = 'loss'
+        # self._validation_name = 'validation'
+
+
+
+
+        # self._network_assembler = network_assembler
+        # loss_builder: ObjectiveBuilder = ObjectiveBuilder()
+        # self._loss_builder = loss_builder
+        # self._n_out = n_out
+
+        # network_assembler.input_name = "x"
+        # network_assembler.output_name = "y"
+         
+        # network = network_assembler.build()
+        # constructor = networks.NetworkConstructor(network)
+
+        # in_, out, t = network[["x", "y", "t"]].ports
+        # # TODO: Set the input size
+        # self._loss_assembler = TargetObjectiveAssembler().set_objective(TargetObjectiveAssembler.BUILDER.mse)
+        # self._loss_assembler.objective_name = "MSE"
+        # self._loss_assembler.target_name = "t"
+        
+        # self._validation_assembler = TargetObjectiveAssembler(
+        #     out.size, t.size
+        # ).set_objective(TargetObjectiveAssembler.BUILDER.mse)
+        # self._validation_assembler.objective_name = "Validation"
+        # self._validation_assembler.target_name = "t"
+        # self._validation_assembler.input_name = "x"
+        
+        # self._loss_assembler.set_input_name("x").set_output_name(self._out_name).set_loss_name(
+        #     self._loss_name
+        # ).set_validation_name(
+        #     self._validation_name
+        # ).set_target_name(self._target_name)
+        
+        # self._loss_assembler.append(BaseNetwork(constructor, [out, t]))
+        # self._validation_assembler.append(BaseNetwork(constructor, [out, t]))
+
+        # self._network.to(device)
+        
+        # self._regression_interface = networks.NetworkInterface(
+        #     self._network, self._network.get_ports(self._validation_name), by=[self._input_name, self._target_name]
+        # )
+        # self._device = device

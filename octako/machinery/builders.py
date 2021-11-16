@@ -1,5 +1,4 @@
 from enum import Enum
-import functools
 import itertools
 from os import stat
 from torch.functional import norm
@@ -11,6 +10,7 @@ from octako.modules import objectives
 from .networks import Operation
 import typing
 from . import utils
+from octako.modules import utils as util_modules
 
 
 """
@@ -29,25 +29,6 @@ as long as the interface is correct.
 class FeedForwardBuilder(object):
     """Builder for creating modules that compose a feed forward network
     """
-
-    def __init__(self):
-        # TODO: check if the stuff below is being used
-        pass
-        
-        # self._activation: typing.Callable[[], Operation] = self.relu
-        # self._normalizer: typing.Callable[[int], Operation] = self.batch_normalizer
-        # self._dense: typing.Callable[[int, int], Operation] = self.linear
-        # self._out_activation: typing.Callable[[], Operation] = self.sigmoid
-
-        # self.ACTIVATION_MAP = dict(
-        #     sigmoid=self.sigmoid,
-        #     relu=self.relu,
-        #     tanh=self.tanh,
-        #     null=self.null
-        # )
-
-    # def activation_type(self, activation_type: str):
-    #     return self.ACTIVATION_MAP[activation_type]
     
     def relu(self, in_size: torch.Size) -> Operation:
         return Operation(nn.ReLU(), in_size)
@@ -135,19 +116,19 @@ class FeedForwardBuilder(object):
     def batch_view(self, *x: int):
         
         return Operation(
-            modules.View(torch.Size(x), keepbatch=True), torch.Size([-1, *x])
+            util_modules.View(torch.Size(x), keepbatch=True), torch.Size([-1, *x])
         )
 
     def flatten(self):
         
         return Operation(
-            modules.Flatten(keepbatch=False), torch.Size([-1])
+            util_modules.Flatten(keepbatch=False), torch.Size([-1])
         )
 
     def batch_flatten(self, sz: torch.Size):
         
         return Operation(
-            modules.Flatten(keepbatch=True), torch.Size([-1, itertools.product(sz[1:])])
+            util_modules.Flatten(keepbatch=True), torch.Size([-1, itertools.product(sz[1:])])
         )
 
     def max(self, in_sz: torch.Size, dim: int):
@@ -155,7 +136,7 @@ class FeedForwardBuilder(object):
         sz = list(in_sz)
         out_size = sz[:dim] + sz[dim+1:]
         return Operation(
-            modules.Lambda(lambda x: torch.max(x, dim=dim)[0]), torch.Size([out_size])
+            util_modules.Lambda(lambda x: torch.max(x, dim=dim)[0]), torch.Size([out_size])
         )
 
     def min(self, in_sz: torch.Size, dim: int):
@@ -163,7 +144,7 @@ class FeedForwardBuilder(object):
         sz = list(in_sz)
         out_size = sz[:dim] + sz[dim+1:]
         return Operation(
-            modules.Lambda(lambda x: torch.min(x, dim=dim)[0]), torch.Size([out_size])
+            util_modules.Lambda(lambda x: torch.min(x, dim=dim)[0]), torch.Size([out_size])
         )
 
     def mean(self, in_sz: torch.Size, dim: int):
@@ -171,7 +152,7 @@ class FeedForwardBuilder(object):
         sz = list(in_sz)
         out_size = sz[:dim] + sz[dim+1:]
         return Operation(
-            modules.Lambda(lambda x: torch.mean(x, dim=dim)), torch.Size([out_size])
+            util_modules.Lambda(lambda x: torch.mean(x, dim=dim)), torch.Size([out_size])
         )
 
 
@@ -312,7 +293,7 @@ class ObjectiveBuilder(object):
             return sum([x * w for x, w in zip(args, weights)])
 
         return Operation(
-            modules.Lambda(_sum), torch.Size([]))
+            util_modules.Lambda(_sum), torch.Size([]))
 
 
     def mean(self, weights: typing.List[float]):
@@ -321,4 +302,4 @@ class ObjectiveBuilder(object):
             return sum([x * w for x, w in zip(args, weights)]) / len(args)
 
         return Operation(
-            modules.Lambda(_mean), torch.Size([]))
+            util_modules.Lambda(_mean), torch.Size([]))

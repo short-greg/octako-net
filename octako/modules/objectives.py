@@ -351,41 +351,13 @@ class GaussianKLDivReg(nn.Module):
         result = result.view(-1, 1)
         return self._w * self._reducer(result)
 
+# TODO: Check if still used
+class CompoundLoss(nn.Module):
 
-# class Regularizer(nn.Module):
+    def __init__(self, weights: list):
+        super().__init__()
+        self._weights = weights
 
-#     def __init__(self, weight: float, norm):
-#         """
-#         Args:
-#             w: The weight on the regularization (lambda)
-#             norm: Function to calculate a norm of the tensor
-#             passed in
-#         """
-#         self.weight = weight
-#         self.norm = norm
-    
-#     def forward(self, x):
-
-#         return self.weight * self.norm(x)
-
-# class LogReg(Regularizer):
-
-#     def __init__(
-#         self, base_regularizer: Regularizer,
-#         reduction_cls: base.ObjectiveReduction=base.MeanReduction,
-#         w: float=1.0, 
-#     ):
-#         """
-#         Args:
-#             w: The weight on the regularization (lambda)
-#         """
-#         super().__init__(False, reduction_cls, 1.0)
-#         self.base_regularizer = base_regularizer
-#         self.eps = 1e-5
-    
-#     def forward(self, x: torch.Tensor):
-#         """
-#         Calculate the log and regularize.
-#         An epsilon is added in case the value is 0 or really close to 0
-#         """
-#         return self.base_regularizer(torch.log(x + self.eps))
+    def forward(self, xs: typing.List[torch.Tensor]):
+        weighted = [x * w for x, w in zip(xs, self._weights)]
+        return sum(weighted)

@@ -975,3 +975,18 @@ class NetworkConstructor(object):
     def build_new(cls, inputs: typing.List[In]=None):
 
         return NetworkConstructor(Network(inputs))
+
+    
+class NetworkInterface(nn.Module):
+
+    def __init__(
+        self, network: Network, inputs: typing.List[str], outputs: typing.List[str]
+    ):
+        self._network = network
+        self._inputs = inputs
+        self._outputs = outputs
+
+    def forward(self, *x):
+        
+        by = dict(zip(self._inputs, x))
+        return self._network.probe(self._outputs, by)
