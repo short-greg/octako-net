@@ -75,7 +75,6 @@ class NetworkBuilder(object):
             return
 
         for input_node in cur_node.input_nodes:
-            print(input_node)
             self._build_network(self._nodes[input_node])
             
         node = self._node_processor.process_node(cur_node)
@@ -85,7 +84,6 @@ class NetworkBuilder(object):
     def get_result(self, default_interface: NetPorts=None):
         self._network = Network()
         for name, node in self._nodes.items():
-            print('Building ', node.name)
             self._build_network(node)
         
         if default_interface:

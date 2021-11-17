@@ -2,7 +2,6 @@ from enum import Enum
 import itertools
 from os import stat
 from torch.functional import norm
-from octako.machinery import modules
 from octako.modules.activations import NullActivation, Scaler
 from torch import nn
 import torch
@@ -131,12 +130,25 @@ class FeedForwardBuilder(object):
             util_modules.Flatten(keepbatch=True), torch.Size([-1, itertools.product(sz[1:])])
         )
 
+    def repeat(self, sz: torch.Size, repeat_by: list):
+
+        out_size = []
+        for x, y in zip(sz[1:], repeat_by):
+            if x == -1:
+                out_size.append(-1)
+            else:
+                out_size.append(x * y)
+
+        return Operation(
+            util_modules.Lambda(lambda x: x.repeat(1, *repeat_by)), torch.Size([-1, *out_size])
+        )
+
     def max(self, in_sz: torch.Size, dim: int):
         
         sz = list(in_sz)
         out_size = sz[:dim] + sz[dim+1:]
         return Operation(
-            util_modules.Lambda(lambda x: torch.max(x, dim=dim)[0]), torch.Size([out_size])
+            util_modules.Lambda(lambda x: torch.max(x, dim=dim)[0]), torch.Size(out_size)
         )
 
     def min(self, in_sz: torch.Size, dim: int):
@@ -144,7 +156,7 @@ class FeedForwardBuilder(object):
         sz = list(in_sz)
         out_size = sz[:dim] + sz[dim+1:]
         return Operation(
-            util_modules.Lambda(lambda x: torch.min(x, dim=dim)[0]), torch.Size([out_size])
+            util_modules.Lambda(lambda x: torch.min(x, dim=dim)[0]), torch.Size(out_size)
         )
 
     def mean(self, in_sz: torch.Size, dim: int):
@@ -152,7 +164,7 @@ class FeedForwardBuilder(object):
         sz = list(in_sz)
         out_size = sz[:dim] + sz[dim+1:]
         return Operation(
-            util_modules.Lambda(lambda x: torch.mean(x, dim=dim)), torch.Size([out_size])
+            util_modules.Lambda(lambda x: torch.mean(x, dim=dim)), torch.Size(out_size)
         )
 
 
@@ -231,50 +243,43 @@ class ObjectiveBuilder(object):
     """Builder for creating loss function modules
     """
 
-    def __init__(self):
-        self._regularizer: typing.Callable[[int, float]] = self.l2_reg
-        self._loss: typing.Callable[[int, float]] = self.mse
-        self._validator: typing.Callable[[int, float], Operation] = self.binary_val
-        self._target_processor: typing.Callable[[torch.Size], Operation] = self.null_processor
+    def mse(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction) -> Operation:
 
-    def mse(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
-
-        # TODO: Add in a weight
         return Operation(
             nn.MSELoss(reduction=reducer_cls.as_str()), reducer_cls.get_out_size(in_size)
         )
 
-    def bce(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
+    def bce(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction) -> Operation:
 
         return Operation(
             nn.BCELoss(reduction=reducer_cls.as_str()), reducer_cls.get_out_size(in_size)
         )
 
-    def cross_entropy(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
+    def cross_entropy(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction) -> Operation:
 
         return Operation(
             nn.CrossEntropyLoss(reduction=reducer_cls.as_str()), reducer_cls.get_out_size(in_size)
         )
 
-    def l1_reg(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
+    def l1_reg(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction) -> Operation:
 
         return Operation(
             objectives.L1Reg(reduction_cls=reducer_cls), reducer_cls.get_out_size(in_size)
         )
 
-    def l2_reg(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction):
+    def l2_reg(self, in_size: torch.Size, reducer_cls: objectives.ObjectiveReduction=objectives.MeanReduction) -> Operation:
 
         return Operation(
             objectives.L2Reg(reduction_cls=reducer_cls), reducer_cls.get_out_size(in_size)
         )
     
-    def binary_val(self, in_size: torch.Size, reducer_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction):
+    def binary_val(self, in_size: torch.Size, reducer_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction) -> Operation:
 
         return Operation(
             objectives.BinaryClassificationFitness(reduction_cls=reducer_cls), reducer_cls.get_out_size(in_size)
         )
 
-    def multiclass_val(self, in_size: torch.Size, reducer_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction):
+    def multiclass_val(self, in_size: torch.Size, reducer_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction) -> Operation:
 
         return Operation(
             objectives.ClassificationFitness(reduction_cls=reducer_cls), reducer_cls.get_out_size(in_size)
@@ -294,7 +299,6 @@ class ObjectiveBuilder(object):
 
         return Operation(
             util_modules.Lambda(_sum), torch.Size([]))
-
 
     def mean(self, weights: typing.List[float]):
 

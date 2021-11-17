@@ -1,8 +1,6 @@
 import typing
 import torch
 import torch.nn as nn
-import functools
-
 
 class Lambda(nn.Module):
 
@@ -27,7 +25,6 @@ class View(nn.Module):
         if self._keepbatch:
             return x.view(x.size(0), *self._sz)
         return x.view(self._sz)
-
 
 
 class Flatten(nn.Module):

@@ -481,7 +481,7 @@ class StandardCourse(Course):
 
     # TODO: Consider if I really want start/resume in here or in the dojo
     def start(self):
-        for i, teacher in enumerate(self._base_teachers):
+        for i, (_, teacher) in enumerate(self._base_teachers.items()):
             teacher.teach()
             last_iteration = i == len(self._base_teachers) - 1
             if not last_iteration:

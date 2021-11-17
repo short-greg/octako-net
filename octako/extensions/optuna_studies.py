@@ -3,8 +3,7 @@ from dataclasses import asdict, dataclass
 
 import optuna
 import typing
-import math
-from takonet.teaching import studies, dojos
+from octako.teaching import studies, dojos
 
 
 PDELIM = "/"

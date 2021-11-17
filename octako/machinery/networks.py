@@ -8,6 +8,9 @@ import itertools
 from abc import ABC, abstractmethod
 from functools import singledispatch, singledispatchmethod
 
+from octako.machinery import builders
+from octako.modules.utils import Lambda
+
 
 # TODO: Rewrite tests and get everything working
 
@@ -935,8 +938,26 @@ class NetworkConstructor(object):
 
         if isinstance(in_, Port):
             in_ = [in_]
-
+        
         node = OpNode(name, op.op, in_, op.out_size, labels)
+        return self._network.add_node(node)
+    
+    def add_module_op(
+        self, name: str, mod: nn.Module, 
+        out_size: typing.Union[typing.List[torch.Size], torch.Size], 
+        in_: typing.Union[Port, typing.List[Port]], 
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
+    ): 
+        node = OpNode(name, mod, in_, out_size, labels)
+        return self._network.add_node(node)
+
+    def add_lambda_op(
+        self, name: str, f: typing.Callable[[], torch.Tensor], 
+        out_size: typing.Union[typing.List[torch.Size], torch.Size], 
+        in_: typing.Union[Port, typing.List[Port]], 
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
+    ): 
+        node = OpNode(name, Lambda(f), in_, out_size, labels)
         return self._network.add_node(node)
 
     def add_subnet_interface(self, name: str, subnet_name: str, in_links: typing.List[Link], out_ports: typing.List[Port]):
@@ -982,6 +1003,7 @@ class NetworkInterface(nn.Module):
     def __init__(
         self, network: Network, inputs: typing.List[str], outputs: typing.List[str]
     ):
+        super().__init__()
         self._network = network
         self._inputs = inputs
         self._outputs = outputs
