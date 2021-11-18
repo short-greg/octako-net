@@ -17,7 +17,7 @@ class _Undefined:
     def __eq__(self, other):
         return isinstance(self, other)
 _UNDEFINED = _Undefined
-UNDEFINED = field(default_factory=_Undefined)
+UNDEFINED = partial(field, default_factory=_Undefined)
 
 
 @dataclass
@@ -42,7 +42,7 @@ class IAssembler(ABC):
     '''
     input_name: str="x"
     output_name: str="y"
-    input_size: torch.Size=UNDEFINED
+    input_size: torch.Size=UNDEFINED()
 
     def __post_init__(self):
         for k, v in asdict(self).items():
@@ -89,7 +89,6 @@ class FeedForwardAssembler(IAssembler):
     """
     network_name = 'network'
     dense_name = 'dense'
-    activation_name = 'act'
 
 
 FEED_FORWARD_BUILDER = builders.FeedForwardBuilder()
@@ -100,8 +99,8 @@ class DenseFeedForwardAssembler(FeedForwardAssembler):
     """
     
     activation_name: str="act"
-    layer_sizes: typing.List[int]=MISSING
-    out_size: int=MISSING
+    out_size: int=UNDEFINED()
+    layer_sizes: typing.List[int]=UNDEFINED()
     dense: typing.Callable[[], Operation] = FEED_FORWARD_BUILDER.linear
     activation: typing.Callable[[], Operation]=FEED_FORWARD_BUILDER.relu
     normalizer: typing.Callable[[float], Operation]=FEED_FORWARD_BUILDER.batch_normalizer
