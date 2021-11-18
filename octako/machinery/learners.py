@@ -189,11 +189,11 @@ class BinaryClassifier(Learner):
     def _assemble_network(self, network_assembler: DenseFeedForwardAssembler):
 
         loss_builder = builders.ObjectiveBuilder()
-        feed_forward_builder = builders.FeedForwardBuilder()
         target_size = torch.Size([-1])
-        network_assembler = network_assembler.set_names(
-            input_=self.INPUT_NAME, output=self.OUT_NAME
-        )
+        network_assembler = network_assembler
+        network_assembler.input_name = self.INPUT_NAME
+        network_assembler.output_name = self.OUT_NAME
+        
         constructor = networks.NetworkConstructor(network_assembler.build())
         in_, out = constructor[[self.INPUT_NAME, self.OUT_NAME]].ports
         target, = constructor.add_tensor_input(self.TARGET_NAME, target_size, labels=["target"])
@@ -270,9 +270,9 @@ class Multiclass(Learner):
     def _assemble_network(self, network_assembler: DenseFeedForwardAssembler):
 
         builder = builders.ObjectiveBuilder()
-        network_assembler = network_assembler.set_names(
-            input_=self.INPUT_NAME, output=self.FUZZY_OUT_NAME
-        )
+        network_assembler.input_name = self.INPUT_NAME
+        network_assembler.output_name = self.OUT_NAME
+
         constructor = networks.NetworkConstructor(network_assembler.build())
         in_, out = constructor[[self.INPUT_NAME, self.FUZZY_OUT_NAME]].ports
         target, = constructor.add_tensor_input(self.TARGET_NAME, out.size, labels=["target"])
@@ -333,6 +333,8 @@ class Regressor(Learner):
     ):
         # out_size = torch.Size([-1, n_out])
         self._device = device
+        network_assembler.input_name = self.INPUT_NAME
+        network_assembler.output_name = self.OUT_NAME
         self._network = self._assemble_network(network_assembler)
 
         self._learning_algorithm = learning_algorithm_cls(
