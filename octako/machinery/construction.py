@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod, abstractproperty
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from enum import Enum
 import itertools
 from os import stat
@@ -9,11 +9,11 @@ from octako.modules.activations import NullActivation, Scaler
 from torch import nn
 import torch
 from octako.modules import objectives
-from .networks import Network, NetworkConstructor, Operation
+from .networks import Network, NetworkConstructor, Operation, Port
 import typing
 from . import utils
 from octako.modules import utils as util_modules
-from functools import partial
+from functools import partial, singledispatchmethod
 
 """
 Overview: Modules for building layers in a network
@@ -37,6 +37,28 @@ class _Undefined:
 _UNDEFINED = _Undefined
 UNDEFINED = partial(field, default_factory=_Undefined)
 
+
+@dataclass
+class BaseNetwork(object):
+    """
+    Base network to build off of. Can be used in the build() method
+    """
+
+    constructor: NetworkConstructor
+    ports: typing.List[Port]
+
+    def __post_init__(self):
+
+        if isinstance(self.ports, Port):
+            self.ports = [self.ports]
+
+    @singledispatchmethod
+    def update(self, ports):
+        self.ports = ports
+
+    @update.register
+    def update(self, ports: Port):
+        self.ports = [ports]
 
 class OpFactory(ABC):
     
@@ -427,19 +449,20 @@ class LinearLayerBuilder(OpBuilder):
 @dataclass
 class FeedForwardBuilder(NetBuilder):
 
-    in_size: torch.Size
+    # pass in a size and a name to start a new network
+    # otherwise base in a base network to build off another
+    base: InitVar(typing.Union[typing.Tuple[torch.Size, str], BaseNetwork])
     out_features: typing.List[int]
-    input_name: str="x"
     base_name: str="layer"
     labels: typing.List[str]=field(default_factory=partial(list, "linear"))
     activation: ActivationFactory=ActivationFactory(torch_act=nn.ReLU)
     normalizer: NormalizerFactory=None
     dropout: DropoutFactory=None
 
-    def __post_init__(self):
-        self._network_constructor = NetworkConstructor(Network())
-        self._layer_builder = LinearLayerBuilder(self.in_size)
-        self._cur_in_size = self.in_size
+    def __post_init__(self, base: typing.Union[typing.Tuple(torch.Size, str), BaseNetwork]):
+        self._cur_base = self._setup_base(base)
+        self._layer_builder = LinearLayerBuilder(self._in_size)
+        self._cur_in_size = self._in_size
         self._n_layers = 0
         self._port = None
 
@@ -451,10 +474,6 @@ class FeedForwardBuilder(NetBuilder):
         
         if 0 < layer_num <= len(self.out_features):
             raise ValueError(f"{layer_num} must be in range [0, {len(self.out_features)})")
-        if self._port is None:
-            self._port, = self._network_constructor.add_tensor_input(
-                self.input_name, self.in_size
-            )
 
         self._layer_builder.reset(in_size=self._cur_in_size)
         name = utils.coalesce(name, f'{self.base_name}_{self._n_layers}')
@@ -471,18 +490,35 @@ class FeedForwardBuilder(NetBuilder):
             self._layer_builder.build_activation()
         
         op = self._layer_builder.product
-        self._network_constructor.add_op(
+        self._cur_base.update(self._cur_base.constructor.add_op(
             name, op, self._port, labels
-        )
+        ))
         self._cur_in_size = op.out_size
         self._n_layers += 1
 
-    def reset(self):
-        self._network_constructor = NetworkConstructor(Network())
-        self._layer_builder = LinearLayerBuilder(self.in_size)
-        self._cur_in_size = self.in_size
+    @singledispatchmethod
+    def _setup_base(self, base) -> BaseNetwork:
+        # it's already a BaseNetwork
+        return base
+
+    @_setup_base.register
+    def _(self, base: typing.Tuple) -> BaseNetwork:
+        network_constructor = NetworkConstructor(Network())
+        in_size = base[0]
+        input_name = base[1]
+        port = network_constructor.add_tensor_input(
+            input_name, in_size
+        )
+        return BaseNetwork(network_constructor, port)
+
+    def reset(self, base: typing.Union[typing.Tuple[torch.Size, str], BaseNetwork]=None, input_name: str=None):
+        if base is not None:
+            self._network_constructor, self._in_size = self._setup_base(base)
+        
+        self._layer_builder = LinearLayerBuilder(self._in_size)
+        self._cur_in_size = self._in_size
         self._n_layers = 0
         self._port = None
 
     def product(self) -> Network:
-        return self._network_constructor.net
+        return self._cur_base.constructor.net
