@@ -4,6 +4,9 @@ import torch
 from . import networks
 import torch.optim
 import torch.nn
+from .construction import (
+    FeedForwardBuilder
+)
 from .assemblers import (
     BaseNetwork, DenseFeedForwardAssembler, FeedForwardAssembler, IAssembler
 )
@@ -166,14 +169,21 @@ class BinaryClassifier(Learner):
     VALIDATION_NAME = 'classification'
 
     def __init__(
-        self, network_assembler: FeedForwardAssembler, 
+        self, network_builder: FeedForwardBuilder, 
         learning_algorithm_cls: typing.Type[LearningAlgorithm],
         testing_algorithm_cls: typing.Type[TestingAlgorithm],
         optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
         device='cpu'
     ):
         self._device = device
-        self._network = self._assemble_network(network_assembler)
+        # self._network = self._assemble_network(network_assembler)
+        network_builder.input_name = "x"
+        for i in range(network_builder.n_layers - 1):
+            network_builder.build_layer(i, name="layer")
+        network_builder.build_layer(
+            network_builder.n_layers, self.OUT_NAME
+        )
+        self._network = network_builder.product
 
         self._learning_algorithm = learning_algorithm_cls(
             optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 

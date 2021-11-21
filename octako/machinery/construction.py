@@ -9,7 +9,7 @@ from octako.modules.activations import NullActivation, Scaler
 from torch import nn
 import torch
 from octako.modules import objectives
-from .networks import Network, Operation
+from .networks import Network, NetworkConstructor, Operation
 import typing
 from . import utils
 from octako.modules import utils as util_modules
@@ -70,12 +70,12 @@ class NetBuilder(ABC):
 @dataclass
 class ActivationFactory(OpReversibleFactory):
 
+    torch_act_cls: typing.Type[nn.Module] = nn.ReLU
     kwargs: dict = field(default_factory=dict)
-    torch_act: typing.Type[nn.Module] = nn.ReLU
 
     def produce(self, in_size: torch.Size) -> Operation:
         
-        return Operation(self.torch_act(**self.kwargs), in_size)
+        return Operation(self.torch_act_cls(**self.kwargs), in_size)
     
     def produce_reverse(self, in_size: torch.Size) -> Operation:
         return self.produce(in_size)
@@ -90,10 +90,10 @@ class NormalizerFactory(OpReversibleFactory):
     affine: bool=True
     device: str="cpu"
     dtype: torch.dtype= torch.float32
-    torch_normalizer: typing.Type[nn.Module] = nn.BatchNorm1d
+    torch_normalizer_cls: typing.Type[nn.Module] = nn.BatchNorm1d
 
     def produce(self, in_size: torch.Size) -> Operation:
-        return Operation(self.torch_normalizer(
+        return Operation(self.torch_normalizer_cls(
             in_size[1], eps=self.eps, momentum=self.momentum, 
             affine=self.affine,
             track_running_stats=self.track_running_stats,
@@ -136,11 +136,11 @@ class DropoutFactory(OpReversibleFactory):
 
     p: float=0.2
     inplace: bool=False
-    dropout: typing.Type[nn.Module] = nn.Dropout
+    dropout_cls: typing.Type[nn.Module] = nn.Dropout
 
     def produce(self, in_size: torch.Size) -> Operation:
         return Operation(
-            self.dropout(p=self.p, inplace=self.inplace),
+            self.dropout_cls(p=self.p, inplace=self.inplace),
             torch.Size(in_size)
         )
     
@@ -153,12 +153,12 @@ class DimAggregateFactory(OpFactory):
 
     dim: int=1
     index: int=None
-    torch_agg: typing.Callable[[int], torch.Tensor]=torch.mean
+    torch_agg_fn: typing.Callable[[int], torch.Tensor]=torch.mean
 
     def produce(self, in_size: torch.Size) -> Operation:
         f = lambda x: (
-            self.torch_agg(x, dim=self.dim) if self.index is None
-            else self.torch_agg(x, dim=self.dim)[self.index]
+            self.torch_agg_fn(x, dim=self.dim) if self.index is None
+            else self.torch_agg_fn(x, dim=self.dim)[self.index]
         )
         out_size = in_size[:self.dim] + in_size[self.dim + 1:]
         return Operation(
@@ -173,8 +173,8 @@ class ConvolutionFactory(OpReversibleFactory):
     k: typing.Union[int, typing.Tuple]=1
     stride: typing.Union[int, typing.Tuple]=1
     padding: typing.Union[int, typing.Tuple]=0
-    torch_conv: typing.Type[nn.Module]= nn.Conv2d
-    torch_deconv: typing.Type[nn.Module]= nn.ConvTranspose2d
+    torch_conv_cls: typing.Type[nn.Module]= nn.Conv2d
+    torch_deconv_cls: typing.Type[nn.Module]= nn.ConvTranspose2d
     kwargs: dict=field(default_factory=dict)
 
     def produce(self, in_size: torch.Size):
@@ -182,7 +182,7 @@ class ConvolutionFactory(OpReversibleFactory):
         out_sizes = utils.calc_conv_out(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, self.out_features, *out_sizes])
         return Operation(
-            self.torch_conv(in_size[1], self.out_features, 
+            self.torch_conv_cls(in_size[1], self.out_features, 
             self.k, self.stride, padding=self.padding, **self.kwargs),
             out_size
         )
@@ -191,7 +191,7 @@ class ConvolutionFactory(OpReversibleFactory):
         out_sizes = utils.calc_conv_transpose_out(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, self.out_features, *out_sizes])
         return Operation(
-            self.torch_conv(in_size[1], self.out_features, 
+            self.torch_deconv_cls(in_size[1], self.out_features, 
             self.k, self.stride, padding=self.padding, **self.kwargs),
             out_size
         )
@@ -203,8 +203,8 @@ class PoolFactory(OpReversibleFactory):
     k: typing.Union[int, typing.Tuple]=1
     stride: typing.Union[int, typing.Tuple]=1
     padding: typing.Union[int, typing.Tuple]=0
-    torch_pool: typing.Type[nn.Module]= nn.MaxPool2d
-    torch_unpool: typing.Type[nn.Module]= nn.MaxUnpool2d
+    torch_pool_cls: typing.Type[nn.Module]= nn.MaxPool2d
+    torch_unpool_cls: typing.Type[nn.Module]= nn.MaxUnpool2d
     kwargs: dict=field(default_factory=dict)
 
     def produce(self, in_size: torch.Size):
@@ -212,7 +212,7 @@ class PoolFactory(OpReversibleFactory):
         out_sizes = utils.calc_max_pool_out(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, in_size[1], *out_sizes])
         return Operation(
-            self.torch_pool(in_size[1], in_size[1], self.k, self.stride, padding=self.padding),
+            self.torch_pool_cls(in_size[1], in_size[1], self.k, self.stride, padding=self.padding),
             out_size
         )
     
@@ -220,7 +220,7 @@ class PoolFactory(OpReversibleFactory):
         out_sizes = utils.calc_maxunpool_out(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, in_size[1], *out_sizes])
         return Operation(
-            self.torch_unpool(in_size[1], in_size[1], self.k, self.stride, padding=self.padding),
+            self.torch_unpool_cls(in_size[1], in_size[1], self.k, self.stride, padding=self.padding),
             out_size
         )
     
@@ -371,3 +371,118 @@ class AggregateFactory(OpFactory):
             util_modules.Lambda(aggregator),
             in_size
         )
+
+
+@dataclass
+class LinearLayerBuilder(OpBuilder):
+
+    in_size: torch.Size
+    activation: ActivationFactory=ActivationFactory(torch.nn.ReLU)
+    dropout: DropoutFactory=DropoutFactory()
+    normalizer: NormalizerFactory=NormalizerFactory()
+    bias: bool=True
+
+    def __post_init__(self):
+        self._cur_in_size = self.in_size
+        self._product: nn.Sequential = nn.Sequential()
+    
+    def _add_op(self, op: Operation):
+        self._cur_in_size = op.out_size
+        self._product.add_module(op.op)
+
+    def build_activation(self):
+        self._add_op(self.activation.produce(self._cur_in_size))
+    
+    def build_linear(self, out_features):
+        self._add_op(
+            LinearFactory(out_features, bias=self.bias).produce(self._cur_in_size)
+        )
+
+    def build_normalizer(self):
+        self._add_op(
+            self.normalizer.produce(self._cur_in_size)
+        )
+
+    def build_dropout(self):
+        self._add_op(
+            self.dropout.produce(self._cur_in_size)
+        )
+
+    @property
+    def product(self) -> Operation:
+        return Operation(self._product, self._cur_in_size)
+    
+    def reset(self, in_size: torch.Size=None) -> None:
+        self._product = nn.Sequential()
+        self._cur_in_size = self.in_size
+        self.in_size = utils.coalesce(in_size, self.in_size)
+    
+    def build_standard(self, out_features: int):
+        self.build_dropout()
+        self.build_linear(out_features)
+        self.build_normalizer()
+        self.build_activation()
+
+
+@dataclass
+class FeedForwardBuilder(NetBuilder):
+
+    in_size: torch.Size
+    out_features: typing.List[int]
+    input_name: str="x"
+    base_name: str="layer"
+    labels: typing.List[str]=field(default_factory=partial(list, "linear"))
+    activation: ActivationFactory=ActivationFactory(torch_act=nn.ReLU)
+    normalizer: NormalizerFactory=None
+    dropout: DropoutFactory=None
+
+    def __post_init__(self):
+        self._network_constructor = NetworkConstructor(Network())
+        self._layer_builder = LinearLayerBuilder(self.in_size)
+        self._cur_in_size = self.in_size
+        self._n_layers = 0
+        self._port = None
+
+    @property
+    def n_layers(self):
+        pass
+
+    def build_layer(self, layer_num: int, name: str=None, labels: typing.List[str]=None):
+        
+        if 0 < layer_num <= len(self.out_features):
+            raise ValueError(f"{layer_num} must be in range [0, {len(self.out_features)})")
+        if self._port is None:
+            self._port, = self._network_constructor.add_tensor_input(
+                self.input_name, self.in_size
+            )
+
+        self._layer_builder.reset(in_size=self._cur_in_size)
+        name = utils.coalesce(name, f'{self.base_name}_{self._n_layers}')
+        labels = utils.coalesce(labels, self.labels)
+        if self.dropout:
+            self._layer_builder.dropout = self.dropout
+            self._layer_builder.build_dropout()
+        self._layer_builder.build_linear(self.out_features[layer_num])
+        if self.normalizer:
+            self._layer_builder.normalizer = self.normalizer
+            self._layer_builder.build_normalizer()
+        if self.activation:
+            self._layer_builder.activation = self.activation
+            self._layer_builder.build_activation()
+        
+        op = self._layer_builder.product
+        self._network_constructor.add_op(
+            name, op, self._port, labels
+        )
+        self._cur_in_size = op.out_size
+        self._n_layers += 1
+
+    def reset(self):
+        self._network_constructor = NetworkConstructor(Network())
+        self._layer_builder = LinearLayerBuilder(self.in_size)
+        self._cur_in_size = self.in_size
+        self._n_layers = 0
+        self._port = None
+
+    def product(self) -> Network:
+        return self._network_constructor.net
