@@ -132,6 +132,25 @@ class OpBuilder(AbstractConstructor):
 
 class NetBuilder(AbstractConstructor):
 
+    base: InitVar(typing.Union[BaseInput, BaseNetwork])
+
+    def __post_init__(self, base: typing.Union[BaseInput, BaseNetwork]):
+        
+        super().__post_init__()
+
+        self._cur_base = self._setup_base(base)
+        self._layer_builder = LinearLayerBuilder(self._cur_base.ports[0].size)
+        self._n_layers = 0
+
+    @singledispatchmethod
+    def _setup_base(self, base) -> BaseNetwork:
+        return base
+
+    @_setup_base.register
+    def _(self, base: BaseInput) -> BaseNetwork:
+
+        return BaseNetwork.from_base_input(base)
+
     @abstractproperty
     def product(self) -> Network:
         pass
@@ -507,21 +526,12 @@ class LinearLayerBuilder(OpBuilder):
 class FeedForwardBuilder(NetBuilder):
 
     # pass in the base of the network
-    base: InitVar(typing.Union[BaseInput, BaseNetwork])
     out_features: typing.List[int]
     base_name: str="layer"
     labels: typing.List[str]=field(default_factory=partial(list, "linear"))
     activation: ActivationFactory=ActivationFactory(torch_act=nn.ReLU)
     normalizer: NormalizerFactory=None
     dropout: DropoutFactory=None
-
-    def __post_init__(self, base: typing.Union[BaseInput, BaseNetwork]):
-        
-        super().__post_init__()
-
-        self._cur_base = self._setup_base(base)
-        self._layer_builder = LinearLayerBuilder(self._cur_base.ports[0].size)
-        self._n_layers = 0
 
     @property
     def n_layers(self):
@@ -553,23 +563,13 @@ class FeedForwardBuilder(NetBuilder):
         ))
         self._n_layers += 1
 
-    @singledispatchmethod
-    def _setup_base(self, base) -> BaseNetwork:
-        return base
-
-    @_setup_base.register
-    def _(self, base: BaseInput) -> BaseNetwork:
-
-        return BaseNetwork.from_base_input(base)
-
     def reset(
-        self, base: typing.Union[BaseInput, BaseNetwork]=None,
+        self, base: typing.Union[BaseInput, BaseNetwork],
         reset_base_data: bool=True
     ):
         super().reset(reset_base_data)
-        if base is not None:
-            self._cur_base = self._setup_base(base)
-            self._n_layers = 0
+        self._cur_base = self._setup_base(base)
+        self._n_layers = 0
 
     def product(self) -> Network:
         return self._cur_base.constructor.net
