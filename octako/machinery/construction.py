@@ -499,7 +499,6 @@ class FeedForwardDirector(NetDirector):
     in_features: int=UNDEFINED
     out_features: typing.List[int]=UNDEFINED
     base_name: str="layer"
-    # labels: typing.List[str]=field(default_factory=partial(list, "linear"))
     activation: ActivationFactory=ActivationFactory(torch_act=nn.ReLU)
     out_activation: ActivationFactory=ActivationFactory(torch_act=nn.ReLU)
     normalizer: Opt[NormalizerFactory]=None
@@ -525,29 +524,30 @@ class FeedForwardDirector(NetDirector):
         linear_factory = LinearFactory(UNDEFINED, self.use_bias, device=self.device)         
         linear_factory.bias = self.use_bias
         linear_factory.device = self.device
+        constructor.base_labels = self.labels
 
         for i, n_out in enumerate(self.out_features):
             linear_factory.out_features = n_out
             if self.dropout is not None: 
                 port, = constructor.add_op(
-                    f"dropout_{i}",
-                    self.dropout.produce(port.size), port.size, labels=self.labels
+                    f"dropout_{i}", self.dropout.produce(port.size)
                 )
             port, = constructor.add_op(
-                f"linear_{i}", linear_factory.produce(port.size), port, self.labels
+                f"linear_{i}", linear_factory.produce(port.size)
             )
             if self.normalizer is not None:
                 port, = constructor.add_op(
-                    f"normalizer_{i}", self.normalizer.produce(port.size), port, self.labels
+                    f"normalizer_{i}", self.normalizer.produce(port.size)
                 )
             if i < len(self.out_features  - 1):
                 port, = constructor.add_op(
-                    f"activation_{i}", self.activation.produce(port.size), port, self.labels
+                    f"activation_{i}", self.activation.produce(port.size)
                 )
                 
-            constructor.add_op(     
-                self.output_name, self.out_activation.produce(port.size), port, self.labels
-            )
+        constructor.add_op(     
+            self.output_name, self.out_activation.produce(port.size)
+        )
+        return constructor.net
 
     def produce(self) -> Network:
 

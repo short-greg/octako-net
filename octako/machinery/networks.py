@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from functools import singledispatch, singledispatchmethod
 
 from octako.machinery import builders
+from octako.machinery.utils import coalesce
 from octako.modules.utils import Lambda
 
 
@@ -888,13 +889,22 @@ class InterfaceNode(Node):
 class NetworkConstructor(object):
     """
     Convenience class for building networks
-
+    - Handles adding nodes to the network to simplify that process
+    - Do not need to specify the incoming ports if the incoming ports
+    -  are the outputs of the previously added node
+    - Can set base labels that will apply to all nodes added to the network
+    -  that use the convenience methods (not add_node)
     """
 
-    def __init__(self, network: Network):
+    def __init__(self, network: Network=None):
+        """
+        network: Network - The network to construct
+        """
 
-        self._network = network
+        self._network = network or Network()
         self._subnets: typing.Dict[str, Network] = {}
+        self.base_labels: typing.Optional[typing.List[str]] = None
+        self._cur_ports: typing.List[Port] = None
     
     def add_subnets(self, **kwargs: typing.Dict[str, Network]): # name: str, network: Network):
         
@@ -904,6 +914,20 @@ class NetworkConstructor(object):
         
             self._subnets[name] = SubNetwork(name, network)
     
+    def _coalesce(self, ports, labels):
+        out_labels = []
+        if self.base_labels is not None:
+            out_labels += self.base_labels
+        if labels is not None:
+            out_labels += labels
+
+        ports = coalesce(ports, self._cur_ports)
+        return ports, labels
+
+    def _set_ports(self, ports):
+        self._cur_ports = ports
+        return ports
+
     @property
     def net(self):
         return self._network
@@ -916,9 +940,10 @@ class NetworkConstructor(object):
 
     def add_node(self, node: Node):
         self._network.add_node(node)
+        return self._set_ports(node.ports)
 
     def add_op(
-        self, name: str, op: Operation, in_: typing.Union[Port, typing.List[Port]], 
+        self, name: str, op: Operation, in_: typing.Union[Port, typing.List[Port]]=None, 
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
     ) -> typing.List[Port]:
         """[summary]
@@ -939,17 +964,19 @@ class NetworkConstructor(object):
         if isinstance(in_, Port):
             in_ = [in_]
         
+        in_, labels = self._coalesce(in_, labels)
         node = OpNode(name, op.op, in_, op.out_size, labels)
-        return self._network.add_node(node)
+        return self._set_ports(self._network.add_node(node))
     
     def add_module_op(
         self, name: str, mod: nn.Module, 
         out_size: typing.Union[typing.List[torch.Size], torch.Size], 
-        in_: typing.Union[Port, typing.List[Port]], 
+        in_: typing.Union[Port, typing.List[Port]]=None, 
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
     ): 
+        in_, labels = self._coalesce(in_, labels)
         node = OpNode(name, mod, in_, out_size, labels)
-        return self._network.add_node(node)
+        return self._set_ports(self._network.add_node(node))
 
     def add_lambda_op(
         self, name: str, f: typing.Callable[[], torch.Tensor], 
@@ -957,35 +984,40 @@ class NetworkConstructor(object):
         in_: typing.Union[Port, typing.List[Port]], 
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
     ): 
+        in_, labels = self._coalesce(in_, labels)
         node = OpNode(name, Lambda(f), in_, out_size, labels)
-        return self._network.add_node(node)
+        return self._set_ports(self._network.add_node(node))
 
     def add_subnet_interface(self, name: str, subnet_name: str, in_links: typing.List[Link], out_ports: typing.List[Port]):
         subnet = self._subnets[subnet_name]
         node = InterfaceNode(name, subnet, out_ports, in_links)
-        return self._network.add_node(node)
+        return self._set_ports(self._network.add_node(node))
     
     def add_input(self, name, sz: torch.Size, value_type: typing.Type, default_value, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
         
+        _, labels = self._coalesce(None, labels)
         node = In(name, sz, value_type, default_value, labels, annotation)
-        return self._network.add_node(node)
+        return self._set_ports(self._network.add_node(node))
 
     def add_tensor_input(self, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
         
+        _, labels = self._coalesce(None, labels)
         node = In.from_tensor(name, sz, default_value, labels, annotation)
-        return self._network.add_node(node)
+        return self._set_ports(self._network.add_node(node))
 
     def add_scalar_input(self, name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
 
+        _, labels = self._coalesce(None, labels)
         node = In.from_scalar(name, default_type, default_value, labels, annotation)
-        return self._network.add_node(node)
+        return self._set_ports(self._network.add_node(node))
 
     def add_parameter(
         self, name: str, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], 
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None
     ):
+        _, labels = self._coalesce(None, labels)
         node = Parameter(name, sz, reset_func, labels, annotation)
-        return self._network.add_node(node)
+        return self._set_ports(self._network.add_node(node))
     
     def set_default_interface(self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]):
         self._network.set_default_interface(
