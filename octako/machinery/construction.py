@@ -3,7 +3,9 @@ from dataclasses import InitVar, asdict, dataclass, field
 from enum import Enum
 import itertools
 from os import stat
-from torch._C import Module, float32
+from optuna.study.study import BaseStudy
+from pandas.core import base
+
 from torch.functional import norm
 from octako.modules.activations import NullActivation, Scaler
 from torch import nn
@@ -11,6 +13,7 @@ import torch
 from octako.modules import objectives
 from .networks import Network, NetworkConstructor, Operation, Port
 import typing
+from typing import Optional as Opt, Union
 from . import utils
 from octako.modules import utils as util_modules
 from functools import partial, singledispatchmethod
@@ -97,12 +100,22 @@ class AbstractConstructor(ABC):
     def __post_init__(self):
         
         self._base_data = asdict(self)
-    
-    def reset(self, reset_base_data: bool=True):
 
-        if reset_base_data:
-            for k, v in self._base_data.items():
-                self.__setattr__(k, v)
+    def reset(self):        
+        for k, v in self._base_data.items():
+            if isinstance(v, AbstractConstructor):
+               v.reset() 
+            self.__setattr__(k, v)
+
+
+def check_undefined(f):
+
+    def _(dataclass_obj, *args, **kwargs):
+        for k, v in asdict(dataclass_obj):
+            if v == UNDEFINED:
+                raise ValueError(f"Parameter {k} has not been defined for {type(dataclass_obj)}")
+        return f(dataclass_obj, *args, **kwargs)
+    return _
 
 
 class OpFactory(AbstractConstructor):
@@ -123,38 +136,24 @@ class OpReversibleFactory(AbstractConstructor):
         pass
 
 
-class OpBuilder(AbstractConstructor):
+class OpDirector(AbstractConstructor):
 
-    @abstractproperty
-    def product(self) -> Operation:
+    @abstractmethod
+    def produce(self) -> Operation:
         pass
 
 
-class NetBuilder(AbstractConstructor):
+class NetDirector(AbstractConstructor):
 
-    base: InitVar(typing.Union[BaseInput, BaseNetwork])
+    base: BaseInput
 
-    def __post_init__(self, base: typing.Union[BaseInput, BaseNetwork]):
-        
-        super().__post_init__()
-
-        self._cur_base = self._setup_base(base)
-        self._layer_builder = LinearLayerBuilder(self._cur_base.ports[0].size)
-        self._n_layers = 0
-
-    @singledispatchmethod
-    def _setup_base(self, base) -> BaseNetwork:
-        return base
-
-    @_setup_base.register
-    def _(self, base: BaseInput) -> BaseNetwork:
-
-        return BaseNetwork.from_base_input(base)
-
-    @abstractproperty
-    def product(self) -> Network:
+    @abstractmethod
+    def produce(self) -> Network:
         pass
 
+    @abstractmethod
+    def append(self, base_network: BaseNetwork) -> Network:
+        pass
 
 @dataclass
 class ActivationFactory(OpReversibleFactory):
@@ -163,7 +162,6 @@ class ActivationFactory(OpReversibleFactory):
     kwargs: dict = field(default_factory=dict)
 
     def produce(self, in_size: torch.Size) -> Operation:
-        
         return Operation(self.torch_act_cls(**self.kwargs), in_size)
     
     def produce_reverse(self, in_size: torch.Size) -> Operation:
@@ -173,13 +171,13 @@ class ActivationFactory(OpReversibleFactory):
 @dataclass
 class NormalizerFactory(OpReversibleFactory):
 
+    torch_normalizer_cls: typing.Type[nn.Module] = nn.BatchNorm1d
     eps: float=1e-4
     momentum: float=1e-1
     track_running_stats: bool=True
     affine: bool=True
     device: str="cpu"
     dtype: torch.dtype= torch.float32
-    torch_normalizer_cls: typing.Type[nn.Module] = nn.BatchNorm1d
 
     def produce(self, in_size: torch.Size) -> Operation:
         return Operation(self.torch_normalizer_cls(
@@ -463,113 +461,100 @@ class AggregateFactory(OpFactory):
 
 
 @dataclass
-class LinearLayerBuilder(OpBuilder):
+class LinearLayerDirector(OpDirector):
 
-    in_size: torch.Size
-    activation: ActivationFactory=ActivationFactory(torch.nn.ReLU)
-    dropout: DropoutFactory=DropoutFactory()
-    normalizer: NormalizerFactory=NormalizerFactory()
+    in_features: int=UNDEFINED
+    out_features: int=UNDEFINED
+    activation: Opt[ActivationFactory]=ActivationFactory(torch.nn.ReLU)
+    dropout: Opt[DropoutFactory]=DropoutFactory()
+    normalizer: Opt[NormalizerFactory]=NormalizerFactory()
     bias: bool=True
+    device: str="cpu"
 
-    def __post_init__(self):
-        super().__post_init__()
-        self._cur_in_size = self.in_size
-        self._product: nn.Sequential = nn.Sequential()
-        if self.activation is None:
-            self.activation = NullFactory()
-        if self.normalizer is None:
-            self.normalizer = NullFactory()
-        if self.dropout is None:
-            self.dropout = NullFactory()
-    
-    def _add_op(self, op: Operation):
-        self._cur_in_size = op.out_size
-        self._product.add_module(op.op)
-
-    def build_activation(self):
-        self._add_op(self.activation.produce(self._cur_in_size))
-    
-    def build_linear(self, out_features):
-        self._add_op(
-            LinearFactory(out_features, bias=self.bias).produce(self._cur_in_size)
+    @check_undefined
+    def produce(self) -> Operation:
+        sequential = nn.Sequential()
+        in_size = torch.Size([-1, self.in_features])
+        out_size = torch.Size([-1, self.out_features])
+        if self.dropout is not None:
+            sequential.add_module(self.dropout.produce(in_size).op)
+        sequential.add_module(
+            nn.Linear(self.in_features, self.out_features, self.bias, self.device)
         )
-
-    def build_normalizer(self):
-        self._add_op(
-            self.normalizer.produce(self._cur_in_size)
-        )
-
-    def build_dropout(self):
-        self._add_op(
-            self.dropout.produce(self._cur_in_size)
-        )
-
-    @property
-    def product(self) -> Operation:
-        return Operation(self._product, self._cur_in_size)
-    
-    def reset(self, in_size: torch.Size=None, reset_base_data: bool=True) -> None:
-
-        super().reset(reset_base_data)
-        self._product = nn.Sequential()
-        self._cur_in_size = self.in_size
-        self.in_size = utils.coalesce(in_size, self.in_size)
-    
-    def build_standard(self, out_features: int):
-        self.build_dropout()
-        self.build_linear(out_features)
-        self.build_normalizer()
-        self.build_activation()
+        
+        if self.normalizer is not None:
+            sequential.add_module(
+                self.normalizer.produce(out_size),
+            )
+        if self.activation is not None:
+            sequential.add_module(
+                self.activation.produce(out_size)
+            )
+        return Operation(sequential, out_size)
 
 
 @dataclass
-class FeedForwardBuilder(NetBuilder):
+class FeedForwardDirector(NetDirector):
 
-    # pass in the base of the network
-    out_features: typing.List[int]
+    in_features: int=UNDEFINED
+    out_features: typing.List[int]=UNDEFINED
     base_name: str="layer"
-    labels: typing.List[str]=field(default_factory=partial(list, "linear"))
+    # labels: typing.List[str]=field(default_factory=partial(list, "linear"))
     activation: ActivationFactory=ActivationFactory(torch_act=nn.ReLU)
-    normalizer: NormalizerFactory=None
-    dropout: DropoutFactory=None
+    out_activation: ActivationFactory=ActivationFactory(torch_act=nn.ReLU)
+    normalizer: Opt[NormalizerFactory]=None
+    dropout: Opt[DropoutFactory]=None
+    input_name: str="x"
+    output_name: str="x"
+    labels: Opt[typing.List[str]]=None
+    use_bias: bool=True
+    device: str="cpu"
 
     @property
-    def n_layers(self):
-        pass
-
-    def build_layer(self, layer_num: int, name: str=None, labels: typing.List[str]=None):
+    def n_layers(self) -> typing.Union[int, UNDEFINED]:
+        if self.out_features == UNDEFINED:
+            return UNDEFINED
+        return len(self.out_features)
+    
+    @check_undefined
+    def append(self, base_network: BaseNetwork) -> Network:
         
-        if 0 < layer_num <= len(self.out_features):
-            raise ValueError(f"{layer_num} must be in range [0, {len(self.out_features)})")
+        constructor = base_network.constructor
+        port, = base_network.ports
+        
+        linear_factory = LinearFactory(UNDEFINED, self.use_bias, device=self.device)         
+        linear_factory.bias = self.use_bias
+        linear_factory.device = self.device
 
-        self._layer_builder = LinearLayerBuilder(
-            dropout=self.dropout,
-            normalizer=self.normalizer,
-            in_size=self._cur_base.ports[0].size,
-            activation=self.activation
+        for i, n_out in enumerate(self.out_features):
+            linear_factory.out_features = n_out
+            if self.dropout is not None: 
+                port, = constructor.add_op(
+                    f"dropout_{i}",
+                    self.dropout.produce(port.size), port.size, labels=self.labels
+                )
+            port, = constructor.add_op(
+                f"linear_{i}", linear_factory.produce(port.size), port, self.labels
+            )
+            if self.normalizer is not None:
+                port, = constructor.add_op(
+                    f"normalizer_{i}", self.normalizer.produce(port.size), port, self.labels
+                )
+            if i < len(self.out_features  - 1):
+                port, = constructor.add_op(
+                    f"activation_{i}", self.activation.produce(port.size), port, self.labels
+                )
+                
+            constructor.add_op(     
+                self.output_name, self.out_activation.produce(port.size), port, self.labels
+            )
+
+    def produce(self) -> Network:
+
+        constructor = NetworkConstructor(Network())
+        in_ = constructor.add_tensor_input(
+            self.input_name, torch.Size([-1, self.in_features]), 
+            labels=self.labels,
+            device=self.device
         )
-
-        self._layer_builder.reset(in_size=self._cur_base.ports[0].size)
-        name = utils.coalesce(name, f'{self.base_name}_{self._n_layers}')
-        labels = utils.coalesce(labels, self.labels)
-        if self.dropout: self._layer_builder.build_dropout()
-        self._layer_builder.build_linear(self.out_features[layer_num])
-        if self.normalizer: self._layer_builder.build_normalizer()
-        if self.activation: self._layer_builder.build_activation()
-        
-        op = self._layer_builder.product
-        self._cur_base.update(self._cur_base.constructor.add_op(
-            name, op, self._port, labels
-        ))
-        self._n_layers += 1
-
-    def reset(
-        self, base: typing.Union[BaseInput, BaseNetwork],
-        reset_base_data: bool=True
-    ):
-        super().reset(reset_base_data)
-        self._cur_base = self._setup_base(base)
-        self._n_layers = 0
-
-    def product(self) -> Network:
-        return self._cur_base.constructor.net
+        return self.append(BaseNetwork(constructor, in_))
