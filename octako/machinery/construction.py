@@ -5,8 +5,10 @@ import itertools
 from os import stat
 from optuna.study.study import BaseStudy
 from pandas.core import base
+from torch._C import Value
 
 from torch.functional import norm
+from torch.nn.modules import linear
 from octako.modules.activations import NullActivation, Scaler
 from torch import nn
 import torch
@@ -30,15 +32,16 @@ as long as the interface is correct.
 """
 
 
-class _Undefined:
+class UNDEFINED:
     """
     use to have fields undefined in a dataclass
     since this is not resolved until Python 3.10 
     """
-    def __eq__(self, other):
-        return isinstance(self, other)
-_UNDEFINED = _Undefined
-UNDEFINED = partial(field, default_factory=_Undefined)
+    pass
+
+
+def is_undefined(val):
+    return isinstance(val, UNDEFINED) or val == UNDEFINED
 
 
 @dataclass
@@ -46,6 +49,24 @@ class BaseInput(object):
 
     size: torch.Size
     name: str="x"
+
+
+def get_undefined(dataclass_obj) -> typing.Optional[str]:
+    for k, v in asdict(dataclass_obj).items():
+        if is_undefined(v):
+            return k
+    return None
+
+
+def check_undefined(f):
+
+    def _(dataclass_obj, *args, **kwargs):
+        k = get_undefined(dataclass_obj)
+        if k is not None:
+            raise ValueError(f"Parameter {k} has not been defined for {type(dataclass_obj)}")
+
+        return f(dataclass_obj, *args, **kwargs)
+    return _
 
 
 @dataclass
@@ -62,17 +83,9 @@ class BaseNetwork(object):
         if isinstance(self.ports, Port):
             self.ports = [self.ports]
 
-    @singledispatchmethod
-    def update(self, ports):
-        self.ports = ports
-
-    @update.register
-    def update(self, ports: Port):
-        self.ports = [ports]
-
     @classmethod
     def from_base_input(cls, base: BaseInput):
-        network_constructor = NetworkConstructor(Network())
+        network_constructor = NetworkConstructor()
         in_size = base.size
         input_name = base.name
         port = network_constructor.add_tensor_input(
@@ -82,7 +95,7 @@ class BaseNetwork(object):
 
     @classmethod
     def from_base_inputs(cls, base: typing.List[BaseInput]):
-        network_constructor = NetworkConstructor(Network())
+        network_constructor = NetworkConstructor()
         ports = []
         for x in base:
             in_size = x.size
@@ -106,16 +119,9 @@ class AbstractConstructor(ABC):
             if isinstance(v, AbstractConstructor):
                v.reset() 
             self.__setattr__(k, v)
-
-
-def check_undefined(f):
-
-    def _(dataclass_obj, *args, **kwargs):
-        for k, v in asdict(dataclass_obj):
-            if v == UNDEFINED:
-                raise ValueError(f"Parameter {k} has not been defined for {type(dataclass_obj)}")
-        return f(dataclass_obj, *args, **kwargs)
-    return _
+    
+    def is_undefined(self):
+        return get_undefined(self) is not None
 
 
 class OpFactory(AbstractConstructor):
@@ -205,7 +211,7 @@ class LinearFactory(OpReversibleFactory):
                 in_size[1], self.out_features, bias=self.bias, 
                 device=self.device, dtype=self.dtype
             ), 
-            torch.Size(in_size[0], self.out_features)
+            torch.Size([in_size[0], self.out_features])
         )
     
     def produce_reverse(self, in_size: torch.Size) -> Operation:
@@ -221,9 +227,9 @@ class LinearFactory(OpReversibleFactory):
 @dataclass
 class DropoutFactory(OpReversibleFactory):
 
+    dropout_cls: typing.Type[nn.Module] = nn.Dropout
     p: float=0.2
     inplace: bool=False
-    dropout_cls: typing.Type[nn.Module] = nn.Dropout
 
     def produce(self, in_size: torch.Size) -> Operation:
         return Operation(
@@ -238,16 +244,20 @@ class DropoutFactory(OpReversibleFactory):
 @dataclass
 class DimAggregateFactory(OpFactory):
 
+    torch_agg_fn: typing.Callable[[int], torch.Tensor]=torch.mean
     dim: int=1
     index: int=None
-    torch_agg_fn: typing.Callable[[int], torch.Tensor]=torch.mean
+    keepdim: bool=False
 
     def produce(self, in_size: torch.Size) -> Operation:
         f = lambda x: (
-            self.torch_agg_fn(x, dim=self.dim) if self.index is None
+            self.torch_agg_fn(x, dim=self.dim, keepdim=self.keepdim) if self.index is None
             else self.torch_agg_fn(x, dim=self.dim)[self.index]
         )
-        out_size = in_size[:self.dim] + in_size[self.dim + 1:]
+        if self.keepdim:
+            out_size = in_size[:self.dim] + torch.Size([1]) + in_size[self.dim + 1:]
+        else:
+            out_size = in_size[:self.dim] + in_size[self.dim + 1:]
         return Operation(
             util_modules.Lambda(f), out_size
         )
@@ -256,7 +266,7 @@ class DimAggregateFactory(OpFactory):
 @dataclass
 class ConvolutionFactory(OpReversibleFactory):
 
-    out_features: int
+    out_features: int=UNDEFINED()
     k: typing.Union[int, typing.Tuple]=1
     stride: typing.Union[int, typing.Tuple]=1
     padding: typing.Union[int, typing.Tuple]=0
@@ -264,25 +274,37 @@ class ConvolutionFactory(OpReversibleFactory):
     torch_deconv_cls: typing.Type[nn.Module]= nn.ConvTranspose2d
     kwargs: dict=field(default_factory=dict)
 
+    @check_undefined
     def produce(self, in_size: torch.Size):
 
-        out_sizes = utils.calc_conv_out(in_size, self.k, self.stride, self.padding)
+        out_sizes = utils.calc_conv_out_size(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, self.out_features, *out_sizes])
         return Operation(
             self.torch_conv_cls(in_size[1], self.out_features, 
             self.k, self.stride, padding=self.padding, **self.kwargs),
             out_size
         )
-    
-    def produce_reverse(self, in_size: torch.Size) -> Operation:        
-        out_sizes = utils.calc_conv_transpose_out(in_size, self.k, self.stride, self.padding)
-        out_size = torch.Size([-1, self.out_features, *out_sizes])
+   
+    @check_undefined 
+    def produce_reverse(self, in_size: torch.Size) -> Operation:
+        out_sizes = torch.Size([
+            -1, self.out_features, *utils.calc_conv_out_size(in_size, self.k, self.stride, self.padding)
+        ])
+        in_sizes_comp = torch.Size([
+            -1, in_size[1], *utils.calc_conv_transpose_out_size(out_sizes, self.k, self.stride, self.padding)
+        ])
+
+        if in_size[1:] != in_sizes_comp[1:]:
+            raise ValueError(f"Failed reverse expect: {in_size} actual: {in_sizes_comp} for {out_sizes}")
+
         return Operation(
-            self.torch_deconv_cls(in_size[1], self.out_features, 
-            self.k, self.stride, padding=self.padding, **self.kwargs),
-            out_size
+            self.torch_deconv_cls(self.out_features, in_size[1],  
+            kernel_size=self.k, stride=self.stride, padding=self.padding, **self.kwargs),
+            in_size
         )
 
+
+# TODO: Add DECONV/UNPOOL Factories etc
 
 @dataclass
 class PoolFactory(OpReversibleFactory):
@@ -296,7 +318,7 @@ class PoolFactory(OpReversibleFactory):
 
     def produce(self, in_size: torch.Size):
         
-        out_sizes = utils.calc_max_pool_out(in_size, self.k, self.stride, self.padding)
+        out_sizes = utils.calc_pool_out_size(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, in_size[1], *out_sizes])
         return Operation(
             self.torch_pool_cls(in_size[1], in_size[1], self.k, self.stride, padding=self.padding),
@@ -304,7 +326,7 @@ class PoolFactory(OpReversibleFactory):
         )
     
     def produce_reverse(self, in_size: torch.Size) -> Operation:
-        out_sizes = utils.calc_maxunpool_out(in_size, self.k, self.stride, self.padding)
+        out_sizes = utils.calc_maxunpool_out_size(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, in_size[1], *out_sizes])
         return Operation(
             self.torch_unpool_cls(in_size[1], in_size[1], self.k, self.stride, padding=self.padding),
@@ -312,25 +334,21 @@ class PoolFactory(OpReversibleFactory):
         )
     
 
-
 @dataclass
 class ViewFactory(OpReversibleFactory):
 
     view: torch.Size
-    keepbatch: bool=True
 
     def produce(self, in_size: torch.Size):
-
-        out_size = in_size[0:1] + self.view if self.keepbatch else self.view
-            
+        
         return Operation(
-            util_modules.View(self.view, keepbatch=self.keepbatch),
-            out_size
+            util_modules.View(self.view),
+            self.view
         )
     
     def produce_reverse(self, in_size: torch.Size) -> Operation:
         return Operation(
-            util_modules.View(in_size, keepbatch=self.keepbatch),
+            util_modules.View(in_size),
             in_size
         )
 
@@ -342,16 +360,20 @@ class RepeatFactory(OpFactory):
     keepbatch: bool=True
 
     def produce(self, in_size: torch.Size):
+        repeat_by = [*self.repeat_by]
+        if self.keepbatch:
+            repeat_by.insert(0, 1)
+
         out_size = []
-        for x, y in zip(in_size[1:], self.repeat_by):
+        for x, y in zip(in_size, repeat_by):
             if x == -1:
                 out_size.append(-1)
             else:
                 out_size.append(x * y)
 
         return Operation(
-            util_modules.Lambda(lambda x: x.repeat(1, *self.repeat_by)), 
-            torch.Size([-1, *out_size])
+            util_modules.Lambda(lambda x: x.repeat(*repeat_by)), 
+            torch.Size(out_size)
         )
 
 
@@ -403,7 +425,7 @@ class RegularizerFactory(OpFactory):
     def produce(self, in_size: torch.Size):
 
         return Operation(
-            self.regularizer_cls(reduction=self.reduction_cls()),
+            self.regularizer_cls(reduction_cls=self.reduction_cls),
             self.reduction_cls.get_out_size(in_size)
         )
 
@@ -417,7 +439,7 @@ class LossFactory(OpFactory):
     def produce(self, in_size: torch.Size):
 
         return Operation(
-            self.loss_cls(reduction=self.reduction_cls()),
+            self.loss_cls(reduction_cls=self.reduction_cls),
             self.reduction_cls.get_out_size(in_size)
         )
 
@@ -431,40 +453,40 @@ class ValidationFactory(OpFactory):
     def produce(self, in_size: torch.Size):
 
         return Operation(
-            self.validation_cls(reduction=self.reduction_cls()),
+            self.validation_cls(reduction_cls=self.reduction_cls),
             self.reduction_cls.get_out_size(in_size)
         )
 
 
-@dataclass
-class AggregateFactory(OpFactory):
+# @dataclass
+# class AggregateFactory(OpFactory):
 
-    aggregator_fn: typing.Callable[[torch.Tensor], torch.Tensor]=torch.mean
-    weights: typing.List=None
+#     aggregator_fn: typing.Callable[[torch.Tensor], torch.Tensor]=torch.mean
+#     weights: typing.List=None
 
-    def produce(self, in_size: torch.Size):
+#     def produce(self, in_size: torch.Size):
 
-        def aggregator(*x):
-            if self.weights is not None:
-                x = [
-                    el * w for el, w in zip(x, self.weights)
-                ]
+#         def aggregator(*x):
+#             if self.weights is not None:
+#                 x = [
+#                     el * w for el, w in zip(x, self.weights)
+#                 ]
             
-            return self.aggregator_fn(
-                *x
-            )
+#             return self.aggregator_fn(
+#                 *x
+#             )
 
-        return Operation(
-            util_modules.Lambda(aggregator),
-            in_size
-        )
+#         return Operation(
+#             util_modules.Lambda(aggregator),
+#             in_size
+#         )
 
 
 @dataclass
 class LinearLayerDirector(OpDirector):
 
-    in_features: int=UNDEFINED
-    out_features: int=UNDEFINED
+    in_features: int=UNDEFINED()
+    out_features: int=UNDEFINED()
     activation: Opt[ActivationFactory]=ActivationFactory(torch.nn.ReLU)
     dropout: Opt[DropoutFactory]=DropoutFactory()
     normalizer: Opt[NormalizerFactory]=NormalizerFactory()
@@ -496,11 +518,11 @@ class LinearLayerDirector(OpDirector):
 @dataclass
 class FeedForwardDirector(NetDirector):
 
-    in_features: int=UNDEFINED
-    out_features: typing.List[int]=UNDEFINED
+    in_features: int=UNDEFINED()
+    out_features: typing.List[int]=UNDEFINED()
     base_name: str="layer"
-    activation: ActivationFactory=ActivationFactory(torch_act=nn.ReLU)
-    out_activation: ActivationFactory=ActivationFactory(torch_act=nn.ReLU)
+    activation: ActivationFactory=ActivationFactory(torch_act_cls=nn.ReLU)
+    out_activation: ActivationFactory=ActivationFactory(torch_act_cls=nn.ReLU)
     normalizer: Opt[NormalizerFactory]=None
     dropout: Opt[DropoutFactory]=None
     input_name: str="x"
@@ -551,7 +573,7 @@ class FeedForwardDirector(NetDirector):
 
     def produce(self) -> Network:
 
-        constructor = NetworkConstructor(Network())
+        constructor = NetworkConstructor()
         in_ = constructor.add_tensor_input(
             self.input_name, torch.Size([-1, self.in_features]), 
             labels=self.labels,

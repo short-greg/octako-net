@@ -5,11 +5,11 @@ from . import networks
 import torch.optim
 import torch.nn
 from .construction import (
-    FeedForwardBuilder
+    FeedForwardDirector
 )
-from .assemblers import (
-    BaseNetwork, DenseFeedForwardAssembler, FeedForwardAssembler, IAssembler
-)
+# from .assemblers import (
+#    BaseNetwork, DenseFeedForwardAssembler, FeedForwardAssembler, IAssembler
+# )
 from abc import ABC, abstractmethod
 
 from octako.machinery import builders
@@ -136,29 +136,6 @@ class MinibatchTestingAlgorithm(TestingAlgorithm):
             [self._agg_loss_name, self._validation_name, *self._loss_names], by={self._x_name: x, self._target_name: t}
         )
 
-#TODO: create this assembler
-class TeachingNetworkAssembler(IAssembler):
-
-    OBJECTIVE_BUILDER = builders.ObjectiveBuilder
-
-    def __init__(self, network_assembler, taget_size: torch.Size):
-        pass
-
-    def set_names(self, input_: str=None, target: str=None, loss: str=None, validation: str=None):
-        pass
-
-    def set_loss(self, objective):
-        pass
-
-    def set_validation(self, objective):
-        pass
-
-    def build(self):
-        pass
-
-    def append(self):
-        pass
-
 
 class BinaryClassifier(Learner):
 
@@ -196,8 +173,9 @@ class BinaryClassifier(Learner):
             self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
         )
 
-    def _assemble_network(self, network_assembler: DenseFeedForwardAssembler):
+    def _assemble_network(self, network_assembler: FeedForwardDirector):
 
+        # tODO: RENAME network_assemble
         loss_builder = builders.ObjectiveBuilder()
         target_size = torch.Size([-1])
         network_assembler = network_assembler
@@ -255,7 +233,7 @@ class Multiclass(Learner):
     FUZZY_OUT_NAME = 'fuzzy_y'
 
     def __init__(
-        self, network_assembler: FeedForwardAssembler, n_classes: int,
+        self, network_assembler: FeedForwardDirector, n_classes: int,
         learning_algorithm_cls: typing.Type[LearningAlgorithm],
         testing_algorithm_cls: typing.Type[TestingAlgorithm],
         optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
@@ -277,7 +255,7 @@ class Multiclass(Learner):
         )
         self._device = device
 
-    def _assemble_network(self, network_assembler: DenseFeedForwardAssembler):
+    def _assemble_network(self, network_assembler: FeedForwardDirector):
 
         builder = builders.ObjectiveBuilder()
         network_assembler.input_name = self.INPUT_NAME
@@ -335,7 +313,7 @@ class Regressor(Learner):
     VALIDATION_NAME = 'validation'
 
     def __init__(
-        self, network_assembler: DenseFeedForwardAssembler, 
+        self, network_assembler: FeedForwardDirector, 
         learning_algorithm_cls: typing.Type[LearningAlgorithm],
         testing_algorithm_cls: typing.Type[TestingAlgorithm],
         optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
@@ -358,7 +336,7 @@ class Regressor(Learner):
             self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
         )
 
-    def _assemble_network(self, network_assembler: DenseFeedForwardAssembler):
+    def _assemble_network(self, network_assembler: FeedForwardDirector):
 
         # Can probably put this in the base class
 
@@ -402,3 +380,4 @@ class Regressor(Learner):
     @property
     def maximize_validation(self):
         return False
+
