@@ -290,15 +290,20 @@ class TestAggregateFactory:
     def test_produce_wtih_defaults(self):
 
         factory = AggregateFactory()
-        aggregate = factory.produce(torch.Size([-1, 4]))
+        aggregate = factory.produce(torch.Size([]))
 
-        assert aggregate.op(torch.rand(2, 4), torch.rand(2, 4)).size() == torch.Size([])
+        assert aggregate.op(torch.tensor(2), torch.tensor(3)).size() == torch.Size([])
 
-    def test_produce_wtih_custom_regularizer(self):
+    def test_produce_wtih_no_mean(self):
 
-        factory = ValidationFactory(validation_cls=objectives.BinaryClassificationFitness)
-        cost = factory.produce(torch.Size([-1, 4]))
-        t =  torch.randint(0, 1, size=torch.Size([2, 4])).float()
-        assert cost.op(torch.rand(2, 4), t).size() == torch.Size([])
+        factory = AggregateFactory(to_average=False)
+        aggregate = factory.produce(torch.Size([]))
 
+        assert aggregate.op(torch.tensor(2), torch.tensor(3)).size() == torch.Size([])
 
+    def test_produce_wtih_weights(self):
+
+        factory = AggregateFactory(to_average=False, weights=[2.0, 3.0])
+        aggregate = factory.produce(torch.Size([]))
+
+        assert aggregate.op(torch.tensor(2), torch.tensor(3)).size() == torch.Size([])

@@ -458,28 +458,29 @@ class ValidationFactory(OpFactory):
         )
 
 
-# @dataclass
-# class AggregateFactory(OpFactory):
+@dataclass
+class AggregateFactory(OpFactory):
 
-#     aggregator_fn: typing.Callable[[torch.Tensor], torch.Tensor]=torch.mean
-#     weights: typing.List=None
+    to_average: bool=True
+    weights: typing.List=None
 
-#     def produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size):
 
-#         def aggregator(*x):
-#             if self.weights is not None:
-#                 x = [
-#                     el * w for el, w in zip(x, self.weights)
-#                 ]
+        def aggregator(*x):
+            if self.weights is not None:
+                x = [
+                    el * w for el, w in zip(x, self.weights)
+                ]
             
-#             return self.aggregator_fn(
-#                 *x
-#             )
+            summed = sum(x)
+            if self.to_average:
+                summed = summed / len(x)
+            return summed
 
-#         return Operation(
-#             util_modules.Lambda(aggregator),
-#             in_size
-#         )
+        return Operation(
+            util_modules.Lambda(aggregator),
+            in_size
+        )
 
 
 @dataclass
