@@ -1,25 +1,3 @@
-from abc import ABC, abstractmethod, abstractproperty
-from dataclasses import InitVar, asdict, dataclass, field
-from enum import Enum
-import itertools
-from os import stat
-from optuna.study.study import BaseStudy
-from pandas.core import base
-from torch._C import Value
-
-from torch.functional import norm
-from torch.nn.modules import linear
-from octako.modules.activations import NullActivation, Scaler
-from torch import nn
-import torch
-from octako.modules import objectives
-from .networks import Network, NetworkConstructor, Operation, Port
-import typing
-from typing import Optional as Opt, Union
-from . import utils
-from octako.modules import utils as util_modules
-from functools import partial, singledispatchmethod
-
 """
 Overview: Modules for building layers in a network
 
@@ -30,6 +8,21 @@ They provide explicit functions like "relu" and also non-explicit functions
 like "activation". The user can set activation to be any type of activation
 as long as the interface is correct.
 """
+
+from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, field
+from os import stat
+from torch.functional import norm
+from octako.modules.activations import NullActivation, Scaler
+from torch import nn
+import torch
+from octako.modules import objectives
+from .networks import Link, Network, Node, Operation, Parameter, Port
+import typing
+from typing import Optional as Opt
+from . import utils
+from octako.modules import utils as util_modules
+from .networks import In, OpNode, SubNetwork, InterfaceNode
 
 
 class UNDEFINED:
@@ -42,6 +35,151 @@ class UNDEFINED:
 
 def is_undefined(val):
     return isinstance(val, UNDEFINED) or val == UNDEFINED
+
+
+
+class NetworkBuilder(object):
+    """
+    Builder class with convenience methods for building networks
+    - Handles adding nodes to the network to simplify that process
+    - Do not need to specify the incoming ports if the incoming ports
+    -  are the outputs of the previously added node
+    - Can set base labels that will apply to all nodes added to the network
+    -  that use the convenience methods (not add_node)
+    """
+
+    def __init__(self, network: Network=None):
+        """
+        network: Network - The network to construct
+        """
+        self._network = network or Network()
+        self._subnets: typing.Dict[str, Network] = {}
+        self.base_labels: typing.Optional[typing.List[str]] = None
+        self._cur_ports: typing.List[Port] = None
+    
+    def add_subnets(self, **kwargs: typing.Dict[str, Network]): # name: str, network: Network):
+        
+        for name, network in kwargs.items():
+            if name in self._subnets:
+                raise ValueError(f"Subnet by name {name} already exists")
+        
+            self._subnets[name] = SubNetwork(name, network)
+    
+    def _coalesce(self, ports, labels):
+        out_labels = []
+        if self.base_labels is not None:
+            out_labels += self.base_labels
+        if labels is not None:
+            out_labels += labels
+
+        ports = utils.coalesce(ports, self._cur_ports)
+        return ports, labels
+
+    def _set_ports(self, ports):
+        self._cur_ports = ports
+        return ports
+
+    @property
+    def net(self):
+        return self._network
+    
+    def sub(self, key: str):
+        return self._subnets[key]
+    
+    def __getitem__(self, name: typing.Union[str, typing.List]) -> Node:
+        return self._network[name]
+
+    def add_node(self, node: Node):
+        self._network.add_node(node)
+        return self._set_ports(node.ports)
+
+    def add_op(
+        self, name: str, op: Operation, in_: typing.Union[Port, typing.List[Port]]=None, 
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
+    ) -> typing.List[Port]:
+        """[summary]
+
+        Args:
+            name (str): The name of the node
+            op (Operation): Operation for the node to perform
+            in_ (typing.Union[Port, typing.List[Port]]): The ports feeding into the node
+            labels (typing.List[str], optional): Labels for the node to be used for searching. Defaults to None. 
+
+        Raises:
+            KeyError: If the name for the node already exists in the network.
+
+        Returns:
+            typing.List[Port]: The ports feeding out of the node
+        """
+
+        if isinstance(in_, Port):
+            in_ = [in_]
+        
+        in_, labels = self._coalesce(in_, labels)
+        node = OpNode(name, op.op, in_, op.out_size, labels)
+        return self._set_ports(self._network.add_node(node))
+    
+    def add_module_op(
+        self, name: str, mod: nn.Module, 
+        out_size: typing.Union[typing.List[torch.Size], torch.Size], 
+        in_: typing.Union[Port, typing.List[Port]]=None, 
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
+    ): 
+        in_, labels = self._coalesce(in_, labels)
+        node = OpNode(name, mod, in_, out_size, labels)
+        return self._set_ports(self._network.add_node(node))
+
+    def add_lambda_op(
+        self, name: str, f: typing.Callable[[], torch.Tensor], 
+        out_size: typing.Union[typing.List[torch.Size], torch.Size], 
+        in_: typing.Union[Port, typing.List[Port]], 
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
+    ): 
+        in_, labels = self._coalesce(in_, labels)
+        node = OpNode(name, util_modules.Lambda(f), in_, out_size, labels)
+        return self._set_ports(self._network.add_node(node))
+
+    def add_subnet_interface(self, name: str, subnet_name: str, in_links: typing.List[Link], out_ports: typing.List[Port]):
+        subnet = self._subnets[subnet_name]
+        node = InterfaceNode(name, subnet, out_ports, in_links)
+        return self._set_ports(self._network.add_node(node))
+    
+    def add_input(self, name, sz: torch.Size, value_type: typing.Type, default_value, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+        
+        _, labels = self._coalesce(None, labels)
+        node = In(name, sz, value_type, default_value, labels, annotation)
+        return self._set_ports(self._network.add_node(node))
+
+    def add_tensor_input(self, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+        
+        _, labels = self._coalesce(None, labels)
+        node = In.from_tensor(name, sz, default_value, labels, annotation)
+        return self._set_ports(self._network.add_node(node))
+
+    def add_scalar_input(self, name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
+
+        _, labels = self._coalesce(None, labels)
+        node = In.from_scalar(name, default_type, default_value, labels, annotation)
+        return self._set_ports(self._network.add_node(node))
+
+    def add_parameter(
+        self, name: str, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], 
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None
+    ):
+        _, labels = self._coalesce(None, labels)
+        node = Parameter(name, sz, reset_func, labels, annotation)
+        return self._set_ports(self._network.add_node(node))
+    
+    def set_default_interface(self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]):
+        self._network.set_default_interface(
+            ins, outs
+        )
+
+    @classmethod
+    def build_new(cls, inputs: typing.List[In]=None):
+
+        return NetworkBuilder(Network(inputs))
+
 
 
 @dataclass
@@ -72,10 +210,11 @@ def check_undefined(f):
 @dataclass
 class BaseNetwork(object):
     """
-    Base network to build off of. Can be used in the build() method
+    Network to build off of containing ports and 
+    a constructor.
     """
 
-    constructor: NetworkConstructor
+    constructor: NetworkBuilder
     ports: typing.List[Port]
 
     def __post_init__(self):
@@ -85,7 +224,7 @@ class BaseNetwork(object):
 
     @classmethod
     def from_base_input(cls, base: BaseInput):
-        network_constructor = NetworkConstructor()
+        network_constructor = NetworkBuilder()
         in_size = base.size
         input_name = base.name
         port = network_constructor.add_tensor_input(
@@ -95,7 +234,7 @@ class BaseNetwork(object):
 
     @classmethod
     def from_base_inputs(cls, base: typing.List[BaseInput]):
-        network_constructor = NetworkConstructor()
+        network_constructor = NetworkBuilder()
         ports = []
         for x in base:
             in_size = x.size
@@ -265,7 +404,7 @@ class DimAggregateFactory(OpFactory):
 
 @dataclass
 class ConvolutionFactory(OpReversibleFactory):
-
+    """For producing convolutional layers. Note: Cannot reverse all configurations."""
     out_features: int=UNDEFINED()
     k: typing.Union[int, typing.Tuple]=1
     stride: typing.Union[int, typing.Tuple]=1
@@ -308,6 +447,7 @@ class ConvolutionFactory(OpReversibleFactory):
 
 @dataclass
 class PoolFactory(OpReversibleFactory):
+    """For producing pooling layers and reverse layers. Note: Cannot reverse all configurations"""
 
     k: typing.Union[int, typing.Tuple]=1
     stride: typing.Union[int, typing.Tuple]=1
@@ -336,6 +476,7 @@ class PoolFactory(OpReversibleFactory):
 
 @dataclass
 class ViewFactory(OpReversibleFactory):
+    """For changing the 'view' of the output"""
 
     view: torch.Size
 
@@ -355,6 +496,7 @@ class ViewFactory(OpReversibleFactory):
 
 @dataclass
 class RepeatFactory(OpFactory):
+    """For repeating certain dimensions of a network"""
 
     repeat_by: typing.List[int]
     keepbatch: bool=True
@@ -518,6 +660,7 @@ class LinearLayerDirector(OpDirector):
 
 @dataclass
 class FeedForwardDirector(NetDirector):
+    """Use to create a feed forward network"""
 
     in_features: int=UNDEFINED()
     out_features: typing.List[int]=UNDEFINED()
@@ -540,6 +683,15 @@ class FeedForwardDirector(NetDirector):
     
     @check_undefined
     def append(self, base_network: BaseNetwork) -> Network:
+        """Construct the feedforward network on top of another
+        network
+
+        Args:
+            base_network (BaseNetwork): Network to build off of
+
+        Returns:
+            Network: 
+        """
         
         constructor = base_network.constructor
         port, = base_network.ports
@@ -573,8 +725,13 @@ class FeedForwardDirector(NetDirector):
         return constructor.net
 
     def produce(self) -> Network:
+        """Produce a new feed forward network
 
-        constructor = NetworkConstructor()
+        Returns:
+            Network: Network being builtSs
+        """
+
+        constructor = NetworkBuilder()
         in_ = constructor.add_tensor_input(
             self.input_name, torch.Size([-1, self.in_features]), 
             labels=self.labels,

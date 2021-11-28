@@ -1,5 +1,6 @@
-from . import assemblers
-from . import builders
+"""Modules for building learning machines
+"""
+
 from . import learners
 from . import networks
 from . import visitors
