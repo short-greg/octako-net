@@ -1,17 +1,3 @@
-from collections import namedtuple
-import torch.nn as nn
-import torch
-import typing
-import copy
-import dataclasses
-import itertools
-from abc import ABC, abstractmethod
-from functools import singledispatch, singledispatchmethod
-
-from octako.machinery import builders
-from octako.machinery.utils import coalesce
-from octako.modules.utils import Lambda
-
 
 # TODO: Rewrite tests and get everything working
 
@@ -21,6 +7,16 @@ Classes related to Networks.
 They are a collection of modules connected together in a graph.
 
 """
+import torch.nn as nn
+import torch
+import typing
+import copy
+import dataclasses
+import itertools
+from functools import singledispatch, singledispatchmethod
+from octako.machinery import builders
+from octako.machinery.utils import coalesce
+from octako.modules.utils import Lambda
 
 
 @dataclasses.dataclass
@@ -45,8 +41,7 @@ class IndexRef(ModRef):
 
 @dataclasses.dataclass
 class Port:
-    """A port into or out of a node. Used for connecting nodes together.
-    """
+    """A port into or out of a node. Used for connecting nodes together."""
     
     # TODO: Decide whether to add a name to the port
     # name: str
@@ -737,8 +732,7 @@ class Link:
 
 
 class SubNetwork(object):
-    """
-    """
+    """A network wrapper which can be added to another network and used as a node through InterfaceNode"""
 
     def __init__(
         self, name: str, network: Network, 
@@ -887,6 +881,7 @@ class InterfaceNode(Node):
 
     
 class NetworkInterface(nn.Module):
+    """A module for probing a network with a standard interface"""
 
     def __init__(
         self, network: Network, inputs: typing.List[str], outputs: typing.List[str]
