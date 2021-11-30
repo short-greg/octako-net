@@ -206,12 +206,12 @@ class BinaryClassifier(Learner):
         target, = constructor.add_tensor_input(self.TARGET_NAME, target_size, labels=["target"])
         constructor.add_op(
             self.LOSS_NAME, 
-            TorchLossFactory(torch.nn.BCELoss).produce(out.size), 
+            TorchLossFactory(torch_loss_cls=torch.nn.BCELoss).produce(out.size), 
             [out, target], "loss"
         )
         constructor.add_op(
             self.VALIDATION_NAME, 
-            ValidationFactory(BinaryClassificationFitness).produce(out.size), 
+            ValidationFactory(torch_loss_cls=BinaryClassificationFitness).produce(out.size), 
             [out, target], "validation"
         )
         
@@ -287,11 +287,11 @@ class Multiclass(Learner):
             self.OUT_NAME, lambda x: torch.log(x), out.size, [out], "out"
         )
         constructor.add_op(
-            self.LOSS_NAME, TorchLossFactory(CrossEntropyLoss).produce(out.size), [out, target], "loss"
+            self.LOSS_NAME, TorchLossFactory(torch_loss_cls=CrossEntropyLoss).produce(out.size), [out, target], "loss"
         )
         constructor.add_op(
             self.VALIDATION_NAME, 
-            ValidationFactory(ClassificationFitness).produce(out.size), 
+            ValidationFactory(torch_loss_cls=ClassificationFitness).produce(out.size), 
             [out, target], "validation"
         )
         
@@ -363,10 +363,10 @@ class Regressor(Learner):
         target = constructor.add_tensor_input(self.TARGET_NAME, out.size, labels=["target"])
 
         constructor.add_op(
-            self.LOSS_NAME, TorchLossFactory(MSELoss), [out, target], "loss"
+            self.LOSS_NAME, TorchLossFactory(torch_loss_cls=MSELoss), [out, target], "loss"
         )
         constructor.add_op(
-            self.VALIDATION_NAME, TorchLossFactory(MSELoss), [out, target], "validation"
+            self.VALIDATION_NAME, TorchLossFactory(torch_loss_cls=MSELoss), [out, target], "validation"
         )
 
         constructor.net.to(self._device)
