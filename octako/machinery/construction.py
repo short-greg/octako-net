@@ -64,6 +64,8 @@ class TypeMap(object):
 
         return cur_type_map.get(callable_name)
 
+nn_dict = nn.__dict__
+
 
 @dataclass
 class AbstractConstructor(ABC):
@@ -427,12 +429,17 @@ class NetDirector(AbstractConstructor):
     def append(self, base_network: BaseNetwork) -> Network:
         pass
 
+
 @dataclass
 class ActivationFactory(OpReversibleFactory):
 
     name: str="Activation"
     torch_act_cls: typing.Type[nn.Module] = nn.ReLU
     kwargs: dict = field(default_factory=dict)
+
+    type_map = TypeMap(
+        torch_act_cls=nn.modules.activation.__dict__
+    )
 
     def _produce(self, in_size: torch.Size) -> Operation:
         return Operation(self.torch_act_cls(**self.kwargs), in_size)
@@ -452,6 +459,13 @@ class NormalizerFactory(OpReversibleFactory):
     affine: bool=True
     device: str="cpu"
     dtype: torch.dtype= torch.float32
+
+    type_map = TypeMap(
+        torch_normalizer_cls={
+            **nn.modules.instancenorm.__dict__,
+            **nn.modules.batchnorm.__dict__
+        }
+    )
 
     def _produce(self, in_size: torch.Size) -> Operation:
         return Operation(self.torch_normalizer_cls(
@@ -499,6 +513,10 @@ class DropoutFactory(OpReversibleFactory):
     dropout_cls: typing.Type[nn.Module] = nn.Dropout
     p: float=0.2
     inplace: bool=False
+
+    type_map = TypeMap(
+        dropout_cls=nn.modules.dropout.__dict__
+    )
 
     def _produce(self, in_size: torch.Size) -> Operation:
         return Operation(
