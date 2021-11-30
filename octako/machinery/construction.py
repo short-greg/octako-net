@@ -150,10 +150,10 @@ class NetworkBuilder(object):
         node = In(name, sz, value_type, default_value, labels, annotation)
         return self._set_ports(self._network.add_node(node))
 
-    def add_tensor_input(self, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+    def add_tensor_input(self, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None, device: str='cpu'):
         
         _, labels = self._coalesce(None, labels)
-        node = In.from_tensor(name, sz, default_value, labels, annotation)
+        node = In.from_tensor(name, sz, default_value, labels, annotation, device)
         return self._set_ports(self._network.add_node(node))
 
     def add_scalar_input(self, name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):

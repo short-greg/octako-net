@@ -325,7 +325,7 @@ class In(Node):
         return by.get(self.name, self._default_value)
 
     @classmethod
-    def from_tensor(cls, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+    def from_tensor(cls, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None, device: str='cpu'):
         if default_value is None:
             sz2 = []
             for el in list(sz):
@@ -334,9 +334,9 @@ class In(Node):
                 else:
                     sz2.append(el)
             if len(sz2) != 0:
-                default_value = torch.zeros(*sz2)
+                default_value = torch.zeros(*sz2, device=device)
             else:
-                default_value = torch.tensor([])
+                default_value = torch.tensor([], device=device)
         return cls(name, sz, torch.Tensor, default_value, labels, annotation)
     
     @classmethod
