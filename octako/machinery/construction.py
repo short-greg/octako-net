@@ -57,9 +57,9 @@ class AbstractConstructor(ABC):
 @dataclass
 class OpFactory(AbstractConstructor):
 
-    name: str=''
+    name: str=field(default_factory=str)
     labels: typing.List[str]=field(default_factory=list)
-    annotation: str = ""
+    annotation: str = field(default_factory=str)
 
     def __post_init__(self):
         self._produced = 0
@@ -80,9 +80,9 @@ class OpFactory(AbstractConstructor):
 @dataclass
 class OpReversibleFactory(AbstractConstructor):
     
-    name: str=''
+    name: str=field(default_factory=str)
     labels: typing.List[str]=field(default_factory=list)
-    annotation: str = ""
+    annotation: str = field(default_factory=str)
 
     def __post_init__(self):
         self._produced = 0
