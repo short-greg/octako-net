@@ -547,8 +547,8 @@ class ScalerFactory(OpFactory):
 @dataclass
 class TorchLossFactory(OpFactory):
 
-    reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     torch_loss_cls: typing.Type[nn.Module]= nn.MSELoss
+    reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
     def produce(self, in_size: torch.Size):
 
@@ -560,10 +560,10 @@ class TorchLossFactory(OpFactory):
 
 @dataclass
 class RegularizerFactory(OpFactory):
-
-    reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
-    regularizer_cls: typing.Type[objectives.Regularizer]= objectives.L2Reg
     
+    regularizer_cls: typing.Type[objectives.Regularizer]= objectives.L2Reg
+    reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
+ 
     def produce(self, in_size: torch.Size):
 
         return Operation(

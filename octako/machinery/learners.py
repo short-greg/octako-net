@@ -138,6 +138,34 @@ class MinibatchTestingAlgorithm(TestingAlgorithm):
         )
 
 
+class IMachine(torch.nn.Module, ABC):
+
+    @abstractmethod
+    def forward(self, *x: torch.Tensor):
+        pass
+
+
+class IBinaryClassifier(IMachine):
+
+    @abstractmethod
+    def classify(self, x: torch.Tensor):
+        pass
+
+
+class IUpdater(ABC):
+    
+    @abstractmethod
+    def learn(self, x: torch.Tensor, t: torch.Tensor):
+        pass
+
+
+class ITester(object):
+
+    @abstractmethod
+    def test(self, x: torch.Tensor, t: torch.Tensor):
+        pass
+
+
 class BinaryClassifier(Learner):
 
     OUT_NAME = 'y'
