@@ -14,9 +14,7 @@ import copy
 import dataclasses
 import itertools
 from functools import singledispatch, singledispatchmethod
-from octako.machinery import builders
 from octako.machinery.utils import coalesce
-from octako.modules.utils import Lambda
 
 
 @dataclasses.dataclass
