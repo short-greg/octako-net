@@ -2,7 +2,7 @@ import pytest
 from octako.machinery import networks
 import torch.nn as nn
 import torch
-from octako.machinery.networks import In, Link, ModRef, Network, NetworkBuilder, InterfaceNode, Node, NullNodeProcessor, Operation, OpNode, Port, SubNetwork, UpdateNodeName
+from octako.machinery.networks import In, Link, ModRef, Network, InterfaceNode, Node, NullNodeProcessor, Operation, OpNode, Port, SubNetwork, UpdateNodeName
 
 
 class TestNode:
@@ -221,7 +221,6 @@ class TestLink:
         to_ = {}
         link.map(from_, to_)
         assert to_['h'] is from_['t']
-
 
 
 class TestSubnetwork:

@@ -7,9 +7,8 @@ from torch._C import Size
 from torch.nn.modules import dropout
 from torch.nn.modules.activation import Sigmoid
 from torch.nn.modules.linear import Linear
-from octako.machinery.construction import UNDEFINED, ActivationFactory, AggregateFactory, BaseInput, BaseNetwork, ConvolutionFactory, DimAggregateFactory, DropoutFactory, LinearFactory, NormalizerFactory, NullFactory, RegularizerFactory, RepeatFactory, ScalerFactory, TorchLossFactory, ValidationFactory, ViewFactory
+from octako.machinery.construction import UNDEFINED, ActivationFactory, AggregateFactory, BaseInput, BaseNetwork, ConvolutionFactory, DimAggregateFactory, DropoutFactory, LinearFactory, NetworkBuilder, NormalizerFactory, NullFactory, RegularizerFactory, RepeatFactory, ScalerFactory, TorchLossFactory, ValidationFactory, ViewFactory
 from octako.machinery.construction import check_undefined, is_undefined
-from octako.machinery.networks import NetworkConstructor
 from octako.modules import objectives
 
 
@@ -50,8 +49,8 @@ class TestBaseNetwork:
 
     def test_single_port_changed_to_list(self):
 
-        constructor = NetworkConstructor()
-        in_, = constructor.add_tensor_input("x", torch.Size([-1, 4]))
+        constructor = NetworkBuilder()
+        in_, = constructor.add_tensor_input(torch.Size([-1, 4]), name="x")
         base_network = BaseNetwork(constructor, in_)
         assert isinstance(base_network.ports,list)
     

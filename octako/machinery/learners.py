@@ -171,8 +171,8 @@ class BinaryClassifier(Learner):
     OUT_NAME = 'y'
     TARGET_NAME = 't'
     INPUT_NAME = 'x'
-    LOSS_NAME = 'loss'
-    VALIDATION_NAME = 'classification'
+    LOSS_NAME = 'Loss'
+    VALIDATION_NAME = 'Classification'
 
     def __init__(
         self, director: FeedForwardDirector, 

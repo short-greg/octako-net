@@ -11,6 +11,7 @@ as long as the interface is correct.
 
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
+from functools import partial
 from os import stat
 from torch.functional import norm
 from octako.modules.activations import NullActivation, Scaler
@@ -19,7 +20,7 @@ import torch
 from octako.modules import objectives
 from .networks import Link, Network, Node, Operation, Parameter, Port
 import typing
-from typing import Optional as Opt
+from typing import Any, Counter, Optional as Opt
 from . import utils
 from octako.modules import utils as util_modules
 from .networks import In, OpNode, SubNetwork, InterfaceNode
@@ -52,6 +53,16 @@ class AbstractConstructor(ABC):
     
     def is_undefined(self):
         return get_undefined(self) is not None
+
+
+class TypeMap(object):
+
+    def __init__(self, **kwargs):
+
+        self._type_map = kwargs
+    
+    def __getattribute__(self, name: str) -> Any:
+        return self._type_map.get(name)
 
 
 @dataclass
@@ -154,6 +165,7 @@ class NetworkBuilder(object):
         self._subnets: typing.Dict[str, Network] = {}
         self.base_labels: typing.Optional[typing.List[str]] = None
         self._cur_ports: typing.List[Port] = None
+        self._name_counter: typing.Counter[str] = Counter()
     
     def add_subnets(self, **kwargs: typing.Dict[str, Network]): # name: str, network: Network):
         
@@ -181,6 +193,13 @@ class NetworkBuilder(object):
     def net(self):
         return self._network
     
+    def _update_name(self, name: str):
+
+        self._name_counter.update([name])
+        count = self._name_counter[name]
+        if count != 1:
+            name = f'{name}_{count}'
+    
     def sub(self, key: str):
         return self._subnets[key]
     
@@ -192,8 +211,8 @@ class NetworkBuilder(object):
         return self._set_ports(node.ports)
 
     def add_op(
-        self, name: str, op: Operation, in_: typing.Union[Port, typing.List[Port]]=None, 
-        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
+        self, op: Operation, in_: typing.Union[Port, typing.List[Port]]=None, 
+        name: str='', labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
     ) -> typing.List[Port]:
         """[summary]
 
@@ -214,7 +233,7 @@ class NetworkBuilder(object):
             in_ = [in_]
         
         in_, labels = self._coalesce(in_, labels)
-        node = OpNode(name, op.op, in_, op.out_size, labels)
+        node = OpNode(self._update_name(name), op.op, in_, op.out_size, labels)
         return self._set_ports(self._network.add_node(node))
     
     def add_op_factories(
@@ -226,7 +245,7 @@ class NetworkBuilder(object):
         for op_factory in op_factories:
             op = op_factory.produce(*[p.size for p in ports])
             node = OpNode(
-                f'{op_factory.name}_{op_factory.produced}',
+                self._update_name(op_factory.name),
                 op, ports, op.out_size, 
                 op_factory.labels,
                 op_factory.annotation
@@ -242,7 +261,7 @@ class NetworkBuilder(object):
         ports, labels = self._coalesce(in_, labels)
         op = op_factory.produce(*[p.size for p in ports])
         node = OpNode(
-            f'{op_factory.name}_{op_factory.produced}',
+            self._update_name(op_factory.name),
             op, ports, op.out_size, 
             op_factory.labels,
             op_factory.annotation
@@ -250,54 +269,54 @@ class NetworkBuilder(object):
         return self._set_ports(self._network.add_node(node))
 
     def add_module_op(
-        self, name: str, mod: nn.Module, 
+        self, mod: nn.Module, 
         out_size: typing.Union[typing.List[torch.Size], torch.Size], 
-        in_: typing.Union[Port, typing.List[Port]]=None, 
+        in_: typing.Union[Port, typing.List[Port]]=None, name: str='',
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
     ): 
         in_, labels = self._coalesce(in_, labels)
-        node = OpNode(name, mod, in_, out_size, labels)
+        node = OpNode(self._update_name(name), mod, in_, out_size, labels)
         return self._set_ports(self._network.add_node(node))
 
     def add_lambda_op(
-        self, name: str, f: typing.Callable[[], torch.Tensor], 
+        self, f: typing.Callable[[], torch.Tensor], 
         out_size: typing.Union[typing.List[torch.Size], torch.Size], 
-        in_: typing.Union[Port, typing.List[Port]], 
+        in_: typing.Union[Port, typing.List[Port]], name: str='',
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None
     ): 
         in_, labels = self._coalesce(in_, labels)
-        node = OpNode(name, util_modules.Lambda(f), in_, out_size, labels)
+        node = OpNode(self._update_name(name), util_modules.Lambda(f), in_, out_size, labels)
         return self._set_ports(self._network.add_node(node))
 
-    def add_subnet_interface(self, name: str, subnet_name: str, in_links: typing.List[Link], out_ports: typing.List[Port]):
+    def add_subnet_interface(self, subnet_name: str, in_links: typing.List[Link], out_ports: typing.List[Port], name: str=''):
         subnet = self._subnets[subnet_name]
-        node = InterfaceNode(name, subnet, out_ports, in_links)
+        node = InterfaceNode(self._update_name(name), subnet, out_ports, in_links)
         return self._set_ports(self._network.add_node(node))
     
-    def add_input(self, name, sz: torch.Size, value_type: typing.Type, default_value, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+    def add_input(self, sz: torch.Size, value_type: typing.Type, default_value, name: str='', labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
         
         _, labels = self._coalesce(None, labels)
-        node = In(name, sz, value_type, default_value, labels, annotation)
+        node = In(self._update_name(name), sz, value_type, default_value, labels, annotation)
         return self._set_ports(self._network.add_node(node))
 
-    def add_tensor_input(self, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None, device: str='cpu'):
+    def add_tensor_input(self, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, name: str='', annotation: str=None, device: str='cpu'):
         
         _, labels = self._coalesce(None, labels)
-        node = In.from_tensor(name, sz, default_value, labels, annotation, device)
+        node = In.from_tensor(self._update_name(name), sz, default_value, labels, annotation, device)
         return self._set_ports(self._network.add_node(node))
 
-    def add_scalar_input(self, name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
+    def add_scalar_input(self, default_type: typing.Type, default_value, name: str='', labels: typing.Set[str]=None, annotation: str=None):
 
         _, labels = self._coalesce(None, labels)
-        node = In.from_scalar(name, default_type, default_value, labels, annotation)
+        node = In.from_scalar(self._update_name(name), default_type, default_value, labels, annotation)
         return self._set_ports(self._network.add_node(node))
 
     def add_parameter(
-        self, name: str, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], 
-        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None
+        self, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], 
+        name: str='', labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None
     ):
         _, labels = self._coalesce(None, labels)
-        node = Parameter(name, sz, reset_func, labels, annotation)
+        node = Parameter(self._update_name(name), sz, reset_func, labels, annotation)
         return self._set_ports(self._network.add_node(node))
     
     def set_default_interface(self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]):
@@ -390,6 +409,7 @@ class NetDirector(AbstractConstructor):
 @dataclass
 class ActivationFactory(OpReversibleFactory):
 
+    name: str="Activation"
     torch_act_cls: typing.Type[nn.Module] = nn.ReLU
     kwargs: dict = field(default_factory=dict)
 
@@ -403,6 +423,7 @@ class ActivationFactory(OpReversibleFactory):
 @dataclass
 class NormalizerFactory(OpReversibleFactory):
 
+    name: str="Normalizer"
     torch_normalizer_cls: typing.Type[nn.Module] = nn.BatchNorm1d
     eps: float=1e-4
     momentum: float=1e-1
@@ -426,6 +447,7 @@ class NormalizerFactory(OpReversibleFactory):
 @dataclass
 class LinearFactory(OpReversibleFactory):
 
+    name: str="Linear"
     out_features: int=UNDEFINED()
     bias: bool=True
     device: str="cpu"
@@ -474,6 +496,14 @@ class DimAggregateFactory(OpFactory):
     dim: int=1
     index: int=None
     keepdim: bool=False
+
+    # torch_agg = TypeMap(
+    #     "torch_agg_fn",
+    #     max=torch.max,
+    #     min=torch.min,
+    #     mean=torch.mean,
+    #     sum=torch.sum
+    # )
 
     def _produce(self, in_size: torch.Size) -> Operation:
         f = lambda x: (
@@ -608,6 +638,7 @@ class RepeatFactory(OpFactory):
 
 @dataclass
 class NullFactory(OpReversibleFactory):
+    name: str="Null"
     
     def _produce(self, in_size: torch.Size):
 
@@ -624,6 +655,8 @@ class NullFactory(OpReversibleFactory):
 @dataclass
 class ScalerFactory(OpFactory):
     
+    name: str="Scaler"
+
     def _produce(self, in_size: torch.Size):
 
         return Operation(
@@ -633,6 +666,7 @@ class ScalerFactory(OpFactory):
 
 @dataclass
 class TorchLossFactory(OpFactory):
+    name: str="TorchLoss"
 
     torch_loss_cls: typing.Type[nn.Module]= nn.MSELoss
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
@@ -648,6 +682,7 @@ class TorchLossFactory(OpFactory):
 @dataclass
 class RegularizerFactory(OpFactory):
     
+    name: str="Regularizer"
     regularizer_cls: typing.Type[objectives.Regularizer]= objectives.L2Reg
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
  
@@ -662,6 +697,7 @@ class RegularizerFactory(OpFactory):
 @dataclass
 class LossFactory(OpFactory):
 
+    name: str="Loss"
     loss_cls: typing.Type[objectives.Loss]=UNDEFINED
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
@@ -676,6 +712,7 @@ class LossFactory(OpFactory):
 @dataclass
 class ValidationFactory(OpFactory):
 
+    name: str="Validation"
     validation_cls: typing.Type[objectives.Loss]=objectives.ClassificationFitness
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
@@ -690,6 +727,7 @@ class ValidationFactory(OpFactory):
 @dataclass
 class AggregateFactory(OpFactory):
 
+    name: str="Aggregate"
     to_average: bool=True
     weights: typing.List=None
 
