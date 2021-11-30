@@ -260,7 +260,10 @@ class OpNode(Node):
         if self.name in by:
             return by[self.name]
 
-        result = self.operation(*[in_.select(by) for in_ in self._inputs])
+        try:
+            result = self.operation(*[in_.select(by) for in_ in self._inputs])
+        except Exception as e:
+            raise RuntimeError(f'Could not probe node {self.name} {type(self.operation)}') from e
         if to_cache:
             by[self.name] = result
         return result
@@ -644,7 +647,6 @@ class Network(nn.Module):
                 raise KeyError(f'Input or Node {module_name} does not exist')
 
         cur_result = node.probe(by, to_cache)
-        # excitations[node.name] = cur_result
         return cur_result
 
     def probe(

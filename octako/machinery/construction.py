@@ -181,7 +181,6 @@ class NetworkBuilder(object):
         return NetworkBuilder(Network(inputs))
 
 
-
 @dataclass
 class BaseInput(object):
 
