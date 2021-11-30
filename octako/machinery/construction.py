@@ -321,6 +321,7 @@ class BaseInput(object):
 def get_undefined(dataclass_obj) -> typing.Optional[str]:
     for k, v in asdict(dataclass_obj).items():
         if is_undefined(v):
+            print(k, v)
             return k
     return None
 
