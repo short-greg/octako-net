@@ -37,6 +37,104 @@ def is_undefined(val):
     return isinstance(val, UNDEFINED) or val == UNDEFINED
 
 
+@dataclass
+class AbstractConstructor(ABC):
+
+    def __post_init__(self):
+        
+        self._base_data = asdict(self)
+
+    def reset(self):        
+        for k, v in self._base_data.items():
+            if isinstance(v, AbstractConstructor):
+               v.reset() 
+            self.__setattr__(k, v)
+    
+    def is_undefined(self):
+        return get_undefined(self) is not None
+
+
+@dataclass
+class OpFactory(AbstractConstructor):
+
+    name: str=''
+    labels: typing.List[str]=field(default_factory=list)
+    annotation: str = ""
+
+    def __post_init__(self):
+        self._produced = 0
+
+    @property
+    def produced(self):
+        return self._produced
+
+    @abstractmethod
+    def _produce(self, *in_size: torch.Size) -> Operation:
+        pass
+    
+    def produce(self, *in_size: torch.Size) -> Operation:
+        self._produced += 1
+        return self._produce(*in_size)
+
+
+@dataclass
+class OpReversibleFactory(AbstractConstructor):
+    
+    name: str=''
+    labels: typing.List[str]=field(default_factory=list)
+    annotation: str = ""
+
+    def __post_init__(self):
+        self._produced = 0
+        self._produced_reverse = 0
+
+    @abstractmethod
+    def _produce(self, *in_size: torch.Size) -> Operation:
+        pass
+
+    @abstractmethod
+    def _produce_reverse(self, *in_size: torch.Size) -> Operation:
+        pass
+
+    @property
+    def produced(self):
+        return self._produced
+
+    @property
+    def produced_reverse(self):
+        return self._produce_reverse
+
+    def produce(self, *in_size: torch.Size, reverse: bool=True):
+        
+        if reverse:
+            self._produced_reverse += 1
+            return self._produce_reverse(*in_size)
+        
+        self._produced += 1
+        return self._produce(*in_size)
+
+
+@dataclass
+class OpFactoryReversed(OpFactory):
+
+    to_reverse: OpReversibleFactory=UNDEFINED()
+
+    def _produce(self, *in_size: torch.Size) -> Operation:
+        return self.to_reverse.produce(*in_size, reverse=True)
+
+
+def _reverse(self, name: str='', labels: typing.List[str]=None, annotation: str=''):
+    return OpFactoryReversed(name, labels, annotation, to_reverse=self)
+
+OpReversibleFactory.reverse = _reverse
+
+
+class OpDirector(AbstractConstructor):
+
+    @abstractmethod
+    def produce(self) -> Operation:
+        pass
+
 
 class NetworkBuilder(object):
     """
@@ -119,6 +217,38 @@ class NetworkBuilder(object):
         node = OpNode(name, op.op, in_, op.out_size, labels)
         return self._set_ports(self._network.add_node(node))
     
+    def add_op_factories(
+        self, op_factories: typing.List[OpFactory], in_: typing.Union[Port, typing.List[Port]]=None,
+        labels: typing.List[str]=None
+    ) -> typing.List[Port]:
+
+        ports, labels = self._coalesce(in_, labels)
+        for op_factory in op_factories:
+            op = op_factory.produce(*[p.size for p in ports])
+            node = OpNode(
+                f'{op_factory.name}_{op_factory.produced}',
+                op, ports, op.out_size, 
+                op_factory.labels,
+                op_factory.annotation
+            )
+            ports = self._network.add_node(node)
+        return self._set_ports(ports)
+    
+    def add_op_factory(
+        self, op_factory: OpFactory, in_: typing.Union[Port, typing.List[Port]]=None,
+        labels: typing.List[str]=None
+    ) -> typing.List[Port]:
+
+        ports, labels = self._coalesce(in_, labels)
+        op = op_factory.produce(*[p.size for p in ports])
+        node = OpNode(
+            f'{op_factory.name}_{op_factory.produced}',
+            op, ports, op.out_size, 
+            op_factory.labels,
+            op_factory.annotation
+        )
+        return self._set_ports(self._network.add_node(node))
+
     def add_module_op(
         self, name: str, mod: nn.Module, 
         out_size: typing.Union[typing.List[torch.Size], torch.Size], 
@@ -245,48 +375,6 @@ class BaseNetwork(object):
         return BaseNetwork(network_constructor, ports)
 
 
-@dataclass
-class AbstractConstructor(ABC):
-
-    def __post_init__(self):
-        
-        self._base_data = asdict(self)
-
-    def reset(self):        
-        for k, v in self._base_data.items():
-            if isinstance(v, AbstractConstructor):
-               v.reset() 
-            self.__setattr__(k, v)
-    
-    def is_undefined(self):
-        return get_undefined(self) is not None
-
-
-class OpFactory(AbstractConstructor):
-    
-    @abstractmethod
-    def produce(self, *in_size: torch.Size) -> Operation:
-        pass
-
-
-class OpReversibleFactory(AbstractConstructor):
-    
-    @abstractmethod
-    def produce(self, *in_size: torch.Size) -> Operation:
-        pass
-
-    @abstractmethod
-    def produce_reverse(self, *in_size: torch.Size) -> Operation:
-        pass
-
-
-class OpDirector(AbstractConstructor):
-
-    @abstractmethod
-    def produce(self) -> Operation:
-        pass
-
-
 class NetDirector(AbstractConstructor):
 
     base: BaseInput
@@ -305,10 +393,10 @@ class ActivationFactory(OpReversibleFactory):
     torch_act_cls: typing.Type[nn.Module] = nn.ReLU
     kwargs: dict = field(default_factory=dict)
 
-    def produce(self, in_size: torch.Size) -> Operation:
+    def _produce(self, in_size: torch.Size) -> Operation:
         return Operation(self.torch_act_cls(**self.kwargs), in_size)
     
-    def produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size) -> Operation:
         return self.produce(in_size)
 
 
@@ -323,7 +411,7 @@ class NormalizerFactory(OpReversibleFactory):
     device: str="cpu"
     dtype: torch.dtype= torch.float32
 
-    def produce(self, in_size: torch.Size) -> Operation:
+    def _produce(self, in_size: torch.Size) -> Operation:
         return Operation(self.torch_normalizer_cls(
             in_size[1], eps=self.eps, momentum=self.momentum, 
             affine=self.affine,
@@ -331,19 +419,19 @@ class NormalizerFactory(OpReversibleFactory):
             device=self.device, dtype=self.dtype
         ), in_size)
     
-    def produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size) -> Operation:
         return self.produce(in_size)
 
 
 @dataclass
 class LinearFactory(OpReversibleFactory):
 
-    out_features: int
+    out_features: int=UNDEFINED()
     bias: bool=True
     device: str="cpu"
     dtype: torch.dtype= torch.float32
 
-    def produce(self, in_size: torch.Size) -> Operation:
+    def _produce(self, in_size: torch.Size) -> Operation:
         return Operation(
             nn.Linear(
                 in_size[1], self.out_features, bias=self.bias, 
@@ -352,7 +440,7 @@ class LinearFactory(OpReversibleFactory):
             torch.Size([in_size[0], self.out_features])
         )
     
-    def produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size) -> Operation:
         return Operation(
             nn.Linear(
                 self.out_features, in_size[1], bias=self.bias, 
@@ -369,13 +457,13 @@ class DropoutFactory(OpReversibleFactory):
     p: float=0.2
     inplace: bool=False
 
-    def produce(self, in_size: torch.Size) -> Operation:
+    def _produce(self, in_size: torch.Size) -> Operation:
         return Operation(
             self.dropout_cls(p=self.p, inplace=self.inplace),
             torch.Size(in_size)
         )
     
-    def produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size) -> Operation:
         return self.produce(in_size)
 
 
@@ -387,7 +475,7 @@ class DimAggregateFactory(OpFactory):
     index: int=None
     keepdim: bool=False
 
-    def produce(self, in_size: torch.Size) -> Operation:
+    def _produce(self, in_size: torch.Size) -> Operation:
         f = lambda x: (
             self.torch_agg_fn(x, dim=self.dim, keepdim=self.keepdim) if self.index is None
             else self.torch_agg_fn(x, dim=self.dim)[self.index]
@@ -413,7 +501,7 @@ class ConvolutionFactory(OpReversibleFactory):
     kwargs: dict=field(default_factory=dict)
 
     @check_undefined
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
 
         out_sizes = utils.calc_conv_out_size(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, self.out_features, *out_sizes])
@@ -424,7 +512,7 @@ class ConvolutionFactory(OpReversibleFactory):
         )
    
     @check_undefined 
-    def produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size) -> Operation:
         out_sizes = torch.Size([
             -1, self.out_features, *utils.calc_conv_out_size(in_size, self.k, self.stride, self.padding)
         ])
@@ -455,7 +543,7 @@ class PoolFactory(OpReversibleFactory):
     torch_unpool_cls: typing.Type[nn.Module]= nn.MaxUnpool2d
     kwargs: dict=field(default_factory=dict)
 
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
         
         out_sizes = utils.calc_pool_out_size(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, in_size[1], *out_sizes])
@@ -464,7 +552,7 @@ class PoolFactory(OpReversibleFactory):
             out_size
         )
     
-    def produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size) -> Operation:
         out_sizes = utils.calc_maxunpool_out_size(in_size, self.k, self.stride, self.padding)
         out_size = torch.Size([-1, in_size[1], *out_sizes])
         return Operation(
@@ -477,16 +565,16 @@ class PoolFactory(OpReversibleFactory):
 class ViewFactory(OpReversibleFactory):
     """For changing the 'view' of the output"""
 
-    view: torch.Size
+    view: torch.Size=UNDEFINED()
 
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
         
         return Operation(
             util_modules.View(self.view),
             self.view
         )
     
-    def produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size) -> Operation:
         return Operation(
             util_modules.View(in_size),
             in_size
@@ -497,10 +585,10 @@ class ViewFactory(OpReversibleFactory):
 class RepeatFactory(OpFactory):
     """For repeating certain dimensions of a network"""
 
-    repeat_by: typing.List[int]
+    repeat_by: typing.List[int]=UNDEFINED()
     keepbatch: bool=True
 
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
         repeat_by = [*self.repeat_by]
         if self.keepbatch:
             repeat_by.insert(0, 1)
@@ -521,13 +609,13 @@ class RepeatFactory(OpFactory):
 @dataclass
 class NullFactory(OpReversibleFactory):
     
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
 
         return Operation(
             NullActivation(), in_size
         )
     
-    def produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size) -> Operation:
         return Operation(
             NullActivation(), in_size
         )
@@ -536,7 +624,7 @@ class NullFactory(OpReversibleFactory):
 @dataclass
 class ScalerFactory(OpFactory):
     
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
 
         return Operation(
             Scaler(), in_size
@@ -549,7 +637,7 @@ class TorchLossFactory(OpFactory):
     torch_loss_cls: typing.Type[nn.Module]= nn.MSELoss
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
 
         return Operation(
             self.torch_loss_cls(reduction=self.reduction_cls.as_str()),
@@ -563,7 +651,7 @@ class RegularizerFactory(OpFactory):
     regularizer_cls: typing.Type[objectives.Regularizer]= objectives.L2Reg
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
  
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
 
         return Operation(
             self.regularizer_cls(reduction_cls=self.reduction_cls),
@@ -574,10 +662,10 @@ class RegularizerFactory(OpFactory):
 @dataclass
 class LossFactory(OpFactory):
 
-    loss_cls: typing.Type[objectives.Loss]
+    loss_cls: typing.Type[objectives.Loss]=UNDEFINED
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
 
         return Operation(
             self.loss_cls(reduction_cls=self.reduction_cls),
@@ -591,7 +679,7 @@ class ValidationFactory(OpFactory):
     validation_cls: typing.Type[objectives.Loss]=objectives.ClassificationFitness
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
 
         return Operation(
             self.validation_cls(reduction_cls=self.reduction_cls),
@@ -605,7 +693,7 @@ class AggregateFactory(OpFactory):
     to_average: bool=True
     weights: typing.List=None
 
-    def produce(self, in_size: torch.Size):
+    def _produce(self, in_size: torch.Size):
 
         def aggregator(*x):
             if self.weights is not None:
