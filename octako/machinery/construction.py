@@ -104,7 +104,7 @@ class OpReversibleFactory(AbstractConstructor):
     def produced_reverse(self):
         return self._produce_reverse
 
-    def produce(self, *in_size: torch.Size, reverse: bool=True):
+    def produce(self, *in_size: torch.Size, reverse: bool=False):
         
         if reverse:
             self._produced_reverse += 1
@@ -321,7 +321,6 @@ class BaseInput(object):
 def get_undefined(dataclass_obj) -> typing.Optional[str]:
     for k, v in asdict(dataclass_obj).items():
         if is_undefined(v):
-            print(k, v)
             return k
     return None
 
