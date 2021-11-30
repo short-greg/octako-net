@@ -211,7 +211,7 @@ class BinaryClassifier(Learner):
         )
         constructor.add_op(
             self.VALIDATION_NAME, 
-            ValidationFactory(torch_loss_cls=BinaryClassificationFitness).produce(out.size), 
+            ValidationFactory(validation_cls=BinaryClassificationFitness).produce(out.size), 
             [out, target], "validation"
         )
         
@@ -291,7 +291,7 @@ class Multiclass(Learner):
         )
         constructor.add_op(
             self.VALIDATION_NAME, 
-            ValidationFactory(torch_loss_cls=ClassificationFitness).produce(out.size), 
+            ValidationFactory(validation_cls=ClassificationFitness).produce(out.size), 
             [out, target], "validation"
         )
         
