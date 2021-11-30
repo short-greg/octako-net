@@ -11,7 +11,7 @@ as long as the interface is correct.
 
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from functools import partial
+from functools import partial, singledispatchmethod
 from os import stat
 from torch.functional import norm
 from octako.modules.activations import NullActivation, Scaler
@@ -20,7 +20,7 @@ import torch
 from octako.modules import objectives
 from .networks import Link, Network, Node, Operation, Parameter, Port
 import typing
-from typing import Any, Counter, Optional as Opt
+from typing import Any, Callable, Counter, Optional as Opt
 from . import utils
 from octako.modules import utils as util_modules
 from .networks import In, OpNode, SubNetwork, InterfaceNode
@@ -38,12 +38,43 @@ def is_undefined(val):
     return isinstance(val, UNDEFINED) or val == UNDEFINED
 
 
+class TypeMap(object):
+
+    def __init__(self, **type_maps: typing.Dict[str, Callable]):
+
+        self._type_map = type_maps
+    
+    def is_type(self, name: str):
+        return name in self._type_map
+
+    @singledispatchmethod
+    def to_udpate(self, field_name: str, value):
+        return False
+
+    @to_udpate.register
+    def _(self, field_name: str, value: str):
+        if field_name in self._type_map:
+            return True
+        return False
+
+    def lookup(self, field_name: str, callable_name: str) -> typing.Optional[Callable]:
+
+        cur_type_map = self._type_map.get(field_name)
+        if cur_type_map is None: return None
+
+        return cur_type_map.get(callable_name)
+
+
 @dataclass
 class AbstractConstructor(ABC):
 
+    type_map = TypeMap()
+
     def __post_init__(self):
-        
         self._base_data = asdict(self)
+        for k, v in asdict(self._base_data).items():
+            if self.type_map.to_udpate(k, v):
+                self.__setattr__(k, self.type_map.lookup(k, v))
 
     def reset(self):        
         for k, v in self._base_data.items():
@@ -53,16 +84,6 @@ class AbstractConstructor(ABC):
     
     def is_undefined(self):
         return get_undefined(self) is not None
-
-
-class TypeMap(object):
-
-    def __init__(self, **kwargs):
-
-        self._type_map = kwargs
-    
-    def __getattribute__(self, name: str) -> Any:
-        return self._type_map.get(name)
 
 
 @dataclass
@@ -497,13 +518,14 @@ class DimAggregateFactory(OpFactory):
     index: int=None
     keepdim: bool=False
 
-    # torch_agg = TypeMap(
-    #     "torch_agg_fn",
-    #     max=torch.max,
-    #     min=torch.min,
-    #     mean=torch.mean,
-    #     sum=torch.sum
-    # )
+    type_map = TypeMap(
+        torch_agg_fn=dict(
+            max=torch.max,
+            min=torch.min,
+            mean=torch.mean,
+            sum=torch.sum
+        )
+    )
 
     def _produce(self, in_size: torch.Size) -> Operation:
         f = lambda x: (
