@@ -47,11 +47,17 @@ class TypeMap(object):
     def is_type(self, name: str):
         return name in self._type_map
 
+    def process(self, field_name: str, value):
+
+        if self.to_update(field_name, value):
+            return self.lookup(field_name, value)
+        return value
+
     @singledispatchmethod
-    def to_udpate(self, field_name: str, value):
+    def to_update(self, field_name: str, value):
         return False
 
-    @to_udpate.register
+    @to_update.register
     def _(self, field_name: str, value: str):
         if field_name in self._type_map:
             return True
@@ -75,7 +81,7 @@ class AbstractConstructor(ABC):
     def __post_init__(self):
         self._base_data = asdict(self)
         for k, v in asdict(self._base_data).items():
-            if self.type_map.to_udpate(k, v):
+            if self.type_map.to_update(k, v):
                 self.__setattr__(k, self.type_map.lookup(k, v))
 
     def reset(self):        
