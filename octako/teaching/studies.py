@@ -16,7 +16,7 @@ class Study(ABC):
 class LearnerBuilder(ABC):
 
     @abstractmethod
-    def build(self) -> dojos.Dojo:
+    def build(self) -> dojos.IDojo:
         pass
 
 

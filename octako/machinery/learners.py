@@ -5,6 +5,7 @@ Learning Machines define an operation, a learning algorithm
 for learning that operation and a testing algorithm for testing the operation.
 """
 
+from dataclasses import dataclass
 from torch.nn.modules.loss import CrossEntropyLoss, MSELoss
 from octako.modules.objectives import BinaryClassificationFitness, ClassificationFitness, Loss
 import typing
@@ -145,7 +146,7 @@ class IMachine(torch.nn.Module, ABC):
         pass
 
 
-class IBinaryClassifier(IMachine):
+class IClassifier(IMachine):
 
     @abstractmethod
     def classify(self, x: torch.Tensor):
@@ -394,4 +395,3 @@ class Regressor(Learner):
     @property
     def maximize_validation(self):
         return False
-

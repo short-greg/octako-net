@@ -1,5 +1,5 @@
-from takonet.teaching import dojos
-from takonet.machinery import learners
+from octako.teaching import dojos
+from octako.machinery import learners
 import torch.utils.data
 import torch
 import pandas as pd
@@ -45,7 +45,6 @@ def create_lecture(n_lessons, cur_iteration):
     return 
 
 
-
 class TestLecture:
 
     def test_results_initializes_data_frame(self):
@@ -77,7 +76,6 @@ class TestLecture:
         lecture.results.loc[1, 'y'] == 3
         lecture.results.loc[1, 'z'] == 9
         lecture.results.loc[1, 'x'] == np.nan
-
 
 
 class TestStaff:
@@ -275,7 +273,7 @@ class TestDojo:
 
     def test_add_base_staff(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         dojo.add_base_staff(inviter)
 
@@ -284,7 +282,7 @@ class TestDojo:
 
     def test_add_sub_staff(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         dojo.add_sub_staff(inviter)
 
@@ -293,7 +291,7 @@ class TestDojo:
 
     def test_is_staff_with_valid(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         dojo.add_base_staff(inviter)
 
@@ -301,7 +299,7 @@ class TestDojo:
 
     def test_is_staff_with_non_staff_member(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         dojo.add_sub_staff(inviter)
 
@@ -310,7 +308,7 @@ class TestDojo:
 
     def test_is_staff_with_sub(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         dojo.add_sub_staff(inviter)
 
@@ -318,21 +316,21 @@ class TestDojo:
 
     def test_is_staff_with_observer(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         dojo.add_observer(dojos.ObserverInviter(DummyObserver, 'observer'))
 
         assert dojo.is_observer("observer")
 
     def test_is_not_observer_with_invalid(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         dojo.add_observer(dojos.ObserverInviter(DummyObserver, 'observer1'))
 
         assert not dojo.is_observer("observer")
 
     def test_reorder_cannot_be_done_if_duplicates(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         inviter2 = get_teacher_inviter(2)
         dojo.add_base_staff(inviter)
@@ -343,7 +341,7 @@ class TestDojo:
 
     def test_reorder_cannot_be_done_if_lower_bound_invalid(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         inviter2 = get_teacher_inviter(2)
         dojo.add_base_staff(inviter)
@@ -354,7 +352,7 @@ class TestDojo:
 
     def test_reorder_cannot_be_done_if_upper_bound_invalid(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         inviter2 = get_teacher_inviter(2)
         dojo.add_base_staff(inviter)
@@ -365,7 +363,7 @@ class TestDojo:
 
     def test_reorder_produces_the_correct_order(self):
 
-        dojo = dojos.StandardDojo("dojo", dojos.GoalSetter(DummyGoalWithCourse))
+        dojo = dojos.StandardTeachingNetwork("dojo", dojos.GoalSetter(DummyGoalWithCourse))
         inviter = get_teacher_inviter()
         inviter2 = get_teacher_inviter(2)
         dojo.add_base_staff(inviter)
@@ -374,3 +372,47 @@ class TestDojo:
         dojo.reorder([1, 0])
         assert dojo[0].teacher_name == inviter2.teacher_name
         assert dojo[1].teacher_name == inviter.teacher_name
+
+
+dataset = torch.utils.data.TensorDataset(
+    torch.randn(4, 2), torch.randint(0, 4, (4,))
+)
+
+
+def get_teacher(name='Teacher'):
+
+    return dojos.StandardTeacher(
+        name, dataset, 32, 1, False
+    )
+
+
+class DummyLearner(learners.Learner):
+    def learn(self, x, y): pass;
+    def test(self, x, y): pass;
+
+
+class DummyGoal(dojos.Goal):
+    def evaluate(self): return 0.;
+
+
+class TestDojoBuilder:
+
+    def test_build_dojo_with_one_teacher(self):
+
+        goal_setter = dojos.GoalSetter(DummyGoal)
+
+        builder = dojos.TeachingNetworkBuilder("Validation Dojo", goal_setter)
+        builder.add_trainer("Trainer", dataset, is_base=True)
+        dojo = builder.get_result()
+        assert dojo.is_base_staff("Trainer")
+
+    def test_build_dojo_with_one_base_and_one_sub(self):
+
+        goal_setter = dojos.GoalSetter(DummyGoal)
+
+        builder = dojos.TeachingNetworkBuilder("Validation Dojo", goal_setter)
+        builder.add_trainer("Trainer", dataset, is_base=True)
+        builder.add_trainer("Trainer2", dataset, is_base=False)
+        network = builder.get_result()
+        assert network.is_base_staff("Trainer")
+

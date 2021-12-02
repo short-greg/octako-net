@@ -1,9 +1,14 @@
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
+from dataclasses import InitVar, asdict, dataclass
+import dataclasses
 
 import optuna
 import typing
+
+from torch.utils import data
+from octako.machinery.learners import Learner
 from octako.teaching import studies, dojos
+from functools import singledispatchmethod
 
 
 PDELIM = "/"
@@ -92,8 +97,6 @@ class Int(TrialSelector):
             return val
         return self._base ** val
 
-        # return int(math.log(val, self._base))
-
     @classmethod
     def from_dict(cls, params: dict):
         return cls(
@@ -104,6 +107,7 @@ class Int(TrialSelector):
 
 
 class Bool(TrialSelector):
+
 
     def __init__(self, name: str, default: bool=True):
         super().__init__(name, default)
@@ -306,9 +310,75 @@ def convert_params(trial_params: dict):
         for k, params in trial_params.items()
     }
 
-# TODO: Remove
+
+class Optunable(ABC):
+
+    @property
+    def path(self):
+        raise NotImplementedError
+
+    @singledispatchmethod
+    def _sample_value(self, v ,trial=None, best: dict=None):
+        return v        
+
+    @_sample_value.register
+    def _(self, v: TrialSelector, trial=None, best: dict=None):
+        return v.select(self.path, trial, best)
+
+    def _sample(self, trial=None, best: dict=None):
+
+        for k, v in asdict(self).items():
+            v = self._sample_value(v, trial, best)
+            self.__setattr__(k, v)
+
+
+@dataclass
+class TunableLearner(Learner, Optunable):
+
+    trial: InitVar[optuna.Trial] = None
+    best: InitVar[optuna.Trial] = None
+
+    def __post_init__(self, trial, best):
+        self._sample(trial, best)
+
+
+@dataclass
+class TunableDojo(dojos.Dojo, Optunable):
+
+    trial: InitVar[optuna.Trial] = None
+    best: InitVar[optuna.Trial] = None
+
+    def __post_init__(self, trial, best):
+        self._sample(trial, best)
+
+
+class OptunaStudy(studies.Study):
+    
+    @abstractmethod
+    def perform(self, trial=None, validation=False, best=None):
+        pass
+
+
+class MonoStudy(OptunaStudy):
+
+    def __init__(
+        self, learner_cls: typing.Type[TunableLearner], dojo_cls: typing.Type[TunableDojo]
+    ):
+        self._learner_cls = learner_cls
+        self._dojo_cls = dojo_cls
+    
+    def perform(self, trial=None, validation=False, best=None):
+        
+        dojo = self._dojo_cls(trial, best)
+        learner = self._learner_cls(trial, best)
+
+        if validation:
+            return dojo.teach(learner)
+        return dojo.test(learner)
+
 
 class ParamConverter(object):
+    """Convert 'best params' to params to update a class"""
 
     def __init__(self, best_params: dict):
 
@@ -380,14 +450,6 @@ class ParamConverter(object):
             self._nest_params_helper(s, value, nested_params)
 
         return nested_params
-
-
-@dataclass
-class OptunaStudy(studies.Study):
-    
-    @abstractmethod
-    def perform(self, trial=None, validation=False, best=None):
-        pass
 
 
 class StudyRunner(object):
