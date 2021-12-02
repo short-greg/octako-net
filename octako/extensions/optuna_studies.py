@@ -338,8 +338,13 @@ class TunableLearner(Learner, Optunable):
     trial: InitVar[optuna.Trial] = None
     best: InitVar[optuna.Trial] = None
 
+    @abstractmethod
+    def _build(self):
+        raise NotImplementedError
+
     def __post_init__(self, trial, best):
         self._sample(trial, best)
+        self._build()
 
 
 @dataclass
@@ -348,8 +353,12 @@ class TunableDojo(dojos.Dojo, Optunable):
     trial: InitVar[optuna.Trial] = None
     best: InitVar[optuna.Trial] = None
 
+    def _build(self):
+        raise NotImplementedError
+
     def __post_init__(self, trial, best):
         self._sample(trial, best)
+        self._build()
 
 
 class OptunaStudy(studies.Study):
