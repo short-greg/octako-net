@@ -471,7 +471,7 @@ class LinearFactory(OpReversibleFactory):
                 in_size[1], out_features, bias=self.bias, 
                 device=self.device, dtype=self.dtype
             ), 
-            torch.Size([in_size[0], self.out_features])
+            torch.Size([in_size[0], out_features])
         )
     
     def _produce_reverse(self, in_size: torch.Size, out_features=None) -> Operation:
@@ -766,7 +766,7 @@ class RegularizerFactory(OpFactory):
 class LossFactory(OpFactory):
 
     name: str="Loss"
-    loss_cls: typing.Type[objectives.Loss]=UNDEFINED
+    loss_cls: typing.Type[objectives.Loss]=UNDEFINED()
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
     def produce(self, in_size: torch.Size):
