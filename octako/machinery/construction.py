@@ -10,7 +10,7 @@ as long as the interface is correct.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from functools import partial, singledispatchmethod
 from os import stat
 from torch.functional import norm
@@ -20,7 +20,7 @@ import torch
 from octako.modules import objectives
 from .networks import Link, Network, Node, Operation, Parameter, Port
 import typing
-from typing import Any, Callable, Counter, Optional as Opt
+from typing import Any, Callable, Counter, Optional as Opt, Union
 from . import utils
 from octako.modules import utils as util_modules
 from .networks import In, OpNode, SubNetwork, InterfaceNode
@@ -101,20 +101,9 @@ class OpFactory(AbstractConstructor):
     labels: typing.List[str]=field(default_factory=list)
     annotation: str = field(default_factory=str)
 
-    def __post_init__(self):
-        self._produced = 0
-
-    @property
-    def produced(self):
-        return self._produced
-
     @abstractmethod
-    def _produce(self, *in_size: torch.Size) -> Operation:
-        pass
-    
     def produce(self, *in_size: torch.Size) -> Operation:
-        self._produced += 1
-        return self._produce(*in_size)
+        pass
 
 
 @dataclass
@@ -124,34 +113,13 @@ class OpReversibleFactory(AbstractConstructor):
     labels: typing.List[str]=field(default_factory=list)
     annotation: str = field(default_factory=str)
 
-    def __post_init__(self):
-        self._produced = 0
-        self._produced_reverse = 0
-
     @abstractmethod
-    def _produce(self, *in_size: torch.Size) -> Operation:
+    def produce(self, *in_size: torch.Size) -> Operation:
         pass
 
     @abstractmethod
-    def _produce_reverse(self, *in_size: torch.Size) -> Operation:
+    def produce_reverse(self, *in_size: torch.Size) -> Operation:
         pass
-
-    @property
-    def produced(self):
-        return self._produced
-
-    @property
-    def produced_reverse(self):
-        return self._produce_reverse
-
-    def produce(self, *in_size: torch.Size, reverse: bool=False):
-        
-        if reverse:
-            self._produced_reverse += 1
-            return self._produce_reverse(*in_size)
-        
-        self._produced += 1
-        return self._produce(*in_size)
 
 
 @dataclass
@@ -160,7 +128,7 @@ class OpFactoryReversed(OpFactory):
     to_reverse: OpReversibleFactory=UNDEFINED()
 
     def _produce(self, *in_size: torch.Size) -> Operation:
-        return self.to_reverse.produce(*in_size, reverse=True)
+        return self.to_reverse.produce_reverse(*in_size)
 
 
 def _reverse(self, name: str='', labels: typing.List[str]=None, annotation: str=''):
@@ -265,7 +233,7 @@ class NetworkBuilder(object):
         node = OpNode(self._update_name(name), op.op, in_, op.out_size, labels)
         return self._set_ports(self._network.add_node(node))
     
-    def add_op_factories(
+    def add_op_factory_sequence(
         self, op_factories: typing.List[OpFactory], in_: typing.Union[Port, typing.List[Port]]=None,
         labels: typing.List[str]=None
     ) -> typing.List[Port]:
@@ -447,10 +415,10 @@ class ActivationFactory(OpReversibleFactory):
         torch_act_cls=nn.modules.activation.__dict__
     )
 
-    def _produce(self, in_size: torch.Size) -> Operation:
+    def produce(self, in_size: torch.Size) -> Operation:
         return Operation(self.torch_act_cls(**self.kwargs), in_size)
     
-    def _produce_reverse(self, in_size: torch.Size) -> Operation:
+    def produce_reverse(self, in_size: torch.Size) -> Operation:
         return self.produce(in_size)
 
 
@@ -473,7 +441,7 @@ class NormalizerFactory(OpReversibleFactory):
         }
     )
 
-    def _produce(self, in_size: torch.Size) -> Operation:
+    def produce(self, in_size: torch.Size) -> Operation:
         return Operation(self.torch_normalizer_cls(
             in_size[1], eps=self.eps, momentum=self.momentum, 
             affine=self.affine,
@@ -481,7 +449,7 @@ class NormalizerFactory(OpReversibleFactory):
             device=self.device, dtype=self.dtype
         ), in_size)
     
-    def _produce_reverse(self, in_size: torch.Size) -> Operation:
+    def produce_reverse(self, in_size: torch.Size) -> Operation:
         return self.produce(in_size)
 
 
@@ -494,19 +462,23 @@ class LinearFactory(OpReversibleFactory):
     device: str="cpu"
     dtype: torch.dtype= torch.float32
 
-    def _produce(self, in_size: torch.Size) -> Operation:
+    def produce(self, in_size: torch.Size, out_features=None) -> Operation:
+        
+        out_features = utils.coalesce(out_features, self.out_features)
+        
         return Operation(
             nn.Linear(
-                in_size[1], self.out_features, bias=self.bias, 
+                in_size[1], out_features, bias=self.bias, 
                 device=self.device, dtype=self.dtype
             ), 
             torch.Size([in_size[0], self.out_features])
         )
     
-    def _produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size, out_features=None) -> Operation:
+        out_features = utils.coalesce(out_features, self.out_features)
         return Operation(
             nn.Linear(
-                self.out_features, in_size[1], bias=self.bias, 
+                out_features, in_size[1], bias=self.bias, 
                 device=self.device, dtype=self.dtype
             ), 
             in_size
@@ -524,14 +496,17 @@ class DropoutFactory(OpReversibleFactory):
         dropout_cls=nn.modules.dropout.__dict__
     )
 
-    def _produce(self, in_size: torch.Size) -> Operation:
+    def produce(self, in_size: torch.Size, p: float=None) -> Operation:
+
+        p = utils.coalesce(p, self.p)
         return Operation(
-            self.dropout_cls(p=self.p, inplace=self.inplace),
+            self.dropout_cls(p=p, inplace=self.inplace),
             torch.Size(in_size)
         )
     
-    def _produce_reverse(self, in_size: torch.Size) -> Operation:
-        return self.produce(in_size)
+    def produce_reverse(self, in_size: torch.Size, p: float=None) -> Operation:
+        p = utils.coalesce(p, self.p)
+        return self.produce(in_size, p=p)
 
 
 @dataclass
@@ -551,11 +526,19 @@ class DimAggregateFactory(OpFactory):
         )
     )
 
-    def _produce(self, in_size: torch.Size) -> Operation:
-        f = lambda x: (
-            self.torch_agg_fn(x, dim=self.dim, keepdim=self.keepdim) if self.index is None
-            else self.torch_agg_fn(x, dim=self.dim)[self.index]
-        )
+    def _f_with_index(self, x):
+        return self.torch_agg_fn(x, self.dim)[self.index]
+
+    def _f(self, x):
+        return self.torch_agg_fn(x, self.dim)
+
+    def produce(self, in_size: torch.Size) -> Operation:
+
+        if self.index is not None:
+            f = self._f_with_index
+        
+        f = self._f if self.index is None else self._f_with_index
+
         if self.keepdim:
             out_size = in_size[:self.dim] + torch.Size([1]) + in_size[self.dim + 1:]
         else:
@@ -577,32 +560,52 @@ class ConvolutionFactory(OpReversibleFactory):
     kwargs: dict=field(default_factory=dict)
 
     @check_undefined
-    def _produce(self, in_size: torch.Size):
+    def produce(
+        self, in_size: torch.Size, out_features: int=None, 
+        k: Union[int, tuple]=None, stride: Union[int, tuple]=None, 
+        padding: Union[int, tuple]=None
+    ):
+        k = utils.coalesce(k, self.k)
+        out_features = utils.coalesce(out_features, self.out_features)
+        stride = utils.coalesce(stride, self.stride)
+        padding = utils.coalesce(padding, self.padding)
 
-        out_sizes = utils.calc_conv_out_size(in_size, self.k, self.stride, self.padding)
-        out_size = torch.Size([-1, self.out_features, *out_sizes])
+        out_sizes = utils.calc_conv_out_size(in_size, k, stride, padding)
+        out_size = torch.Size([-1, out_features, *out_sizes])
         return Operation(
-            self.torch_conv_cls(in_size[1], self.out_features, 
-            self.k, self.stride, padding=self.padding, **self.kwargs),
-            out_size
+            self.torch_conv_cls(
+                in_size[1], out_features, 
+                k, stride, padding=padding, **self.kwargs
+            ), out_size
         )
    
     @check_undefined 
-    def _produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(
+        self, in_size: torch.Size, out_features: int=None, 
+        k: Union[int, tuple]=None, stride: Union[int, tuple]=None, 
+        padding: Union[int, tuple]=None
+    ) -> Operation:
+    
+        k = utils.coalesce(k, self.k)
+        out_features = utils.coalesce(out_features, self.out_features)
+        stride = utils.coalesce(stride, self.stride)
+        padding = utils.coalesce(padding, self.padding)
+
         out_sizes = torch.Size([
-            -1, self.out_features, *utils.calc_conv_out_size(in_size, self.k, self.stride, self.padding)
+            -1, self.out_features, *utils.calc_conv_out_size(in_size, k, stride, padding)
         ])
         in_sizes_comp = torch.Size([
-            -1, in_size[1], *utils.calc_conv_transpose_out_size(out_sizes, self.k, self.stride, self.padding)
+            -1, in_size[1], *utils.calc_conv_transpose_out_size(out_sizes, k, stride, padding)
         ])
 
         if in_size[1:] != in_sizes_comp[1:]:
             raise ValueError(f"Failed reverse expect: {in_size} actual: {in_sizes_comp} for {out_sizes}")
 
         return Operation(
-            self.torch_deconv_cls(self.out_features, in_size[1],  
-            kernel_size=self.k, stride=self.stride, padding=self.padding, **self.kwargs),
-            in_size
+            self.torch_deconv_cls(
+                out_features, in_size[1],  
+                kernel_size=k, stride=stride, padding=padding, **self.kwargs
+            ), in_size
         )
 
 
@@ -619,20 +622,37 @@ class PoolFactory(OpReversibleFactory):
     torch_unpool_cls: typing.Type[nn.Module]= nn.MaxUnpool2d
     kwargs: dict=field(default_factory=dict)
 
-    def _produce(self, in_size: torch.Size):
+    def _produce(
+        self, in_size: torch.Size, 
+        k: Union[int, tuple]=None, stride: Union[int, tuple]=None, 
+        padding: Union[int, tuple]=None
+    ):
         
-        out_sizes = utils.calc_pool_out_size(in_size, self.k, self.stride, self.padding)
+        k = utils.coalesce(k, self.k)
+        stride = utils.coalesce(stride, self.stride)
+        padding = utils.coalesce(padding, self.padding)
+    
+        out_sizes = utils.calc_pool_out_size(in_size, k, stride, padding)
         out_size = torch.Size([-1, in_size[1], *out_sizes])
         return Operation(
-            self.torch_pool_cls(in_size[1], in_size[1], self.k, self.stride, padding=self.padding),
+            self.torch_pool_cls(in_size[1], in_size[1], k, stride, padding),
             out_size
         )
     
-    def _produce_reverse(self, in_size: torch.Size) -> Operation:
-        out_sizes = utils.calc_maxunpool_out_size(in_size, self.k, self.stride, self.padding)
+    def _produce_reverse(
+        self, in_size: torch.Size, 
+        k: Union[int, tuple]=None, stride: Union[int, tuple]=None, 
+        padding: Union[int, tuple]=None
+    ) -> Operation:
+
+        k = utils.coalesce(k, self.k)
+        stride = utils.coalesce(stride, self.stride)
+        padding = utils.coalesce(padding, self.padding)
+    
+        out_sizes = utils.calc_maxunpool_out_size(in_size, k, stride, padding)
         out_size = torch.Size([-1, in_size[1], *out_sizes])
         return Operation(
-            self.torch_unpool_cls(in_size[1], in_size[1], self.k, self.stride, padding=self.padding),
+            self.torch_unpool_cls(in_size[1], in_size[1], k, stride, padding=padding),
             out_size
         )
     
@@ -643,14 +663,15 @@ class ViewFactory(OpReversibleFactory):
 
     view: torch.Size=UNDEFINED()
 
-    def _produce(self, in_size: torch.Size):
-        
+    def _produce(self, in_size: torch.Size, view: torch.Size=None):
+        view = utils.coalesce(view, self.view)
         return Operation(
-            util_modules.View(self.view),
+            util_modules.View(view),
             self.view
         )
     
-    def _produce_reverse(self, in_size: torch.Size) -> Operation:
+    def _produce_reverse(self, in_size: torch.Size, view: torch.Size=None) -> Operation:
+
         return Operation(
             util_modules.View(in_size),
             in_size
@@ -664,8 +685,9 @@ class RepeatFactory(OpFactory):
     repeat_by: typing.List[int]=UNDEFINED()
     keepbatch: bool=True
 
-    def _produce(self, in_size: torch.Size):
-        repeat_by = [*self.repeat_by]
+    def _produce(self, in_size: torch.Size, repeat_by: typing.List[int]=None):
+        repeat_by = utils.coalesce(repeat_by, self.repeat_by)
+        repeat_by = [*repeat_by]
         if self.keepbatch:
             repeat_by.insert(0, 1)
 
@@ -717,7 +739,7 @@ class TorchLossFactory(OpFactory):
     torch_loss_cls: typing.Type[nn.Module]= nn.MSELoss
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
-    def _produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size):
 
         return Operation(
             self.torch_loss_cls(reduction=self.reduction_cls.as_str()),
@@ -732,7 +754,7 @@ class RegularizerFactory(OpFactory):
     regularizer_cls: typing.Type[objectives.Regularizer]= objectives.L2Reg
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
  
-    def _produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size):
 
         return Operation(
             self.regularizer_cls(reduction_cls=self.reduction_cls),
@@ -747,7 +769,7 @@ class LossFactory(OpFactory):
     loss_cls: typing.Type[objectives.Loss]=UNDEFINED
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
-    def _produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size):
 
         return Operation(
             self.loss_cls(reduction_cls=self.reduction_cls),
@@ -762,7 +784,7 @@ class ValidationFactory(OpFactory):
     validation_cls: typing.Type[objectives.Loss]=objectives.ClassificationFitness
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
-    def _produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size):
 
         return Operation(
             self.validation_cls(reduction_cls=self.reduction_cls),
@@ -777,7 +799,7 @@ class AggregateFactory(OpFactory):
     to_average: bool=True
     weights: typing.List=None
 
-    def _produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size):
 
         def aggregator(*x):
             if self.weights is not None:

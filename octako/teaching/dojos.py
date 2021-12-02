@@ -888,6 +888,7 @@ class StandardDojo(Dojo[learners.Learner]):
             self.test_batch_size 
         )
 
+    # TODO: Decide on whether to keep these names
     def validate(self, learner: learners.Learner):
         
         return self._validation_network.teach(learner)
