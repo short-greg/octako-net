@@ -454,6 +454,8 @@ class Network(nn.Module):
     def __init__(self, inputs: typing.List[In]=None):
         super().__init__()
 
+        self._leaves: typing.Set[str] = set()
+        self._roots: typing.Set[str] = set()
         self._nodes: nn.ModuleDict = nn.ModuleDict()
         self._node_outputs: typing.Dict[str, typing.List[str]] = {}
         self._default_ins: typing.List[str] = []
@@ -504,6 +506,13 @@ class Network(nn.Module):
         if len(self._cache_names_used.intersection(node.cache_names_used)) > 0:
             raise ValueError("Cannot add node {} because the cache names are already used.".format(node.name))
         
+        if len(node.input_nodes) == 0:
+            self._roots.add(node.name)
+        
+        for input_node in node.input_nodes:
+            self._leaves.remove(input_node)
+        self._leaves.add(node.name)
+
         self._nodes[node.name] = node
         self._node_outputs[node.name] = []
         return node.ports
@@ -514,6 +523,17 @@ class Network(nn.Module):
         for node in self._nodes:
             yield node
 
+    @property
+    def leaves(self) -> typing.Iterator[Node]:
+        
+        for name in self._leaves:
+            yield self._nodes[name]
+
+    @property
+    def roots(self) -> typing.Iterator[Node]:
+        
+        for name in self._roots:
+            yield self._nodes[name]
     # def get_node(self, name: str, t: typing.Type=None):
     #     node = self._nodes.get(name)
     #     if t is None or isinstance(node, t):
@@ -628,6 +648,8 @@ class Network(nn.Module):
         all_true = not (False in is_inputs)
         return all_true and not other_found
     
+    # TODO: Update traverse forward / traverse backward
+    # to just return an iterator over nodes
     def traverse_forward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
 
         if from_nodes is None:
