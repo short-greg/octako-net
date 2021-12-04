@@ -7,6 +7,7 @@ Classes related to Networks.
 They are a collection of modules connected together in a graph.
 
 """
+from abc import ABC, abstractmethod
 import torch.nn as nn
 import torch
 import typing
@@ -15,6 +16,7 @@ import dataclasses
 import itertools
 from functools import singledispatch, singledispatchmethod
 from octako.machinery.utils import coalesce
+from itertools import chain
 
 
 @dataclasses.dataclass
@@ -156,15 +158,18 @@ class NodeSet(object):
 
     def __init__(self, nodes: typing.List[Node]):
 
-        self._nodes = nodes
-        self._node_dict: typing.Dict[str, Node] = {node.name: node for node in nodes}
+        self._order = [node.name for node in nodes]
+        self._nodes: typing.Dict[str, Node] = {node.name: node for node in nodes}
+        self.__or__ = self.unify
+        self.__and__ = self.intersect
+        self.__sub__ = self.difference
 
     @property
     def ports(self):
 
         result = []
-        for node in self._nodes:
-            result.extend(node.ports)
+        for node in self._order:
+            result.extend(self._nodes[node].ports)
         return result
 
     @singledispatchmethod
@@ -173,7 +178,7 @@ class NodeSet(object):
 
     @__getitem__.register
     def _(self, key: str):
-        return self._node_dict[key]
+        return self._nodes[key]
     
     @__getitem__.register
     def _(self, key: list):
@@ -184,6 +189,32 @@ class NodeSet(object):
     @__getitem__.register
     def _(self, key: int):
         return self._nodes[key]
+    
+    def unify(self, other):
+        nodes = [node for _, node in self._nodes.items()]
+
+        for name in other._order:
+            if name not in self._nodes:
+                nodes.append(other._nodes[name])
+        
+        return NodeSet(nodes)
+    
+    def intersect(self, other):
+        
+        nodes = []
+        for name in self._order:
+            if name in other._nodes:
+                nodes.append(self._nodes[name])
+        
+        return NodeSet(nodes)
+
+    def difference(self, other):
+        
+        nodes = []
+        for name in self._order:
+            if name not in other._nodes:
+                nodes.append(self._nodes[name])
+        return NodeSet(nodes)
 
 
 class NodeVisitor(object):
@@ -407,6 +438,14 @@ class Parameter(Node):
         return by.get(self.name, self._value)
 
 
+# labelq = (
+#     LabelQ(['']) | LabelQ([''])
+# ).filter(net.nodes)
+
+# labelq(net.nodes)
+
+
+
 class Network(nn.Module):
     """
     Network of nodes. Use for building complex machines.
@@ -468,35 +507,41 @@ class Network(nn.Module):
         self._nodes[node.name] = node
         self._node_outputs[node.name] = []
         return node.ports
-
-    def get_node(self, name: str, t: typing.Type=None):
-        node = self._nodes.get(name)
-        if t is None or isinstance(node, t):
-            return node
     
-    def get_ports(self, names: typing.Union[str, typing.List[str]], flat=True) -> typing.List[Port]:
-
-        if isinstance(names, str):
-            return self._nodes[names].ports
-        
-        ports = []
-        for name in names:
-            if name not in self._nodes:
-                raise ValueError(f'There is no node named {name} in the network')
-            if flat:
-                ports.extend(self._nodes[name].ports)
-            else:
-                ports.append(self._nodes[name].ports)
-
-        return ports
-    
-    def nodes_by_label(self, labels: typing.Iterable[str]):
+    @property
+    def nodes(self) -> typing.Iterator[Node]:
 
         for node in self._nodes:
-            node: Node = node
+            yield node
+
+    # def get_node(self, name: str, t: typing.Type=None):
+    #     node = self._nodes.get(name)
+    #     if t is None or isinstance(node, t):
+    #         return node
+    
+    # def get_ports(self, names: typing.Union[str, typing.List[str]], flat=True) -> typing.List[Port]:
+
+    #     if isinstance(names, str):
+    #         return self._nodes[names].ports
+        
+    #     ports = []
+    #     for name in names:
+    #         if name not in self._nodes:
+    #             raise ValueError(f'There is no node named {name} in the network')
+    #         if flat:
+    #             ports.extend(self._nodes[name].ports)
+    #         else:
+    #             ports.append(self._nodes[name].ports)
+
+    #     return ports
+    
+    # def nodes_by_label(self, labels: typing.Iterable[str]):
+
+    #     for node in self._nodes:
+    #         node: Node = node
             
-            if len(set(node.labels).intersection(labels)) == len(labels):
-                yield node
+    #         if len(set(node.labels).intersection(labels)) == len(labels):
+    #             yield node
     
     def _get_input_names_helper(self, node: Node, use_input: typing.List[bool]):
 
@@ -675,9 +720,9 @@ class Network(nn.Module):
         
         return result
     
-    # TODO: Depracate
-    def get_node(self, key) -> Node:
-        return self._nodes[key]
+    # # TODO: Depracate
+    # def get_node(self, key) -> Node:
+    #     return self._nodes[key]
 
     @singledispatchmethod
     def __getitem__(self, name):
