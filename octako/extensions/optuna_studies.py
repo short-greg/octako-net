@@ -311,79 +311,80 @@ def convert_params(trial_params: dict):
     }
 
 
-class Optunable(ABC):
+# class Optunable(ABC):
 
-    @property
-    def path(self):
-        raise NotImplementedError
+#     @property
+#     def path(self):
+#         raise NotImplementedError
 
-    @singledispatchmethod
-    def _sample_value(self, v ,trial=None, best: dict=None):
-        return v        
+#     @singledispatchmethod
+#     def _sample_value(self, v ,trial=None, best: dict=None):
+#         return v        
 
-    @_sample_value.register
-    def _(self, v: TrialSelector, trial=None, best: dict=None):
-        return v.select(self.path, trial, best)
+#     @_sample_value.register
+#     def _(self, v: TrialSelector, trial=None, best: dict=None):
+#         return v.select(self.path, trial, best)
 
-    def _sample(self, trial=None, best: dict=None):
+#     def _sample(self, trial=None, best: dict=None):
 
-        for k, v in asdict(self).items():
-            v = self._sample_value(v, trial, best)
-            self.__setattr__(k, v)
-
-
-@dataclass
-class TunableLearner(Learner, Optunable):
-
-    trial: InitVar[optuna.Trial] = None
-    best: InitVar[optuna.Trial] = None
-
-    @abstractmethod
-    def _build(self):
-        raise NotImplementedError
-
-    def __post_init__(self, trial, best):
-        self._sample(trial, best)
-        self._build()
+#         for k, v in asdict(self).items():
+#             v = self._sample_value(v, trial, best)
+#             self.__setattr__(k, v)
 
 
-@dataclass
-class TunableDojo(dojos.Dojo, Optunable):
+# @dataclass
+# class TunableLearner(Learner, Optunable):
 
-    trial: InitVar[optuna.Trial] = None
-    best: InitVar[optuna.Trial] = None
+#     trial: InitVar[optuna.Trial] = None
+#     best: InitVar[optuna.Trial] = None
 
-    def _build(self):
-        raise NotImplementedError
+#     @abstractmethod
+#     def _build(self):
+#         raise NotImplementedError
 
-    def __post_init__(self, trial, best):
-        self._sample(trial, best)
-        self._build()
+#     def __post_init__(self, trial, best):
+#         self._sample(trial, best)
+#         self._build()
+
+# @dataclass
+# class TunableDojo(dojos.Dojo, Optunable):
+
+#     trial: InitVar[optuna.Trial] = None
+#     best: InitVar[optuna.Trial] = None
+
+#     def _build(self):
+#         raise NotImplementedError
+
+#     def __post_init__(self, trial, best):
+#         self._sample(trial, best)
+#         self._build()
+
+# class MonoStudy(OptunaStudy):
+
+#     def __init__(
+#         self, learner_cls: typing.Type[TunableLearner], 
+#         dojo_cls: typing.Type[TunableDojo], params, device='cpu'
+#     ):
+#         self._learner_cls = learner_cls
+#         self._dojo_cls = dojo_cls
+#         self._params = params
+#         self._device = device
+    
+#     def perform(self, trial=None, validation=False, best=None):
+        
+#         dojo = self._dojo_cls(**self._params)
+#         learner = self._learner_cls(**self._device)
+
+#         if validation:
+#             return dojo.validate(learner, trial, best)
+#         return dojo.test(learner, trial, best)
 
 
 class OptunaStudy(studies.Study):
     
     @abstractmethod
-    def perform(self, trial=None, validation=False, best=None):
+    def perform(self, trial=None, best=None, validation=False) -> typing.List[dojos.Course]:
         pass
-
-
-class MonoStudy(OptunaStudy):
-
-    def __init__(
-        self, learner_cls: typing.Type[TunableLearner], dojo_cls: typing.Type[TunableDojo]
-    ):
-        self._learner_cls = learner_cls
-        self._dojo_cls = dojo_cls
-    
-    def perform(self, trial=None, validation=False, best=None):
-        
-        dojo = self._dojo_cls(trial, best)
-        learner = self._learner_cls(trial, best)
-
-        if validation:
-            return dojo.teach(learner)
-        return dojo.test(learner)
 
 
 class ParamConverter(object):
