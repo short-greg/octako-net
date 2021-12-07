@@ -10,10 +10,11 @@ as long as the interface is correct.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import InitVar, asdict, dataclass, field, replace
 from functools import partial, singledispatchmethod
 from os import stat
 from torch.functional import norm
+from torch.utils import data
 from octako.modules.activations import NullActivation, Scaler
 from torch import nn
 import torch
@@ -816,6 +817,43 @@ class AggregateFactory(OpFactory):
             util_modules.Lambda(aggregator),
             in_size
         )
+
+
+@dataclass
+class OverrideFactory(OpFactory):
+    """Decorator factory to override the produce method
+
+    Args:
+        OpFactory ([type]): Factory to overri
+
+    Raises:
+        ValueError: If factory is undefined
+    """
+
+    factory: OpFactory = UNDEFINED
+    # if name is undefined, name is set to the name of the decorated factory
+    name: str = None
+    meta: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+
+        if self.factory == UNDEFINED:
+            raise ValueError("Factory must be defined upon initialization")
+        if self.name is None:
+            self.name = self.factory.name
+        
+
+    def produce(self, in_size: torch.Size):
+
+        return self.factory.produce(
+            in_size, **self.meta
+        )
+
+
+def override(factory: OpFactory, name: str=None, **kwargs):
+
+    return OverrideFactory(name=name, factory=factory, meta=kwargs)
+
 
 
 @dataclass

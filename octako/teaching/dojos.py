@@ -2,7 +2,7 @@ import dataclasses
 import typing
 from attr import field
 from octako.machinery import learners
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, abstractproperty
 import pandas as pd
 from . import events
 from torch.utils import data as torch_data
@@ -29,7 +29,26 @@ class IMessageReceiver(ABC):
         pass
 
 
-class Teacher(IMessageReceiver):
+class EventSet:
+    pass
+
+
+class TeachingNode(IMessageReceiver):
+
+    @abstractproperty
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
+    def send(self, message: IMessage):
+        pass
+
+    @abstractproperty
+    def events(self) -> EventSet:
+        pass
+
+
+class Teacher(TeachingNode):
 
     @property
     def name(self) -> str:
@@ -40,7 +59,7 @@ class Teacher(IMessageReceiver):
         pass
 
 
-class Observer(IMessageReceiver):
+class Observer(TeachingNode):
     
     @property
     def name(self) -> str:
@@ -608,6 +627,12 @@ class StandardTeachingNetwork(TeachingNetwork):
         self._members: typing.Set[str] = set()
         self._audience: typing.Set[ObserverInviter] = set()
         self._n_finished: int = 0
+
+    def add_main_node(self, node: TeachingNode):
+        pass
+
+    def add_sub_node(self, node: TeachingNode, on_: typing.List[events.TeachingEvent]):
+        pass
     
     def is_base_staff(self, name: str):
         for member in self._base:
