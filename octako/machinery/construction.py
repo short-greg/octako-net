@@ -81,7 +81,7 @@ class AbstractConstructor(ABC):
 
     def __post_init__(self):
         self._base_data = asdict(self)
-        for k, v in asdict(self._base_data).items():
+        for k, v in self._base_data.items():
             if self.type_map.to_update(k, v):
                 self.__setattr__(k, self.type_map.lookup(k, v))
 
