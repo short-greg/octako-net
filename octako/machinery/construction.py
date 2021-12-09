@@ -861,7 +861,7 @@ class LinearLayerDirector(OpDirector):
 
     in_features: int=UNDEFINED()
     out_features: int=UNDEFINED()
-    activation: Opt[ActivationFactory]=ActivationFactory(torch.nn.ReLU)
+    activation: Opt[ActivationFactory]=ActivationFactory(torch_act_cls=torch.nn.ReLU)
     dropout: Opt[DropoutFactory]=DropoutFactory()
     normalizer: Opt[NormalizerFactory]=NormalizerFactory()
     bias: bool=True
