@@ -9,14 +9,14 @@ import typing
 class Study(ABC):
 
     @abstractmethod
-    def perform() -> typing.List[dojos.Course]:
+    def perform(self) -> typing.List[dojos.Course]:
         pass
 
 
 class LearnerBuilder(ABC):
 
     @abstractmethod
-    def build(self) -> dojos.IDojo:
+    def build(self) -> learners.Learner:
         pass
 
 
