@@ -42,10 +42,6 @@ class TeachingNode(IMessageReceiver):
     def send(self, message: IMessage):
         pass
 
-    @abstractproperty
-    def events(self) -> EventSet:
-        pass
-
 
 class Teacher(TeachingNode):
 

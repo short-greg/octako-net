@@ -197,6 +197,7 @@ class NetworkBuilder(object):
         count = self._name_counter[name]
         if count != 1:
             name = f'{name}_{count}'
+        return name
     
     def sub(self, key: str):
         return self._subnets[key]
@@ -244,7 +245,7 @@ class NetworkBuilder(object):
             op = op_factory.produce(*[p.size for p in ports])
             node = OpNode(
                 self._update_name(op_factory.name),
-                op, ports, op.out_size, 
+                op.op, ports, op.out_size, 
                 op_factory.labels,
                 op_factory.annotation
             )
@@ -260,7 +261,7 @@ class NetworkBuilder(object):
         op = op_factory.produce(*[p.size for p in ports])
         node = OpNode(
             self._update_name(op_factory.name),
-            op, ports, op.out_size, 
+            op.op, ports, op.out_size, 
             op_factory.labels,
             op_factory.annotation
         )
@@ -622,6 +623,7 @@ class PoolFactory(OpReversibleFactory):
     torch_pool_cls: typing.Type[nn.Module]= nn.MaxPool2d
     torch_unpool_cls: typing.Type[nn.Module]= nn.MaxUnpool2d
     kwargs: dict=field(default_factory=dict)
+    name: str="Pool"
 
     def produce(
         self, in_size: torch.Size, 
@@ -663,12 +665,13 @@ class ViewFactory(OpReversibleFactory):
     """For changing the 'view' of the output"""
 
     view: torch.Size=UNDEFINED()
+    name: str="View"
 
     def produce(self, in_size: torch.Size, view: torch.Size=None):
         view = utils.coalesce(view, self.view)
         return Operation(
             util_modules.View(view),
-            self.view
+            view
         )
     
     def produce_reverse(self, in_size: torch.Size, view: torch.Size=None) -> Operation:
@@ -685,6 +688,7 @@ class RepeatFactory(OpFactory):
 
     repeat_by: typing.List[int]=UNDEFINED()
     keepbatch: bool=True
+    name: str="Repeat"
 
     def produce(self, in_size: torch.Size, repeat_by: typing.List[int]=None):
         repeat_by = utils.coalesce(repeat_by, self.repeat_by)
@@ -740,7 +744,7 @@ class TorchLossFactory(OpFactory):
     torch_loss_cls: typing.Type[nn.Module]= nn.MSELoss
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
-    def produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size, target_size: torch.Size=None):
 
         return Operation(
             self.torch_loss_cls(reduction=self.reduction_cls.as_str()),
@@ -770,7 +774,7 @@ class LossFactory(OpFactory):
     loss_cls: typing.Type[objectives.Loss]=UNDEFINED()
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
-    def produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size, target_size: torch.Size=None):
 
         return Operation(
             self.loss_cls(reduction_cls=self.reduction_cls),
@@ -785,7 +789,7 @@ class ValidationFactory(OpFactory):
     validation_cls: typing.Type[objectives.Loss]=objectives.ClassificationFitness
     reduction_cls: typing.Type[objectives.ObjectiveReduction]=objectives.MeanReduction
     
-    def produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size, target_size: torch.Size=None):
 
         return Operation(
             self.validation_cls(reduction_cls=self.reduction_cls),
@@ -843,10 +847,10 @@ class OverrideFactory(OpFactory):
             self.name = self.factory.name
         
 
-    def produce(self, in_size: torch.Size):
+    def produce(self, *in_size: torch.Size):
 
         return self.factory.produce(
-            in_size, **self.meta
+            *in_size, **self.meta
         )
 
 

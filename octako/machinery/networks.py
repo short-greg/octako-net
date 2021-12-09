@@ -510,7 +510,8 @@ class Network(nn.Module):
             self._roots.add(node.name)
         
         for input_node in node.input_nodes:
-            self._leaves.remove(input_node)
+            if input_node in self._leaves:
+                self._leaves.remove(input_node)
         self._leaves.add(node.name)
 
         self._nodes[node.name] = node
