@@ -108,7 +108,6 @@ class Int(TrialSelector):
 
 class Bool(TrialSelector):
 
-
     def __init__(self, name: str, default: bool=True):
         super().__init__(name, default)
 

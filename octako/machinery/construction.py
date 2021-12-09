@@ -861,9 +861,9 @@ class LinearLayerDirector(OpDirector):
 
     in_features: int=UNDEFINED()
     out_features: int=UNDEFINED()
-    activation: Opt[ActivationFactory]=ActivationFactory(torch_act_cls=torch.nn.ReLU)
-    dropout: Opt[DropoutFactory]=DropoutFactory()
-    normalizer: Opt[NormalizerFactory]=NormalizerFactory()
+    activation: Opt[ActivationFactory]=field(default_factory=ActivationFactory)
+    dropout: Opt[DropoutFactory]=field(default_factory=DropoutFactory)
+    normalizer: Opt[NormalizerFactory]=field(default_factory=NormalizerFactory)
     bias: bool=True
     device: str="cpu"
 
@@ -896,8 +896,8 @@ class FeedForwardDirector(NetDirector):
     in_features: int=UNDEFINED()
     out_features: typing.List[int]=UNDEFINED()
     base_name: str="layer"
-    activation: ActivationFactory=ActivationFactory(torch_act_cls=nn.ReLU)
-    out_activation: ActivationFactory=ActivationFactory(torch_act_cls=nn.ReLU)
+    activation: ActivationFactory=field(default_factory=ActivationFactory)
+    out_activation: ActivationFactory=field(default_factory=ActivationFactory)
     normalizer: Opt[NormalizerFactory]=None
     dropout: Opt[DropoutFactory]=None
     input_name: str="x"
