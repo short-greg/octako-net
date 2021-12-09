@@ -6,9 +6,8 @@ from abc import ABC, abstractmethod, abstractproperty
 import pandas as pd
 from . import events
 from torch.utils import data as torch_data
-from . import observers
 import typing
-from typing import TypeVar, Generic
+from typing import TypeVar
 
 
 class IMessage(ABC):

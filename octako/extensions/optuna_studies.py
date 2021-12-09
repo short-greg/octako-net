@@ -1,14 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import InitVar, asdict, dataclass
-import dataclasses
 
 import optuna
 import typing
-
-from torch.utils import data
-from octako.machinery.learners import Learner
 from octako.teaching import studies, dojos
-from functools import singledispatchmethod
 
 
 PDELIM = "/"
