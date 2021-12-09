@@ -128,7 +128,7 @@ class OpFactoryReversed(OpFactory):
 
     to_reverse: OpReversibleFactory=UNDEFINED()
 
-    def _produce(self, *in_size: torch.Size) -> Operation:
+    def produce(self, *in_size: torch.Size) -> Operation:
         return self.to_reverse.produce_reverse(*in_size)
 
 
@@ -475,7 +475,7 @@ class LinearFactory(OpReversibleFactory):
             torch.Size([in_size[0], out_features])
         )
     
-    def _produce_reverse(self, in_size: torch.Size, out_features=None) -> Operation:
+    def produce_reverse(self, in_size: torch.Size, out_features=None) -> Operation:
         out_features = utils.coalesce(out_features, self.out_features)
         return Operation(
             nn.Linear(
@@ -581,7 +581,7 @@ class ConvolutionFactory(OpReversibleFactory):
         )
    
     @check_undefined 
-    def _produce_reverse(
+    def produce_reverse(
         self, in_size: torch.Size, out_features: int=None, 
         k: Union[int, tuple]=None, stride: Union[int, tuple]=None, 
         padding: Union[int, tuple]=None
@@ -623,7 +623,7 @@ class PoolFactory(OpReversibleFactory):
     torch_unpool_cls: typing.Type[nn.Module]= nn.MaxUnpool2d
     kwargs: dict=field(default_factory=dict)
 
-    def _produce(
+    def produce(
         self, in_size: torch.Size, 
         k: Union[int, tuple]=None, stride: Union[int, tuple]=None, 
         padding: Union[int, tuple]=None
@@ -640,7 +640,7 @@ class PoolFactory(OpReversibleFactory):
             out_size
         )
     
-    def _produce_reverse(
+    def produce_reverse(
         self, in_size: torch.Size, 
         k: Union[int, tuple]=None, stride: Union[int, tuple]=None, 
         padding: Union[int, tuple]=None
@@ -664,14 +664,14 @@ class ViewFactory(OpReversibleFactory):
 
     view: torch.Size=UNDEFINED()
 
-    def _produce(self, in_size: torch.Size, view: torch.Size=None):
+    def produce(self, in_size: torch.Size, view: torch.Size=None):
         view = utils.coalesce(view, self.view)
         return Operation(
             util_modules.View(view),
             self.view
         )
     
-    def _produce_reverse(self, in_size: torch.Size, view: torch.Size=None) -> Operation:
+    def produce_reverse(self, in_size: torch.Size, view: torch.Size=None) -> Operation:
 
         return Operation(
             util_modules.View(in_size),
@@ -686,7 +686,7 @@ class RepeatFactory(OpFactory):
     repeat_by: typing.List[int]=UNDEFINED()
     keepbatch: bool=True
 
-    def _produce(self, in_size: torch.Size, repeat_by: typing.List[int]=None):
+    def produce(self, in_size: torch.Size, repeat_by: typing.List[int]=None):
         repeat_by = utils.coalesce(repeat_by, self.repeat_by)
         repeat_by = [*repeat_by]
         if self.keepbatch:
@@ -709,13 +709,13 @@ class RepeatFactory(OpFactory):
 class NullFactory(OpReversibleFactory):
     name: str="Null"
     
-    def _produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size):
 
         return Operation(
             NullActivation(), in_size
         )
     
-    def _produce_reverse(self, in_size: torch.Size) -> Operation:
+    def produce_reverse(self, in_size: torch.Size) -> Operation:
         return Operation(
             NullActivation(), in_size
         )
@@ -726,7 +726,7 @@ class ScalerFactory(OpFactory):
     
     name: str="Scaler"
 
-    def _produce(self, in_size: torch.Size):
+    def produce(self, in_size: torch.Size):
 
         return Operation(
             Scaler(), in_size
