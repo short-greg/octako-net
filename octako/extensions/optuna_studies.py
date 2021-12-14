@@ -18,13 +18,10 @@ class TrialSelector(ABC):
 
     def select(self, path: str='', trial: optuna.Trial=None, best: dict=None):
 
-        if best and self.cat_path(path) in best:
-            result = self.update_best(best)
-            return result
-        elif trial is None:
-            return self.default
-        return self.suggest(path, trial)
-    
+        if trial:
+            return self.suggest(path, trial)
+        return self.update_best(best, path)
+
     def cat_path(self, path: str=None, sub: str=None):
         full_path = self._name
         if path is not None:
@@ -36,16 +33,10 @@ class TrialSelector(ABC):
     @abstractmethod
     def suggest(self, path: str, trial: optuna.Trial):
         raise NotImplementedError
-    
-    @abstractmethod
-    def _update_best_helper(self, best_val: dict, path: str):
-        raise NotImplementedError
 
+    @abstractmethod
     def update_best(self, best_val: dict, path: str=None):
-        if self.cat_path(path) not in best_val:
-            return self.default
-    
-        return self._update_best_helper(best_val, path)
+        raise NotImplementedError
 
     @classmethod
     def from_dict(cls, params: dict):
@@ -61,7 +52,8 @@ class Default(TrialSelector):
     def suggest(self, path: str, trial: optuna.Trial):
         return self._val
     
-    def _update_best_helper(self, best_val):
+    # def _update_best_helper(self, best_val):
+    def update_best(self, best_val: dict, path: str=None):
         return self.default
 
     @classmethod
@@ -86,8 +78,9 @@ class Int(TrialSelector):
             return result
         return self._base ** result
 
-    def _update_best_helper(self, best_val: dict, path:str):
-        val = best_val[self.cat_path(path)]
+    # def _update_best_helper(self, best_val: dict, path:str):
+    def update_best(self, best_val: dict, path: str=None):
+        val = best_val.get(self.cat_path(path), self.default)
         if self._base is None:
             return val
         return self._base ** val
@@ -112,8 +105,9 @@ class Bool(TrialSelector):
             self.cat_path(path) , 0, 1
         ))
 
-    def _update_best_helper(self, best_val: dict, path:str):
-        val = best_val[self.cat_path(path)]
+    # def _update_best_helper(self, best_val: dict, path:str):
+    def update_best(self, best_val: dict, path: str=None):
+        val = best_val.get(self.cat_path(path), self.default)
         return bool(val)
 
     @classmethod
@@ -134,14 +128,14 @@ class Float(TrialSelector):
             self.cat_path(path) , self._low, self._high
         )
 
-    def _update_best_helper(self, best_val: dict, path:str):
-        val = best_val[self.cat_path(path)]
+    # def _update_best_helper(self, best_val: dict, path:str):
+    def update_best(self, best_val: dict, path: str=None):
+        val = best_val.get(self.cat_path(path), self.default)
         return val
 
     @classmethod
     def from_dict(cls, params: dict):
         return cls(params['name'], default=params.get('default'))
-
 
 
 class Categorical(TrialSelector):
@@ -155,8 +149,9 @@ class Categorical(TrialSelector):
             self.cat_path(path), self._categories
         )
 
-    def _update_best_helper(self, best_val: dict, path:str):
-        return best_val[self.cat_path(path)]
+    #def _update_best_helper(self, best_val: dict, path:str):
+    def update_best(self, best_val: dict, path: str=None):
+        return best_val.get(self.cat_path(path), self.default)
 
     @classmethod
     def from_dict(cls, params: dict):
@@ -167,7 +162,7 @@ class ConditionalCategorical(TrialSelector):
 
     def __init__(self, name: str, categories: typing.Dict[str, str], default: str):
         super().__init__(name, default)
-        self._categries = categories
+        self._categeries = categories
     
     def _get_paths(self, path):
         base_path = self.cat_path(path)
@@ -176,13 +171,16 @@ class ConditionalCategorical(TrialSelector):
     
     def suggest(self, path: str, trial: optuna.Trial):
         base_path, sub_path = self._get_paths(path)
-        base = trial.suggest_categorical(base_path, list(self._categries.keys()))
-        sub_categories = self._categries[base]
+        base = trial.suggest_categorical(base_path, list(self._categeries.keys()))
+        sub_categories = self._categeries[base]
         sub = trial.suggest_categorical(sub_path, sub_categories)
         return (base, sub)
     
-    def _update_best_helper(self, best_val: dict, path:str):
+    # def _update_best_helper(self, best_val: dict, path:str):
+    def update_best(self, best_val: dict, path: str=None):
         base_path, sub_path = self._get_paths(path)
+        if base_path not in best_val or sub_path not in best_val:
+            return self.default
         return best_val[base_path], best_val[sub_path] 
 
     @classmethod
@@ -202,8 +200,9 @@ class LogUniform(TrialSelector):
             self.cat_path(path), self._low, self._high
         )
 
-    def _update_best_helper(self, best_val: dict, path:str):
-        return best_val[self.cat_path(path)]
+    # def _update_best_helper(self, best_val: dict, path:str):
+    def update_best(self, best_val: dict, path: str=None):
+        return best_val.get(self.cat_path(path), self.default)
     
     @classmethod
     def from_dict(cls, params: dict):
@@ -255,21 +254,31 @@ class Array(TrialSelector):
             if param._name == name:
                 return k, param
 
-    def _update_best_helper(self, best_val: dict, path:str):
-        best = best_val[self.cat_path(path)]
+    # def _update_best_helper(self, best_val: dict, path:str):
+    def update_best(self, best_val: dict, path: str=None):
+        # best = best_val[self.cat_path(path)]
         
-        size = best['size']
+        path = self.cat_path(path)
+        size_path = f'{path}/size'
+        if size_path not in best_val:
+            return self.default
+    
+        size = best_val[f'{path}/size']
         result = []
         for i in range(size):
             i_str = str(i)
             result.append({})
 
-            cur_params = best[i_str]
-            for k in cur_params.keys():
-                key, param = self._get_param_by_name(k)
+            cur_path = f'{path}/{i}'
+            # cur_params = best_val[cur_path]
+            # cur_params = best[i_str]
+            # for k in cur_params.keys():
+            for k, v in self._params.items():
+                # key, param = self._get_param_by_name(k)
 
-                v = param.update_best(cur_params)
-                result[i][key] = v
+                v = v.update_best(best_val, cur_path)
+                # v = param.update_best(cur_params)
+                result[i][k] = v
         
         return result
     
@@ -303,6 +312,54 @@ def convert_params(trial_params: dict):
         k: ParamMap[params['type']].from_dict(params)
         for k, params in trial_params.items()
     }
+
+
+class OptunaStudy(studies.Study):
+    
+    @abstractmethod
+    def perform(self, trial=None, best=None, validation=False) -> typing.List[dojos.Course]:
+        pass
+
+
+class StudyRunner(object):
+
+    @staticmethod
+    def get_direction(to_maximize):
+        return optuna.study.StudyDirection.MAXIMIZE if to_maximize else optuna.study.StudyDirection.MINIMIZE
+
+    def __init__(
+        self, study: OptunaStudy, base_name: str, n_trials: int, to_maximize: bool
+    ):
+        self._study = study
+        self._base_name = base_name
+        self._n_trials = n_trials
+        self._direction = self.get_direction(to_maximize)
+    
+    def get_objective(self, name: str, courses: typing.List[dojos.Course], parameters: typing.List) -> typing.Callable:
+        cur: int = 0
+        def objective(trial: optuna.Trial):
+            nonlocal cur
+            nonlocal courses
+            nonlocal parameters
+            course = self._study.perform(trial=trial, validation=True)
+            parameters.append(trial.params)
+            cur += 1
+            courses.append(course)
+            return course.evaluate().result
+        return objective
+
+    def run(self, name) -> typing.List[dojos.Course]:
+
+        courses: typing.List[dojos.Course] = []
+        parameters = []
+        study = optuna.create_study(direction=self._direction)
+        objective = self.get_objective(name, courses, parameters)
+        study.optimize(objective, self._n_trials)
+        # best_params = ParamConverter(study.best_params).to_dict()
+        parameters.append(study.best_params)
+        
+        courses.append(self._study.perform(best=study.best_params))
+        return courses, parameters
 
 
 # class Optunable(ABC):
@@ -374,124 +431,78 @@ def convert_params(trial_params: dict):
 #         return dojo.test(learner, trial, best)
 
 
-class OptunaStudy(studies.Study):
+# TODO: FIX!!
+
+# class ParamConverter(object):
+#     """Convert 'best params' to params to update a class"""
+
+#     def __init__(self, best_params: dict):
+
+#         self._best_params = best_params
     
-    @abstractmethod
-    def perform(self, trial=None, best=None, validation=False) -> typing.List[dojos.Course]:
-        pass
+#     def to_dict(self):
 
+#         return self._nest_params(self._best_params)
 
-class ParamConverter(object):
-    """Convert 'best params' to params to update a class"""
+#     def _replace_with_lists(self):
+#         """[convert dictionaries in in the nested parameters 
+#         to lists where the param dictionary consists of the keys 'size' plus integers
+#         this is somewhat of a hack]
 
-    def __init__(self, best_params: dict):
+#         Args:
+#             nested_params ([type]): [description]
 
-        self._best_params = best_params
-    
-    def to_dict(self):
+#         Returns:
+#             [type]: [description]
+#         """
 
-        return self._nest_params(self._best_params)
+#         nested_params = self._best_params
+#         if 'size' in nested_params and len(nested_params) > 1:
+#             all_digits = True
+#             for k in nested_params:
+#                 if k != 'size' and not k.isdigit():
+#                     all_digits = False
+#                     break
+#             result = []
+#             if all_digits is True:
+#                 for k, v in nested_params.items():
+#                     if k == 'size': continue;
+#                     cur = int(k)
+#                     if len(result) >= cur:
+#                         result.extend([None] * (cur + 1 - len(result)))
+#                     result[cur] = self._replace_with_lists(v)
+#                 return result
 
-    def _replace_with_lists(self):
-        """[convert dictionaries in in the nested parameters 
-        to lists where the param dictionary consists of the keys 'size' plus integers
-        this is somewhat of a hack]
+#         for k, v in nested_params.items():
+#             if type(v) == dict:
+#                 nested_params[k] = self._replace_with_lists(v)
+#             else:
+#                 nested_params[k] = v
 
-        Args:
-            nested_params ([type]): [description]
+#         return nested_params
 
-        Returns:
-            [type]: [description]
-        """
-
-        nested_params = self._best_params
-        if 'size' in nested_params and len(nested_params) > 1:
-            all_digits = True
-            for k in nested_params:
-                if k != 'size' and not k.isdigit():
-                    all_digits = False
-                    break
-            result = []
-            if all_digits is True:
-                for k, v in nested_params.items():
-                    if k == 'size': continue;
-                    cur = int(k)
-                    if len(result) >= cur:
-                        result.extend([None] * (cur + 1 - len(result)))
-                    result[cur] = self._replace_with_lists(v)
-                return result
-
-        for k, v in nested_params.items():
-            if type(v) == dict:
-                nested_params[k] = self._replace_with_lists(v)
-            else:
-                nested_params[k] = v
-
-        return nested_params
-
-    def _nest_params_helper(self, key_tuple, value, nested_params):
+#     def _nest_params_helper(self, key_tuple, value, nested_params):
         
-        cur = key_tuple[0]
-        # if cur not in nested_params:
-        #    nested_params[cur] = None
+#         cur = key_tuple[0]
+#         # if cur not in nested_params:
+#         #    nested_params[cur] = None
 
-        if len(key_tuple) == 1:
-            nested_params[cur] = value
-        else:
-            if cur not in nested_params:
-                nested_params[cur] = {}
-            self._nest_params_helper(
-                key_tuple[1:], value, nested_params[cur]
-            )
+#         if len(key_tuple) == 1:
+#             nested_params[cur] = value
+#         else:
+#             if cur not in nested_params:
+#                 nested_params[cur] = {}
+#             self._nest_params_helper(
+#                 key_tuple[1:], value, nested_params[cur]
+#             )
 
-    def _nest_params(self, best_params):
-        nested_params = {}
-        for key, value in best_params.items():
+#     def _nest_params(self, best_params):
+#         nested_params = {}
+#         for key, value in best_params.items():
 
-            s = key.split(PDELIM)
-            cur = s[0]
-            # nested_params[cur] = 
-            self._nest_params_helper(s, value, nested_params)
+#             s = key.split(PDELIM)
+#             cur = s[0]
+#             # nested_params[cur] = 
+#             self._nest_params_helper(s, value, nested_params)
 
-        return nested_params
-
-
-class StudyRunner(object):
-
-    @staticmethod
-    def get_direction(to_maximize):
-        return optuna.study.StudyDirection.MAXIMIZE if to_maximize else optuna.study.StudyDirection.MINIMIZE
-
-    def __init__(
-        self, study: OptunaStudy, base_name: str, n_trials: int, to_maximize: bool
-    ):
-        self._study = study
-        self._base_name = base_name
-        self._n_trials = n_trials
-        self._direction = self.get_direction(to_maximize)
-    
-    def get_objective(self, name: str, courses: typing.List[dojos.Course], parameters: typing.List) -> typing.Callable:
-        cur: int = 0
-        def objective(trial: optuna.Trial):
-            nonlocal cur
-            nonlocal courses
-            nonlocal parameters
-            course = self._study.perform(trial=trial, validation=True)
-            parameters.append(trial.params)
-            cur += 1
-            courses.append(course)
-            return course.evaluate().result
-        return objective
-
-    def run(self, name) -> typing.List[dojos.Course]:
-
-        courses: typing.List[dojos.Course] = []
-        parameters = []
-        study = optuna.create_study(direction=self._direction)
-        objective = self.get_objective(name, courses, parameters)
-        study.optimize(objective, self._n_trials)
-        best_params = ParamConverter(study.best_params).to_dict()
-        parameters.append(study.best_params)
-        
-        courses.append(self._study.perform(best=best_params))
-        return courses, parameters
+#         return nested_params
