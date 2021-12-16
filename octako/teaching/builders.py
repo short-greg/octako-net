@@ -86,11 +86,11 @@ def build_validation_network(
         [Dojo]: The validation dojo
     """
     goal_setter = GoalSetter(StandardGoal, to_maximize=to_maximize, teacher_name="Validator", goal_field=goal_field)
-    builder = TeachingNetworkBuilder(name, goal_setter)
+    builder = TeachingNetworkBuilder(name, goal_setter, device=device)
     return builder.add_trainer(
-        "Trainer", training_data, n_epochs, training_batch_size, True,  device=device
+        "Trainer", training_data, n_epochs, training_batch_size, True
     ).add_tester(
-        "Validator", test_data, test_batch_size, False,  device=device
+        "Validator", test_data, test_batch_size, False
     ).add_progress_bar(
         "Progress Bar", listen_to=["Trainer", "Validator"]
     ).add_teacher_trigger(
@@ -121,11 +121,11 @@ def build_testing_network(
         [Dojo]: The validation dojo
     """
     goal_setter = GoalSetter(StandardGoal, to_maximize=to_maximize, teacher_name="Tester", goal_field=goal_field)
-    builder = TeachingNetworkBuilder(name, goal_setter)
+    builder = TeachingNetworkBuilder(name, goal_setter, device)
     return builder.add_trainer(
-        "Trainer", training_data, n_epochs, training_batch_size, True,  device=device
+        "Trainer", training_data, n_epochs, training_batch_size, True
     ).add_tester(
-        "Tester", test_data, test_batch_size, False, device=device
+        "Tester", test_data, test_batch_size, False
     ).add_teacher_trigger(
         "Tester Trigger", 
         TriggerInviter(
