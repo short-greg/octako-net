@@ -528,7 +528,7 @@ class StandardTeacher(object):
 
     def __init__(
         self, name: str, course: Course, material: torch_data.Dataset, batch_size: int, n_lessons: int,
-        is_training: bool=True,
+        is_training: bool=True, device='cpu'
     ):
         """[initializer]
 
@@ -545,6 +545,7 @@ class StandardTeacher(object):
         self._name = name
         self._course = course
         self._n_lessons = n_lessons
+        self.device = device
 
     @property
     def name(self) -> str:
@@ -586,6 +587,8 @@ class StandardTeacher(object):
             self._course.start_lesson(self, len(data_loader))
 
             for x, t in data_loader:
+                x = x.to(self.device)
+                t = t.to(self.device)
                 if self._is_training:
                     item_results = student.learn(x, t)
                 else:

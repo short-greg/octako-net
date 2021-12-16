@@ -109,8 +109,9 @@ class Fitness(Objective):
 class ClassificationFitness(Fitness):
     
     def forward(self, x: torch.Tensor, t: torch.Tensor):
+        dim = t.dim()
         return self._w * self._reduction(
-            (torch.argmax(x) == t).float() 
+            (torch.argmax(x, dim=dim) == t).float() 
         ).detach()
 
 
@@ -123,6 +124,7 @@ class BinaryClassificationFitness(Fitness):
         return self._w * self._reduction(
             (x.round() == t).float() 
         ).detach()
+
 
 class Loss(Objective):
 

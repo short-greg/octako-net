@@ -1,5 +1,3 @@
-
-
 from abc import ABC, abstractmethod
 import dataclasses
 import typing
@@ -14,11 +12,12 @@ class TeachingNetworkBuilder(object):
     """
 
     def __init__(
-        self, name: str, goal_setter: GoalSetter =None
+        self, name: str, goal_setter: GoalSetter =None, device='cpu'
     ):
         self._name = name
         self._goal_setter = goal_setter
         self.dojo = StandardTeachingNetwork (name, goal_setter)
+        self.device = device
     
     def add_staff(self, teacher: Teacher, is_base: bool=True):
         if is_base:
@@ -32,7 +31,7 @@ class TeachingNetworkBuilder(object):
         batch_size: int=32, is_base: bool=False
     ):
         teacher = TeacherInviter(
-            StandardTeacher, name, material=material, batch_size=batch_size, n_lessons=1
+            StandardTeacher, name, material=material, batch_size=batch_size, n_lessons=1, device=self.device
         )
         return self.add_staff(teacher, is_base)
 
@@ -41,7 +40,7 @@ class TeachingNetworkBuilder(object):
         batch_size: int=32, is_base: bool=False
     ):
         return self.add_staff(TeacherInviter(
-            StandardTeacher, name, material=material, batch_size=batch_size, n_lessons=n_lessons,
+            StandardTeacher, name, material=material, batch_size=batch_size, n_lessons=n_lessons, device=self.device
         ), is_base)
     
     def add_teacher_trigger(self, name: str, trigger_inviter: TriggerInviter):
@@ -69,7 +68,7 @@ class TeachingNetworkBuilder(object):
 
 def build_validation_network(
     name: str, to_maximize: bool, goal_field: str, training_data: torch_data.Dataset, test_data: torch_data.Dataset,
-    n_epochs: int=10, training_batch_size: int=32, test_batch_size: int=32
+    n_epochs: int=10, training_batch_size: int=32, test_batch_size: int=32, device='cpu'
 ) -> StandardTeachingNetwork:
     """[Function to build a teaching network for doing validation]
 
@@ -89,9 +88,9 @@ def build_validation_network(
     goal_setter = GoalSetter(StandardGoal, to_maximize=to_maximize, teacher_name="Validator", goal_field=goal_field)
     builder = TeachingNetworkBuilder(name, goal_setter)
     return builder.add_trainer(
-        "Trainer", training_data, n_epochs, training_batch_size, True
+        "Trainer", training_data, n_epochs, training_batch_size, True,  device=device
     ).add_tester(
-        "Validator", test_data, test_batch_size, False
+        "Validator", test_data, test_batch_size, False,  device=device
     ).add_progress_bar(
         "Progress Bar", listen_to=["Trainer", "Validator"]
     ).add_teacher_trigger(
@@ -104,7 +103,7 @@ def build_validation_network(
 
 def build_testing_network(
     name: str, to_maximize: bool, goal_field: str, training_data: torch_data.Dataset, test_data: torch_data.Dataset,
-    n_epochs: int=10, training_batch_size: int=32, test_batch_size: int=32
+    n_epochs: int=10, training_batch_size: int=32, test_batch_size: int=32, device='cpu'
 ) -> StandardTeachingNetwork:    
     """[Function to build a teaching newtork for testing]
 
@@ -124,9 +123,9 @@ def build_testing_network(
     goal_setter = GoalSetter(StandardGoal, to_maximize=to_maximize, teacher_name="Tester", goal_field=goal_field)
     builder = TeachingNetworkBuilder(name, goal_setter)
     return builder.add_trainer(
-        "Trainer", training_data, n_epochs, training_batch_size, True
+        "Trainer", training_data, n_epochs, training_batch_size, True,  device=device
     ).add_tester(
-        "Tester", test_data, test_batch_size, False
+        "Tester", test_data, test_batch_size, False, device=device
     ).add_teacher_trigger(
         "Tester Trigger", 
         TriggerInviter(
@@ -163,20 +162,21 @@ class StandardDojo(Dojo[learners.Learner]):
     n_testing_epochs: int=10
     training_batch_size: int=32
     test_batch_size: int=32
+    device: str='cpu'
 
     def __post_init__(self):
         self._validation_network = build_validation_network(
             self.name, self.to_maximize, 
             self.goal_field, self.training_data, self.validation_data,
             self.n_validation_epochs, self.training_batch_size,
-            self.test_batch_size 
+            self.test_batch_size, device=self.device
         )
 
         self._testing_network = build_testing_network(
             self.name, self.to_maximize, 
             self.goal_field, self.final_training_data, self.test_data,
             self.n_testing_epochs, self.training_batch_size,
-            self.test_batch_size 
+            self.test_batch_size, device=self.device
         )
 
     # TODO: Decide on whether to keep these names
