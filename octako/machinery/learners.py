@@ -153,6 +153,13 @@ class IClassifier(IMachine):
         pass
 
 
+class IRegressor(IMachine):
+
+    @abstractmethod
+    def regress(self, x: torch.Tensor):
+        pass
+
+
 class IUpdater(ABC):
     
     @abstractmethod
