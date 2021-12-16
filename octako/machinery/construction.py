@@ -845,10 +845,8 @@ class OverrideFactory(OpFactory):
             raise ValueError("Factory must be defined upon initialization")
         if self.name is None:
             self.name = self.factory.name
-        
 
     def produce(self, *in_size: torch.Size):
-
         return self.factory.produce(
             *in_size, **self.meta
         )
