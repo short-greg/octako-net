@@ -221,7 +221,7 @@ def to_size(ports: typing.List[Port]):
 class BasicOp(OpFactory):
 
     def __init__(
-        self, module: typing.Type[nn.Module], out: typing.Callable[[nn.Module, torch.Size], typing.List], args: Args=None, kwargs: Kwargs=None,
+        self, module: typing.Type[nn.Module], out: typing.Union[torch.Size, typing.Callable[[nn.Module, torch.Size], typing.List]], args: Args=None, kwargs: Kwargs=None,
         name: str=None, labels: typing.List[str]=None, annotation: str=None
     ):
         if isinstance(out, torch.Size):
@@ -277,6 +277,24 @@ class BasicOp(OpFactory):
 
 op = BasicOp
 
+
+class DefinedOp(OpFactory):
+
+    def __init__(
+        self, module: nn.Module, out_size: typing.List[torch.Size], name: str=None, labels: typing.List[str]=None,
+        annotation: str=None
+    ):
+        self._module = module
+        self._out_size = out_size
+        self._annotation = annotation or ''
+        self._name = name or type(self._module).__name__
+        self._labels = labels or []
+    
+    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+        yield OpNode(self._name, self._module, in_, self._out_size, self._labels, self._annotation)
+
+    def produce(self, in_size: torch.Size, **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+        return self._module, self._out_size
 
 # @singledispatch
 # def op(module_factory: typing.Callable[[], nn.Module], out: typing.List[torch.Size], name: str=None, labels: typing.List[str]=None, annotation: str=None):
