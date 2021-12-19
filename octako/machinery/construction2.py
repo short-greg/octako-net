@@ -3,10 +3,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import partial, singledispatch, singledispatchmethod
 from os import path
-from typing import Any, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 import typing
 import torch
 from torch import nn
+from torch._C import Size
+from torch.nn.modules.container import Sequential
 from .networks import Node, OpNode, Port
 
 
@@ -22,31 +24,37 @@ class BaseVar(ABC):
 class Var(object):
 
     def __init__(self, name: str):
-        
         self._name = name
+    
+    @property
+    def name(self):
+        return self._name
 
-    def process(self, kwargs):
-
-        if self._name not in kwargs:
-            raise ValueError("Value {self._name} not contained in kwargs")
-        return kwargs
-
-    def spawn(self, kwargs: dict):
-        return Var(kwargs.get(self._name, self._name))
+    def spawn(self, **kwargs):
+        return kwargs.get(self._name, self)
 
 
 class Sz(object):
 
-    def __init__(self, idx: int, port_idx: int=None):
+    def __init__(self, dim_idx: int, port_idx: int=None):
         
         self._port_idx = port_idx
-        self._idx = idx
+        self._dim_idx= dim_idx
 
-    def process(self, size: torch.Size):
+    def process(self, sizes: typing.List[torch.Size]):
 
         if self._port_idx is None:
-            return size[self._idx]
-        return size[self._port_idx][self._idx]
+            if len(sizes[0]) <= self._dim_idx:
+                raise ValueError(f"Size dimension {len(sizes)} is smaller than the dimension index {self._dim_idx}.")
+            return sizes[0][self._dim_idx]
+        
+        if len(sizes) <= self._port_idx:
+            raise ValueError(f"Number of ports {len(sizes)} is smaller than the port index {self._port_idx}")
+
+        if len(sizes[self._port_idx]) <= self._dim_idx:
+            raise ValueError(f"Size dimension {len(sizes)} is smaller than the dimension index {self._dim_idx}")
+        return sizes[self._port_idx][self._dim_idx]
+
 
 @dataclass
 class BuildPort(object):
@@ -58,7 +66,7 @@ class BuildPort(object):
 class OpFactory(ABC):
 
     @abstractmethod
-    def produce(self, in_size: torch.Size, **kwargs) -> nn.Module:
+    def produce(self, in_size: torch.Size, **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
         raise NotImplementedError
     
     @abstractmethod
@@ -77,15 +85,13 @@ class OpFactory(ABC):
     def name(self, name):
         raise NotImplementedError
 
-    @abstractmethod
-    def __getitem__(self, key) -> typing.List[BuildPort]:
-        raise NotImplementedError
+    # @abstractmethod
+    # def __getitem__(self, key) -> typing.List[BuildPort]:
+    #     raise NotImplementedError
 
 
 OpFactory.__call__ = OpFactory.spawn
 
-
-# TODO: NEXT IMPLEMENT THIS
 
 class Sequence(OpFactory):
 
@@ -95,7 +101,42 @@ class Sequence(OpFactory):
     
     def add(self, op_factory: OpFactory, position: int=None):
 
-        pass
+        if position is None:
+            self._op_factories.append(op_factory)
+        else:
+            self._op_factories.insert(op_factory, position)
+
+    def __lshift__(self, other: OpFactory):
+        return Sequence(self._op_factories + [other])
+    
+    def produce(self, in_: typing.List[torch.Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+
+        sequential = nn.Sequential()
+
+        for factory in self._op_factories:
+            module, in_ = factory.produce(in_, **kwargs)
+            sequential.add_module(type(module).__name__, module)
+        return sequential, in_
+
+    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+        
+        for factory in self._op_factories:
+            for node in factory.produce_nodes(in_, **kwargs):      
+                in_ = node.ports  
+                yield node
+    
+    def spawn(self, **kwargs):
+        return Sequence(
+            [factory.spawn(**kwargs) for factory in self._op_factories]
+        )
+
+    @property
+    def labels(self):
+        return []
+
+    @property
+    def name(self):
+        return ''
 
 
 class NullFactory(OpFactory):
@@ -119,7 +160,7 @@ class _ArgMap(ABC):
 
     @_remap_arg.register
     def _(self, val: Var, kwargs):
-        return val.spawn(kwargs)
+        return val.spawn(**kwargs)
 
     @singledispatchmethod
     def _lookup_arg(self, val, in_size: torch.Size, kwargs):
@@ -127,18 +168,18 @@ class _ArgMap(ABC):
 
     @_lookup_arg.register
     def _(self, val: Var, in_size: torch.Size, kwargs):
-        return val.process(kwargs)
+        return val.spawn(**kwargs)
 
     @_lookup_arg.register
     def _(self, val: Sz, in_size: torch.Size, kwargs):
         return val.process(in_size)
 
     @abstractmethod
-    def lookup(self, in_size: torch.Size, **kwargs):        
+    def lookup(self, in_size: torch.Size, kwargs):        
         raise NotImplementedError
 
     @abstractmethod
-    def remap(self, **kwargs):    
+    def remap(self, kwargs):    
         raise NotImplementedError
 
 
@@ -148,13 +189,13 @@ class Kwargs(_ArgMap):
 
         self._kwargs = kwargs
 
-    def lookup(self, in_size: torch.Size, **kwargs):
+    def lookup(self, in_size: torch.Size, kwargs):
     
-        return {k: self._lookup_arg(in_size, kwargs) for k, v in self._kwargs.items()}
+        return {k: self._lookup_arg(v, in_size, kwargs) for k, v in self._kwargs.items()}
 
-    def remap(self, **kwargs):
+    def remap(self, kwargs):
 
-        return {k: self._remap_arg(kwargs) for k, v in self._kwargs.items()}
+        return {k: self._remap_arg(v, kwargs) for k, v in self._kwargs.items()}
 
 
 class Args(_ArgMap):
@@ -163,49 +204,69 @@ class Args(_ArgMap):
 
         self._args = args
 
-    def lookup(self, in_size: torch.Size, **kwargs):
+    def lookup(self, in_size: torch.Size, kwargs):
     
-        return [self._lookup_arg(in_size, kwargs) for v in self._args]
+        return [self._lookup_arg(v, in_size, kwargs) for v in self._args]
 
-    def remap(self, **kwargs):
+    def remap(self, kwargs):
 
-        return [self._remap_arg(kwargs) for v in self._args]
+        return [self._remap_arg(v, kwargs) for v in self._args]
+
+
+def to_size(ports: typing.List[Port]):
+
+    return [port.size for port in ports]
 
 
 class BasicOp(OpFactory):
 
     def __init__(
-        self, module: typing.Type[nn.Module], out: typing.Callable[[torch.Size], typing.List], args: Args, kwargs: Kwargs,
-        labels: typing.List[str]=None, annotation: str=None
+        self, module: typing.Type[nn.Module], out: typing.Callable[[nn.Module, torch.Size], typing.List], args: Args=None, kwargs: Kwargs=None,
+        name: str=None, labels: typing.List[str]=None, annotation: str=None
     ):
-
+        if isinstance(out, torch.Size):
+            self._out = lambda mod, sz: out
+        else:
+            self._out = out or null_out
         self._module = module
-        self._args = args
-        self._kwargs = kwargs
-        self._out = out
+        self._args = args or Args()
+        self._kwargs = kwargs or Kwargs()
+        self._name = name or module.__name__
         self._labels = labels
         self._annotation = annotation
-        
-        # 1) determine where the variables are
-        # 2) arg_vars, kwarg_vars (two varsets)
-        # kwarg_vars[k]
     
     def __lshift__(self, other) -> Sequence:
         return Sequence([self, other])
 
-    def produce(self, in_: typing.List[Port], **kwargs) -> nn.Module:
-        my_kwargs = self._kwargs.lookup(in_, kwargs)
-        my_args = self._args.lookup(in_, kwargs)
-        return self._module(*my_args, **my_kwargs)
-    
-    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
-        
+    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+
+        if isinstance(in_, Size):
+            in_ = [in_]
         my_kwargs = self._kwargs.lookup(in_, kwargs)
         my_args = self._args.lookup(in_, kwargs)
         module = self._module(*my_args, **my_kwargs)
-        return OpNode(
-            type(module).__name__, module, in_, self._out([i.size for i in in_])
+        return module, self._out(module, in_)
+    
+    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+        
+        if isinstance(in_, Port):
+            in_ = [in_]
+        in_ = to_size(in_)
+        my_kwargs = self._kwargs.lookup(in_, kwargs)
+        my_args = self._args.lookup(in_, kwargs)
+        module = self._module(*my_args, **my_kwargs)
+        
+        yield OpNode(
+            type(module).__name__, module, in_, self._out(module, in_)
         )
+    
+    @property
+    def labels(self):
+        return self._labels
+
+    @property
+    def name(self):
+        return self._name
 
     def spawn(self, **kwargs):
         my_kwargs = self._kwargs.remap(kwargs)
@@ -213,6 +274,8 @@ class BasicOp(OpFactory):
         return BasicOp(
             self._module, self._out, my_args, my_kwargs
         )
+
+op = BasicOp
 
 
 # @singledispatch
@@ -244,13 +307,9 @@ class Out(ABC):
         raise NotImplementedError
 
 
-class NullOut(Out):
 
-    def spawn(self, **kwargs):
-        return NullOut()
-
-    def __call__(self, mod: nn.Module, in_size: torch.Size): 
-        return in_size
+def null_out(mod: nn.Module, in_size: torch.Size): 
+    return in_size
 
 
 class TupleOut(Out):
@@ -266,19 +325,26 @@ class TupleOut(Out):
     def __call__(self, mod: nn.Module, in_size: torch.Size): 
         return in_size
 
+def _func_type():
+    pass
+
+_func_type = type(_func_type)
+
 
 class Mod(object):
 
     def __init__(self, mod: typing.Type[nn.Module], *args, **kwargs):
 
         self._module = mod
-        self._args = Args(args)
-        self._kwargs = Kwargs(kwargs)
+        self._args = Args(*args)
+        self._kwargs = Kwargs(**kwargs)
     
     @singledispatchmethod
     def _out(self, out_size):
         if out_size is None:
-            return NullOut()
+            return null_out
+        if isinstance(out_size, _func_type):
+            return out_size
         raise TypeError(f"Cannot process out_size of type {type(out_size).__name__}")
     
     @_out.register
@@ -297,11 +363,16 @@ class Mod(object):
             self._module, out_size, self._args, self._kwargs, labels, annotation
         )
 
-    def produce(self, in_: typing.List[Port], **kwargs) -> nn.Module:
+    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+        if isinstance(in_, Size):
+            in_ = [in_]
+        
         my_kwargs = self._kwargs.lookup(in_, kwargs)
         my_args = self._args.lookup(in_, kwargs)
-        return self._module(*my_args, **my_kwargs)
+        module = self._module(*my_args, **my_kwargs)
+        return module
 
+mod = Mod
 
 # mod(nn.Linear, 2, 3).op(out=(-1, Sz(1))
 # mod(nn.Linear, 2, 3).op()
@@ -317,20 +388,20 @@ class Mod(object):
 # labels
 
 
-class Mod(object):
+# class Mod(object):
 
-    def __init__(self, module: typing.Type[nn.Module], *args, **kwargs):
+#     def __init__(self, module: typing.Type[nn.Module], *args, **kwargs):
 
-        self._module = module
-        self._args = args
-        self._kwargs = kwargs
+#         self._module = module
+#         self._args = args
+#         self._kwargs = kwargs
 
-    def spawn(self, **kwargs):
-        my_kwargs = self._kwargs.remap(kwargs)
-        my_args = self._args.remap(kwargs)
-        return BasicOp(
-            self._module, self._out, my_args, my_kwargs
-        )
+#     def spawn(self, **kwargs):
+#         my_kwargs = self._kwargs.remap(kwargs)
+#         my_args = self._args.remap(kwargs)
+#         return BasicOp(
+#             self._module, self._out, my_args, my_kwargs
+#         )
 
 
 # override(linear, )
