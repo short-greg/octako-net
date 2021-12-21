@@ -103,14 +103,14 @@ class TestOp:
         
         op = BasicOp(nn.Sigmoid, null_out)
         nodes = list(op.produce_nodes(Port("x", torch.Size([-1, 4]))))
-        sigmoid = nodes[0].operation
+        sigmoid = nodes[0].op
         assert isinstance(sigmoid, Sigmoid)
 
     def test_linear_layer(self):
         
         op = BasicOp(nn.Linear, args=Args(2, 4), out=torch.Size([-1, 4]))
         nodes = list(op.produce_nodes(Port("x", torch.Size([-1, 4]))))
-        linear = nodes[0].operation
+        linear = nodes[0].op
         assert isinstance(linear, nn.Linear)
 
 
@@ -143,3 +143,28 @@ class TestSequence:
         ).produce([torch.Size([1, 2])])
         
         assert isinstance(sequence, Sequential)
+
+    def test_sequence_produce_nodes_from_three_ops(self):
+
+        # linear = mod(nn.Linear, Sz(1), Var('x')).op(linear_out)
+        port = Port("mod", torch.Size([1, 2]))
+        nodes = list((
+            mod(nn.Linear, 2, 4).op(torch.Size([-1, 4])) << 
+            mod(nn.Sigmoid).op() <<
+            mod(nn.Linear, 4, 3).op(torch.Size([-1, 3]))
+        ).produce_nodes(port))
+        
+        assert len(nodes) == 3
+
+    def test_sequence_produce_nodes_from_three_ops_and_vars(self):
+
+        # linear = mod(nn.Linear, Sz(1), Var('x')).op(linear_out)
+        port = Port("mod", torch.Size([1, 2]))
+        nodes = list((
+            mod(nn.Linear, 2, 4).op(torch.Size([-1, 4])) << 
+            mod(Var('activation')).op() <<
+            mod(nn.Linear, 4, 3).op(torch.Size([-1, 3]))  <<
+            mod(Var('activation')).op()
+        ).spawn(activation=nn.ReLU).produce_nodes(port))
+        
+        assert isinstance(nodes[1].op, nn.ReLU) and isinstance(nodes[3].op, nn.ReLU)

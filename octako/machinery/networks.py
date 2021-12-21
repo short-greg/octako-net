@@ -238,7 +238,7 @@ class OpNode(Node):
         annotation: str=None
     ):
         super().__init__(name, labels, annotation)
-        self.operation: nn.Module = operation
+        self.op: nn.Module = operation
         self._out_size = out_size
         self._inputs: typing.List[Port] = inputs
 
@@ -278,13 +278,13 @@ class OpNode(Node):
 
     def clone(self):
         return OpNode(
-            self.name, self.operation, self._inputs, self._out_size, self._labels,
+            self.name, self.op, self._inputs, self._out_size, self._labels,
             self._annotation
         )
     
     def forward(self, *args, **kwargs):
 
-        return self.operation(*args, **kwargs)
+        return self.op(*args, **kwargs)
 
     def probe(self, by: typing.Dict, to_cache=True):
         
@@ -292,9 +292,9 @@ class OpNode(Node):
             return by[self.name]
 
         try:
-            result = self.operation(*[in_.select(by) for in_ in self._inputs])
+            result = self.op(*[in_.select(by) for in_ in self._inputs])
         except Exception as e:
-            raise RuntimeError(f'Could not probe node {self.name} {type(self.operation)}') from e
+            raise RuntimeError(f'Could not probe node {self.name} {type(self.op)}') from e
         if to_cache:
             by[self.name] = result
         return result

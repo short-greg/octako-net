@@ -56,6 +56,17 @@ class Sz(object):
         return sizes[self._port_idx][self._dim_idx]
 
 
+class PortSize(object):
+
+    @singledispatchmethod
+    def __init__(self, sizes: typing.List[torch.Size]):
+        self._sizes = sizes
+    
+    @__init__.register
+    def __init__(self, sizes: torch.Size):
+        self._sizes = [sizes]
+
+
 @dataclass
 class BuildPort(object):
 
@@ -195,7 +206,7 @@ class Kwargs(_ArgMap):
 
     def remap(self, kwargs):
 
-        return {k: self._remap_arg(v, kwargs) for k, v in self._kwargs.items()}
+        return Kwargs(**{k: self._remap_arg(v, kwargs) for k, v in self._kwargs.items()})
 
 
 class Args(_ArgMap):
@@ -210,7 +221,46 @@ class Args(_ArgMap):
 
     def remap(self, kwargs):
 
-        return [self._remap_arg(v, kwargs) for v in self._args]
+        return Args(*[self._remap_arg(v, kwargs) for v in self._args])
+
+
+VarType = typing.Union[nn.Module, Var]
+
+
+class VarModule(object):
+
+    def __init__(self, module: VarType, args: Args=None, kwargs: Kwargs=None):
+
+        self._module = module
+        self._args = args or Args()
+        self._kwargs = kwargs or Kwargs()
+
+    def spawn(self, **kwargs):
+        my_kwargs = self._kwargs.remap(kwargs)
+        my_args = self._args.remap(kwargs)
+        module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
+        return VarModule(module, my_args, my_kwargs)
+
+    # TODO: produce should not take in a port
+    # look into refactoring the "port" and the out size next
+    def produce(self, in_: typing.List[Port], **kwargs):
+        
+        module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
+        my_kwargs = self._kwargs.lookup(in_, kwargs)
+        my_args = self._args.lookup(in_, kwargs)
+        return module(*my_args, **my_kwargs)
+    
+    @property
+    def module(self):
+        return self._module
+
+    @property
+    def args(self):
+        return self._args
+    
+    @property
+    def kwargs(self):
+        return self._kwargs
 
 
 def to_size(ports: typing.List[Port]):
@@ -221,7 +271,8 @@ def to_size(ports: typing.List[Port]):
 class BasicOp(OpFactory):
 
     def __init__(
-        self, module: typing.Type[nn.Module], out: typing.Union[torch.Size, typing.Callable[[nn.Module, torch.Size], typing.List]], args: Args=None, kwargs: Kwargs=None,
+        self, module: typing.Union[typing.Type[nn.Module], Var], 
+        out: typing.Union[torch.Size, typing.Callable[[nn.Module, torch.Size], typing.List]], args: Args=None, kwargs: Kwargs=None,
         name: str=None, labels: typing.List[str]=None, annotation: str=None
     ):
         if isinstance(out, torch.Size):
@@ -231,7 +282,8 @@ class BasicOp(OpFactory):
         self._module = module
         self._args = args or Args()
         self._kwargs = kwargs or Kwargs()
-        self._name = name or module.__name__
+        self._var_module = VarModule(self._module, args, kwargs)
+        self._name = name
         self._labels = labels
         self._annotation = annotation
     
@@ -242,9 +294,8 @@ class BasicOp(OpFactory):
 
         if isinstance(in_, Size):
             in_ = [in_]
-        my_kwargs = self._kwargs.lookup(in_, kwargs)
-        my_args = self._args.lookup(in_, kwargs)
-        module = self._module(*my_args, **my_kwargs)
+
+        module = self._var_module.produce(in_, **kwargs)
         return module, self._out(module, in_)
     
     def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
@@ -252,12 +303,11 @@ class BasicOp(OpFactory):
         if isinstance(in_, Port):
             in_ = [in_]
         in_ = to_size(in_)
-        my_kwargs = self._kwargs.lookup(in_, kwargs)
-        my_args = self._args.lookup(in_, kwargs)
-        module = self._module(*my_args, **my_kwargs)
-        
+        module = self._var_module.produce(in_, **kwargs)
+        name = self._name or type(module).__name__
+
         yield OpNode(
-            type(module).__name__, module, in_, self._out(module, in_)
+            name, module, in_, self._out(module, in_)
         )
     
     @property
@@ -269,10 +319,10 @@ class BasicOp(OpFactory):
         return self._name
 
     def spawn(self, **kwargs):
-        my_kwargs = self._kwargs.remap(kwargs)
-        my_args = self._args.remap(kwargs)
+        var_module = self._var_module.spawn(**kwargs)
         return BasicOp(
-            self._module, self._out, my_args, my_kwargs
+            var_module.module, self._out, var_module.args, var_module.kwargs, self._name,
+            self._labels, self._annotation
         )
 
 op = BasicOp
@@ -281,39 +331,31 @@ op = BasicOp
 class DefinedOp(OpFactory):
 
     def __init__(
-        self, module: nn.Module, out_size: typing.List[torch.Size], name: str=None, labels: typing.List[str]=None,
+        self, module: typing.Union[typing.Type[nn.Module], Var], out_size: typing.List[torch.Size], name: str=None, labels: typing.List[str]=None,
         annotation: str=None
     ):
-        self._module = module
+        self._var_module = VarModule(module)
         self._out_size = out_size
         self._annotation = annotation or ''
-        self._name = name or type(self._module).__name__
+        self._name = name
         self._labels = labels or []
     
     def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
-        yield OpNode(self._name, self._module, in_, self._out_size, self._labels, self._annotation)
+        var_module = self._var_module.produce(in_, **kwargs)
+        name = self._name or type(var_module.module).__name__
+        yield OpNode(name, var_module.module, in_, self._out_size, self._labels, self._annotation)
 
     def produce(self, in_size: torch.Size, **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
-        return self._module, self._out_size
+        var_module = self._var_module.produce(in_size, **kwargs)
+        return var_module, self._out_size
 
-# @singledispatch
-# def op(module_factory: typing.Callable[[], nn.Module], out: typing.List[torch.Size], name: str=None, labels: typing.List[str]=None, annotation: str=None):
-#     pass
+    def spawn(self, **kwargs):
+        var_module = self._var_module.spawn(**kwargs)
 
+        return DefinedOp(
+            var_module.module, self._out_size, self._name, self._labels, self._annotation
+        )
 
-# @op.register
-# def _(module, out: typing.List[torch.Size], *args, **kwargs):
-#     return BasicOp(module, args, kwargs, out_size)
-
-
-# @op.register
-# def _(module, out: torch.Size, *args, **kwargs):
-#     return BasicOp(module, args, kwargs, [out_size])
-
-
-# @op.register
-# def _(module, out: torch.Size, *args, **kwargs):
-#     return BasicOp(module, args, kwargs, [out_size])
 
 class Out(ABC):
 
@@ -375,10 +417,10 @@ class Mod(object):
 
     def op(self, out_size=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
 
-        name = name or self._module.__name__
+        # name = name or self._module.__name__
         out_size = self._out(out_size)
         return BasicOp(
-            self._module, out_size, self._args, self._kwargs, labels, annotation
+            self._module, out_size, self._args, self._kwargs, name=name, labels=labels, annotation=annotation
         )
 
     def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
@@ -387,10 +429,31 @@ class Mod(object):
         
         my_kwargs = self._kwargs.lookup(in_, kwargs)
         my_args = self._args.lookup(in_, kwargs)
-        module = self._module(*my_args, **my_kwargs)
+        module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
+        module = module(*my_args, **my_kwargs)
         return module
 
 mod = Mod
+
+
+class Diverge(OpFactory):
+
+    pass
+
+
+class Override(OpFactory):
+
+    pass
+
+
+class Parallel(OpFactory):
+
+    pass
+
+
+class NetworkBuilder(object):
+    pass
+
 
 # mod(nn.Linear, 2, 3).op(out=(-1, Sz(1))
 # mod(nn.Linear, 2, 3).op()
@@ -441,19 +504,25 @@ mod = Mod
 #         pass
 
 
-class Diverge(OpFactory):
-
-    pass
-
-
-class Override(OpFactory):
-
-    pass
+# @singledispatch
+# def op(module_factory: typing.Callable[[], nn.Module], out: typing.List[torch.Size], name: str=None, labels: typing.List[str]=None, annotation: str=None):
+#     pass
 
 
-class Parallel(OpFactory):
+# @op.register
+# def _(module, out: typing.List[torch.Size], *args, **kwargs):
+#     return BasicOp(module, args, kwargs, out_size)
 
-    pass
+
+# @op.register
+# def _(module, out: torch.Size, *args, **kwargs):
+#     return BasicOp(module, args, kwargs, [out_size])
+
+
+# @op.register
+# def _(module, out: torch.Size, *args, **kwargs):
+#     return BasicOp(module, args, kwargs, [out_size])
+
 
 
 # class Var(Generic[T]):
