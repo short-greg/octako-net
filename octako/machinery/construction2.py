@@ -246,11 +246,23 @@ def to_size(ports: typing.List[Port]):
     return [port.size for port in ports]
 
 
+
+class Out(ABC):
+
+    @abstractmethod
+    def spawn(self, **kwargs):
+        raise NotImplementedError
+
+    @abstractmethod
+    def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):
+        raise NotImplementedError
+    
+
 class BasicOp(OpFactory):
 
     def __init__(
         self, module: BaseMod, 
-        out: typing.Union[torch.Size, typing.Callable[[nn.Module, torch.Size], typing.List]],
+        out: Out,
         name: str=None, labels: typing.List[str]=None, annotation: str=None
     ):
         if isinstance(out, torch.Size):
@@ -271,7 +283,7 @@ class BasicOp(OpFactory):
             in_ = [in_]
 
         module = self._mod.produce(in_, **kwargs)
-        return module, self._out(module, in_)
+        return module, self._out.produce(module, in_, **kwargs)
     
     def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
         
@@ -282,7 +294,7 @@ class BasicOp(OpFactory):
         name = self._name or type(module).__name__
 
         yield OpNode(
-            name, module, in_, self._out(module, in_)
+            name, module, in_, self._out.produce(module, in_)
         )
     
     @property
@@ -296,7 +308,7 @@ class BasicOp(OpFactory):
     def spawn(self, **kwargs):
         mod = self._mod.spawn(**kwargs)
         return BasicOp(
-            mod, self._out, self._name,
+            mod, self._out.spawn(**kwargs), self._name,
             self._labels, self._annotation
         )
 
@@ -306,6 +318,7 @@ op = BasicOp
 
 ModType = typing.Union[typing.Type[nn.Module], Var]
 ModInstance = typing.Union[nn.Module, Var]
+
 
 
 class ModFactory(BaseMod):
@@ -343,7 +356,7 @@ class ModFactory(BaseMod):
     def kwargs(self):
         return self._kwargs
 
-    def op(self, out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
+    def op(self, out: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
         return BasicOp(self, out, name, labels, annotation)
 
 
@@ -367,7 +380,7 @@ class Instance(BaseMod):
     def module(self):
         return self._module
 
-    def op(self, out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
+    def op(self, out: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
         return BasicOp(self, out, name, labels, annotation)
 
 
@@ -379,15 +392,6 @@ def inst(mod: ModInstance):
     return Instance(mod)
 
 
-class Out(ABC):
-
-    @abstractmethod
-    def spawn(self, **kwargs):
-        raise NotImplementedError
-
-    @abstractmethod
-    def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):
-        raise NotImplementedError
 
 
 def null_out(mod: nn.Module, in_size: torch.Size): 

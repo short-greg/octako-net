@@ -2,6 +2,7 @@ import typing
 import torch
 import torch.nn as nn
 
+
 class Lambda(nn.Module):
 
     def __init__(self, lambda_fn: typing.Callable[[], torch.Tensor]):
