@@ -1,13 +1,13 @@
  
 from abc import ABC, abstractmethod, abstractproperty
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial, singledispatch, singledispatchmethod
 from os import path
 from typing import Any, TypeVar
 import typing
 import torch
 from torch import nn
-from torch._C import Def, Size
+from torch import Size
 from torch.nn import modules
 from torch.nn.modules.container import Sequential
 from .networks import Node, OpNode, Port
@@ -98,10 +98,6 @@ class OpFactory(ABC):
     def name(self, name):
         raise NotImplementedError
 
-    # @abstractmethod
-    # def __getitem__(self, key) -> typing.List[BuildPort]:
-    #     raise NotImplementedError
-
 
 OpFactory.__call__ = OpFactory.spawn
 
@@ -152,12 +148,6 @@ class Sequence(OpFactory):
         return ''
 
 
-class NullFactory(OpFactory):
-
-    # doesn't create a module
-    pass
-
-
 @abstractmethod
 def _lshift(self, op_factory) -> Sequence:
     raise NotImplementedError
@@ -204,11 +194,15 @@ class Kwargs(_ArgMap):
 
     def lookup(self, in_size: torch.Size, kwargs):
     
-        return {k: self._lookup_arg(v, in_size, kwargs) for k, v in self._kwargs.items()}
+        return Kwargs(**{k: self._lookup_arg(v, in_size, kwargs) for k, v in self._kwargs.items()})
 
     def remap(self, kwargs):
 
         return Kwargs(**{k: self._remap_arg(v, kwargs) for k, v in self._kwargs.items()})
+
+    @property
+    def items(self):
+        return self._kwargs
 
 
 class Args(_ArgMap):
@@ -219,11 +213,40 @@ class Args(_ArgMap):
 
     def lookup(self, in_size: torch.Size, kwargs):
     
-        return [self._lookup_arg(v, in_size, kwargs) for v in self._args]
+        return Args(*[self._lookup_arg(v, in_size, kwargs) for v in self._args])
 
     def remap(self, kwargs):
 
         return Args(*[self._remap_arg(v, kwargs) for v in self._args])
+    
+    @property
+    def items(self):
+
+        return self._args
+
+
+class ArgSet(_ArgMap):
+
+    def __init__(self, *args, **kwargs):
+
+        self._args = Args(*args)
+        self._kwargs = Kwargs(*kwargs)
+    
+    def lookup(self, in_size: torch.Size, kwargs):
+
+        return ArgSet(*self._args.lookup(in_size, kwargs).items, **self._kwargs.lookup(in_size, kwargs).items)
+    
+    def remap(self, kwargs):
+
+        return ArgSet(*self._args.remap(kwargs).items, **self._kwargs.remap(kwargs).items)
+
+    @property
+    def kwargs(self):
+        return self._kwargs.items
+
+    @property
+    def args(self):
+        return self._args.items
 
 
 class BaseMod(ABC):
@@ -241,12 +264,6 @@ class BaseMod(ABC):
         raise NotImplementedError
 
 
-def to_size(ports: typing.List[Port]):
-
-    return [port.size for port in ports]
-
-
-
 class Out(ABC):
 
     @abstractmethod
@@ -256,7 +273,14 @@ class Out(ABC):
     @abstractmethod
     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):
         raise NotImplementedError
-    
+
+
+# @dataclass
+# class NodeMeta:
+#     name: str=None
+#     labels: typing.List[str] = field(default_factory=list)
+#     annotation: str=None
+
 
 class BasicOp(OpFactory):
 
@@ -266,9 +290,9 @@ class BasicOp(OpFactory):
         name: str=None, labels: typing.List[str]=None, annotation: str=None
     ):
         if isinstance(out, torch.Size):
-            self._out = lambda mod, sz: out
+            self._out = SizeOut(out)
         else:
-            self._out = out or null_out
+            self._out = out or NullOut()
         self._mod = module
         self._name = name
         self._labels = labels
@@ -289,8 +313,7 @@ class BasicOp(OpFactory):
         
         if isinstance(in_, Port):
             in_ = [in_]
-        in_ = to_size(in_)
-        module = self._mod.produce(in_, **kwargs)
+        module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
         name = self._name or type(module).__name__
 
         yield OpNode(
@@ -312,37 +335,34 @@ class BasicOp(OpFactory):
             self._labels, self._annotation
         )
 
-
-
-op = BasicOp
+    
 
 ModType = typing.Union[typing.Type[nn.Module], Var]
 ModInstance = typing.Union[nn.Module, Var]
 
 
-
 class ModFactory(BaseMod):
 
-    def __init__(self, module: ModType, args: Args=None, kwargs: Kwargs=None):
+    def __init__(self, module: ModType, args: ArgSet = None):
 
         self._module = module
-        self._args = args or Args()
-        self._kwargs = kwargs or Kwargs()
+        self._args = args or ArgSet
 
     def spawn(self, **kwargs):
-        my_kwargs = self._kwargs.remap(kwargs)
-        my_args = self._args.remap(kwargs)
+        args = self._args.remap(kwargs)
         module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
-        return ModFactory(module, my_args, my_kwargs)
+        return ModFactory(module, args)
 
-    # TODO: produce should not take in a port
-    # look into refactoring the "port" and the out size next
-    def produce(self, in_: typing.List[Port], **kwargs):
+    @singledispatchmethod
+    def produce(self, in_: typing.List[torch.Size], **kwargs):
         
         module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
-        my_kwargs = self._kwargs.lookup(in_, kwargs)
-        my_args = self._args.lookup(in_, kwargs)
-        return module(*my_args, **my_kwargs)
+        args = self._args.lookup(in_, kwargs)
+        return module(*args.args, **args.kwargs)
+    
+    @produce.register
+    def _(self, in_: torch.Size, **kwargs):
+        return self.produce([in_], **kwargs)
     
     @property
     def module(self):
@@ -350,11 +370,11 @@ class ModFactory(BaseMod):
 
     @property
     def args(self):
-        return self._args
+        return self._args.args
     
     @property
     def kwargs(self):
-        return self._kwargs
+        return self._args.kwargs
 
     def op(self, out: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
         return BasicOp(self, out, name, labels, annotation)
@@ -370,9 +390,7 @@ class Instance(BaseMod):
         module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
         return module
 
-    # TODO: produce should not take in a port
-    # look into refactoring the "port" and the out size next
-    def produce(self, in_: typing.List[Port], **kwargs):
+    def produce(self, in_: typing.List[torch.Size], **kwargs):
         
         return self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
     
@@ -385,17 +403,11 @@ class Instance(BaseMod):
 
 
 def fc(mod: ModType, *args, **kwargs):
-    return ModFactory(mod, args, kwargs)
+    return ModFactory(mod, ArgSet(*args, *kwargs))
 
 
 def inst(mod: ModInstance):
     return Instance(mod)
-
-
-
-
-def null_out(mod: nn.Module, in_size: torch.Size): 
-    return in_size
 
 
 class ListOut(Out):
@@ -410,7 +422,7 @@ class ListOut(Out):
 
     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs): 
         size = self._size.lookup(in_size, kwargs)
-        return torch.Size(*size)
+        return torch.Size(size.items)
 
 
 class SizeOut(Out):
@@ -440,7 +452,7 @@ class NullOut(Out):
 
 class FuncOut(Out):
 
-    def __init__(self, f: typing.Callable[[nn.Module, torch.Size, typing.Dict]]):
+    def __init__(self, f: typing.Callable[[nn.Module, torch.Size, typing.Dict], torch.Size]):
         
         self._f = f
 
@@ -464,7 +476,7 @@ def out(out_=None):
     return NullOut()
 
 @out.register
-def _(out_: typing.List):
+def _(out_: list):
     return ListOut(out_)
 
 
@@ -490,28 +502,175 @@ def over(factory: OpFactory):
 
 class DivergeFactory(OpFactory):
 
-    pass
+    def __init__(
+        self, op_factories: typing.List[OpFactory], 
+        name: str=None, labels: typing.List[str]=None, annotation: str=None
+    ):
+        self._op_factories = op_factories
+        self._name = name
+        self._labels = labels
+        self._annotation = annotation
+    
+    def __lshift__(self, other) -> Sequence:
+        return Sequence([self, other])
+
+    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+
+        if isinstance(in_, Size):
+            in_ = [in_]
+        mods = []
+        outs = []
+        for in_i, op_factory in zip(in_, self._op_factories):
+            mod, out = op_factory.produce(in_i, **kwargs)
+            mods.append(mod)
+            outs.append(out)
+        mod = Diverge(mods)
+        return mod, outs
+    
+    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+        
+        if isinstance(in_, Port):
+            in_ = [in_]
+        
+        for in_i, op_factory in zip(in_, self._op_factories):
+            for node in op_factory.produce_nodes(in_i, **kwargs):
+                yield node
+    
+    @property
+    def labels(self):
+        return self._labels
+
+    @property
+    def name(self):
+        return self._name
+
+    def spawn(self, **kwargs):
+        return DivergeFactory(
+            [op_factory.spawn(**kwargs) for op_factory in self._op_factories],
+            self._name, self._labels, self._annotation
+        )
 
 
-def diverge(*factories: OpFactory):
-
-    pass
+diverge = DivergeFactory
 
 
 class ParallelFactory(OpFactory):
 
-    pass
+    def __init__(
+        self, op_factories: typing.List[OpFactory], 
+        name: str=None, labels: typing.List[str]=None, annotation: str=None
+    ):
+        self._op_factories = op_factories
+        self._name = name
+        self._labels = labels
+        self._annotation = annotation
+    
+    def __lshift__(self, other) -> Sequence:
+        return Sequence([self, other])
+
+    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+
+        if isinstance(in_, Size):
+            in_ = [in_]
+        mods = []
+        outs = []
+        for op_factory in self._op_factories:
+            mod, out = op_factory.produce(in_, **kwargs)
+            mods.append(mod)
+            outs.append(out)
+        mod = Parallel(mods)
+        return mod, outs
+    
+    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+        
+        if isinstance(in_, Port):
+            in_ = [in_]
+        
+        for op_factory in self._op_factories:
+            for node in op_factory.produce_nodes(in_, **kwargs):
+                yield node
+    
+    @property
+    def labels(self):
+        return self._labels
+
+    @property
+    def name(self):
+        return self._name
+
+    def spawn(self, **kwargs):
+        return ParallelFactory(
+            [op_factory.spawn(**kwargs) for op_factory in self._op_factories],
+            self._name, self._labels, self._annotation
+        )
 
 
-def parallel(*factories: OpFactory):
-
-    pass
+parallel = ParallelFactory
 
 
 class Chain(OpFactory):
     # need to allow for 
-    pass
+    def __init__(
+        self, op_factory: OpFactory, attributes: typing.Union[Var, typing.List[Kwargs]],
+        name: str=None, labels: typing.List[str]=None, annotation: str=None
+    ):
+        self._op_factory = op_factory
+        self._attributes = attributes
+        self._name = name
+        self._labels = labels
+        self._annotation = annotation
+    
+    def __lshift__(self, other) -> Sequence:
+        return Sequence([self, other])
 
+    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+
+        if isinstance(in_, Size):
+            in_ = [in_]
+        attributes = self._attributes
+        if isinstance(attributes, Var):
+            attributes = self._attributes.spawn(**kwargs)
+        
+        mods = []
+        out = in_
+        for attribute in self._attributes:
+            mod, out = self._op_factory.produce(out, **attribute.items)
+            mods.append(mod)
+        return nn.Sequential(*mods), out
+    
+    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+        
+        if isinstance(in_, Size):
+            in_ = [in_]
+        attributes = self._attributes
+        if isinstance(attributes, Var):
+            attributes = self._attributes.spawn(**kwargs)
+        
+        for attribute in self._attributes:
+            for node in self._op_factory.produce_nodes(in_, **attribute.items):
+                yield node
+            # Use produce to get the next in_size
+            _, in_ = self._op_factory.produce(in_, **attribute.items)
+    
+    @property
+    def labels(self):
+        return self._labels
+
+    @property
+    def name(self):
+        return self._name
+
+    def spawn(self, **kwargs):
+        attributes = self._attributes
+        if isinstance(self._attributes, Var):
+            attributes = self._attributes.spawn(**kwargs)
+        return Chain(
+            self._op_factory.spawn(kwargs), attributes,
+            self._name, self._labels, self._annotation
+        )
+
+
+chain = Chain
 
 class NetBuilder(object):
     pass
