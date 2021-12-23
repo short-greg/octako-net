@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
 from functools import partial, singledispatch, singledispatchmethod
 from os import path
-from typing import Any, TypeVar
+from typing import Any, Counter, TypeVar
 import typing
 import torch
 from torch import nn
@@ -32,7 +32,7 @@ class Var(object):
     def name(self):
         return self._name
 
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         return kwargs.get(self._name, self)
 
 
@@ -87,9 +87,12 @@ class OpFactory(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         raise NotImplementedError
     
+    def alias(self, **kwargs):
+        return self.to(**{k: Var(v) for k, v in kwargs.items()})
+
     @abstractmethod
     def labels(self, labels):
         raise NotImplementedError
@@ -99,7 +102,7 @@ class OpFactory(ABC):
         raise NotImplementedError
 
 
-OpFactory.__call__ = OpFactory.spawn
+OpFactory.__call__ = OpFactory.to
 
 
 class Sequence(OpFactory):
@@ -116,15 +119,18 @@ class Sequence(OpFactory):
             self._op_factories.insert(op_factory, position)
 
     def __lshift__(self, other: OpFactory):
+        if isinstance(other, Sequence):
+            return Sequence(self._op_factories + other._op_factories)
         return Sequence(self._op_factories + [other])
     
     def produce(self, in_: typing.List[torch.Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
         sequential = nn.Sequential()
 
-        for factory in self._op_factories:
+        for i, factory in enumerate(self._op_factories):
             module, in_ = factory.produce(in_, **kwargs)
-            sequential.add_module(type(module).__name__, module)
+            sequential.add_module(str(i), module)
+    
         return sequential, in_
 
     def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
@@ -134,11 +140,11 @@ class Sequence(OpFactory):
                 in_ = node.ports  
                 yield node
     
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         return Sequence(
-            [factory.spawn(**kwargs) for factory in self._op_factories]
+            [factory.to(**kwargs) for factory in self._op_factories]
         )
-
+    
     @property
     def labels(self):
         return []
@@ -163,7 +169,7 @@ class _ArgMap(ABC):
 
     @_remap_arg.register
     def _(self, val: Var, kwargs):
-        return val.spawn(**kwargs)
+        return val.to(**kwargs)
 
     @singledispatchmethod
     def _lookup_arg(self, val, in_size: torch.Size, kwargs):
@@ -171,7 +177,7 @@ class _ArgMap(ABC):
 
     @_lookup_arg.register
     def _(self, val: Var, in_size: torch.Size, kwargs):
-        return val.spawn(**kwargs)
+        return val.to(**kwargs)
 
     @_lookup_arg.register
     def _(self, val: Sz, in_size: torch.Size, kwargs):
@@ -252,7 +258,7 @@ class ArgSet(_ArgMap):
 class BaseMod(ABC):
 
     @abstractmethod
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         raise NotImplementedError
 
     @abstractmethod
@@ -267,7 +273,7 @@ class BaseMod(ABC):
 class Out(ABC):
 
     @abstractmethod
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         raise NotImplementedError
 
     @abstractmethod
@@ -328,15 +334,14 @@ class BasicOp(OpFactory):
     def name(self):
         return self._name
 
-    def spawn(self, **kwargs):
-        mod = self._mod.spawn(**kwargs)
+    def to(self, **kwargs):
+        mod = self._mod.to(**kwargs)
         return BasicOp(
-            mod, self._out.spawn(**kwargs), self._name,
+            mod, self._out.to(**kwargs), self._name,
             self._labels, self._annotation
         )
 
     
-
 ModType = typing.Union[typing.Type[nn.Module], Var]
 ModInstance = typing.Union[nn.Module, Var]
 
@@ -348,15 +353,15 @@ class ModFactory(BaseMod):
         self._module = module
         self._args = args or ArgSet
 
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         args = self._args.remap(kwargs)
-        module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
+        module = self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
         return ModFactory(module, args)
 
     @singledispatchmethod
     def produce(self, in_: typing.List[torch.Size], **kwargs):
         
-        module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
+        module = self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
         args = self._args.lookup(in_, kwargs)
         return module(*args.args, **args.kwargs)
     
@@ -376,8 +381,8 @@ class ModFactory(BaseMod):
     def kwargs(self):
         return self._args.kwargs
 
-    def op(self, out: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
-        return BasicOp(self, out, name, labels, annotation)
+    def op(self, out_: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
+        return BasicOp(self, out(out_), name, labels, annotation)
 
 
 class Instance(BaseMod):
@@ -386,24 +391,30 @@ class Instance(BaseMod):
 
         self._module = module
 
-    def spawn(self, **kwargs):
-        module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
+    def to(self, **kwargs):
+        module = self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
         return module
 
     def produce(self, in_: typing.List[torch.Size], **kwargs):
         
-        return self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
+        return self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
     
     @property
     def module(self):
         return self._module
 
-    def op(self, out: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
-        return BasicOp(self, out, name, labels, annotation)
+    def op(self, out_: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
+        return BasicOp(self, out(out_), name, labels, annotation)
 
 
+@singledispatch
 def fc(mod: ModType, *args, **kwargs):
     return ModFactory(mod, ArgSet(*args, *kwargs))
+
+
+@fc.register
+def _(mod: str, *args, **kwargs):
+    return ModFactory(Var(mod), ArgSet(*args, *kwargs))
 
 
 def inst(mod: ModInstance):
@@ -416,9 +427,9 @@ class ListOut(Out):
         
         self._size = Args(*size)
 
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         size = self._size.remap(kwargs)
-        return ListOut(size)
+        return ListOut(size.items)
 
     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs): 
         size = self._size.lookup(in_size, kwargs)
@@ -431,7 +442,7 @@ class SizeOut(Out):
         
         self._size =size
     
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         return SizeOut(self._size)
 
     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs): 
@@ -443,7 +454,7 @@ class NullOut(Out):
     def __init__(self):
         pass
 
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         return NullOut()
 
     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
@@ -456,7 +467,7 @@ class FuncOut(Out):
         
         self._f = f
 
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         return FuncOut(self._f)
 
     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
@@ -488,6 +499,11 @@ def _(out_: _func_type):
 @out.register
 def _(out_: torch.Size):
     return SizeOut(out_)
+
+
+@out.register
+def _(out_: Out):
+    return out_
 
 
 class Override(OpFactory):
@@ -544,9 +560,9 @@ class DivergeFactory(OpFactory):
     def name(self):
         return self._name
 
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         return DivergeFactory(
-            [op_factory.spawn(**kwargs) for op_factory in self._op_factories],
+            [op_factory.to(**kwargs) for op_factory in self._op_factories],
             self._name, self._labels, self._annotation
         )
 
@@ -598,9 +614,9 @@ class ParallelFactory(OpFactory):
     def name(self):
         return self._name
 
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         return ParallelFactory(
-            [op_factory.spawn(**kwargs) for op_factory in self._op_factories],
+            [op_factory.to(**kwargs) for op_factory in self._op_factories],
             self._name, self._labels, self._annotation
         )
 
@@ -629,7 +645,7 @@ class Chain(OpFactory):
             in_ = [in_]
         attributes = self._attributes
         if isinstance(attributes, Var):
-            attributes = self._attributes.spawn(**kwargs)
+            attributes = self._attributes.to(**kwargs)
         
         mods = []
         out = in_
@@ -644,7 +660,7 @@ class Chain(OpFactory):
             in_ = [in_]
         attributes = self._attributes
         if isinstance(attributes, Var):
-            attributes = self._attributes.spawn(**kwargs)
+            attributes = self._attributes.to(**kwargs)
         
         for attribute in self._attributes:
             for node in self._op_factory.produce_nodes(in_, **attribute.items):
@@ -660,12 +676,12 @@ class Chain(OpFactory):
     def name(self):
         return self._name
 
-    def spawn(self, **kwargs):
+    def to(self, **kwargs):
         attributes = self._attributes
         if isinstance(self._attributes, Var):
-            attributes = self._attributes.spawn(**kwargs)
+            attributes = self._attributes.to(**kwargs)
         return Chain(
-            self._op_factory.spawn(kwargs), attributes,
+            self._op_factory.to(kwargs), attributes,
             self._name, self._labels, self._annotation
         )
 
@@ -698,7 +714,7 @@ class NetBuilder(object):
 #         self._args = args
 #         self._kwargs = kwargs
 
-#     def spawn(self, **kwargs):
+#     def to(self, **kwargs):
 #         my_kwargs = self._kwargs.remap(kwargs)
 #         my_args = self._args.remap(kwargs)
 #         return BasicOp(
@@ -787,8 +803,8 @@ class NetBuilder(object):
 #         var_module = self._var_module.produce(in_size, **kwargs)
 #         return var_module, self._out_size
 
-#     def spawn(self, **kwargs):
-#         var_module = self._var_module.spawn(**kwargs)
+#     def to(self, **kwargs):
+#         var_module = self._var_module.to(**kwargs)
 
 #         return DefinedOp(
 #             var_module.module, self._out_size, self._name, self._labels, self._annotation
@@ -835,7 +851,7 @@ class NetBuilder(object):
         
 #         my_kwargs = self._kwargs.lookup(in_, kwargs)
 #         my_args = self._args.lookup(in_, kwargs)
-#         module = self._module.spawn(**kwargs) if isinstance(self._module, Var) else self._module
+#         module = self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
 #         module = module(*my_args, **my_kwargs)
 #         return module
 
