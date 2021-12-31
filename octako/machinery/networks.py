@@ -69,6 +69,14 @@ class Port:
 
 
 @dataclasses.dataclass
+class Multitap:
+
+    ports: typing.List[Port]
+
+    # TODO: Define
+
+
+@dataclasses.dataclass
 class NetworkPort(Port):
     """A port into or out of a node. Used for connecting nodes together.
     """

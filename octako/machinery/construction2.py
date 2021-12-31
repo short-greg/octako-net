@@ -10,7 +10,7 @@ from torch import nn
 from torch import Size
 from torch.nn import modules
 from torch.nn.modules.container import Sequential
-from .networks import Node, OpNode, Port
+from .networks import ModRef, Node, OpNode, Port
 from octako.modules.containers import Parallel, Diverge
 
 
@@ -23,7 +23,7 @@ class BaseVar(ABC):
         raise NotADirectoryError
 
 
-class Var(object):
+class var(object):
 
     def __init__(self, name: str):
         self._name = name
@@ -36,7 +36,40 @@ class Var(object):
         return kwargs.get(self._name, self)
 
 
-class Sz(object):
+#         # class SizeMeta(type):
+
+#         #     def __call__(cls, *args, **kwargs):
+
+#         #         obj = cls.__new__(cls, *args, **kwargs)
+#         #         obj.__init__(*args, **kwargs)
+#         #         return obj
+
+#         #     def __getitem__(cls, idx: int):
+#         #         return cls(idx)
+            
+#         # class Size(object, metaclass=SizeMeta):
+
+#         #     def __init__(self, idx):
+#         #         self.idx = idx
+
+
+class SizeMeta(type):
+
+    def __call__(cls, *args, **kwargs):
+
+        obj = cls.__new__(cls, *args, **kwargs)
+        obj.__init__(*args, **kwargs)
+        return obj
+
+    def __getitem__(cls, idx: typing.Union[int, tuple]):
+        if isinstance(idx, tuple):
+            if len(idx) > 2:
+                raise KeyError(f'Index size must be less than or equal to 2 not {len(idx)}')
+            return cls(idx[0], idx[1])
+        return cls(idx)
+
+
+class sz(object, metaclass=SizeMeta):
 
     def __init__(self, dim_idx: int, port_idx: int=None):
         
@@ -58,6 +91,7 @@ class Sz(object):
         return sizes[self._port_idx][self._dim_idx]
 
 
+
 class PortSize(object):
 
     @singledispatchmethod
@@ -76,7 +110,32 @@ class BuildPort(object):
     idx: int
 
 
+class LabelSet:
+    
+    def __init__(self, labels: typing.Iterable[str]=None):
+        labels = labels or []
+        self._labels = set(*labels)
+    
+    def __contains__(self, key):
+        return key in self._labels
+
+
+@dataclass
+class Info:
+
+    name: str=''
+    labels: LabelSet=field(default_factory=LabelSet)
+    annotation: str=''
+
+    def __post_init__(self):
+        if isinstance(self.labels, typing.List):
+            self.labels = LabelSet(self.labels)
+
+
 class OpFactory(ABC):
+
+    def __init__(self, info: Info=None):
+        self._info = info or Info()
 
     @abstractmethod
     def produce(self, in_size: torch.Size, **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
@@ -91,15 +150,10 @@ class OpFactory(ABC):
         raise NotImplementedError
     
     def alias(self, **kwargs):
-        return self.to(**{k: Var(v) for k, v in kwargs.items()})
+        return self.to(**{k: var(v) for k, v in kwargs.items()})
 
-    @abstractmethod
-    def labels(self, labels):
-        raise NotImplementedError
-
-    @abstractmethod
-    def name(self, name):
-        raise NotImplementedError
+    def info(self):
+        return self._info
 
 
 OpFactory.__call__ = OpFactory.to
@@ -107,8 +161,8 @@ OpFactory.__call__ = OpFactory.to
 
 class Sequence(OpFactory):
 
-    def __init__(self, op_factories: typing.List[OpFactory]):
-
+    def __init__(self, op_factories: typing.List[OpFactory], info: Info=None):
+        super().__init__(info)
         self._op_factories = op_factories
     
     def add(self, op_factory: OpFactory, position: int=None):
@@ -134,9 +188,8 @@ class Sequence(OpFactory):
         return sequential, in_
 
     def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
-        
         for factory in self._op_factories:
-            for node in factory.produce_nodes(in_, **kwargs):      
+            for node in factory.produce_nodes(in_, **kwargs):
                 in_ = node.ports  
                 yield node
     
@@ -146,12 +199,8 @@ class Sequence(OpFactory):
         )
     
     @property
-    def labels(self):
-        return []
-
-    @property
-    def name(self):
-        return ''
+    def info(self):
+        return self._info
 
 
 @abstractmethod
@@ -168,7 +217,7 @@ class _ArgMap(ABC):
         return val
 
     @_remap_arg.register
-    def _(self, val: Var, kwargs):
+    def _(self, val: var, kwargs):
         return val.to(**kwargs)
 
     @singledispatchmethod
@@ -176,11 +225,11 @@ class _ArgMap(ABC):
         return val
 
     @_lookup_arg.register
-    def _(self, val: Var, in_size: torch.Size, kwargs):
+    def _(self, val: var, in_size: torch.Size, kwargs):
         return val.to(**kwargs)
 
     @_lookup_arg.register
-    def _(self, val: Sz, in_size: torch.Size, kwargs):
+    def _(self, val: sz, in_size: torch.Size, kwargs):
         return val.process(in_size)
 
     @abstractmethod
@@ -291,18 +340,11 @@ class Out(ABC):
 class BasicOp(OpFactory):
 
     def __init__(
-        self, module: BaseMod, 
-        out: Out,
-        name: str=None, labels: typing.List[str]=None, annotation: str=None
+        self, module: BaseMod, out: Out=None, info: Info=None
     ):
-        if isinstance(out, torch.Size):
-            self._out = SizeOut(out)
-        else:
-            self._out = out or NullOut()
+        super().__init__(info)
+        self._out = to_out(out)
         self._mod = module
-        self._name = name
-        self._labels = labels
-        self._annotation = annotation
     
     def __lshift__(self, other) -> Sequence:
         return Sequence([self, other])
@@ -319,49 +361,82 @@ class BasicOp(OpFactory):
         
         if isinstance(in_, Port):
             in_ = [in_]
+        
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        name = self._name or type(module).__name__
+        name = self._info.name or type(module).__name__
 
         yield OpNode(
-            name, module, in_, self._out.produce(module, in_)
+            name, module, in_, self._out.produce(module, in_), self._info.labels,
+            self._info.annotation
         )
-    
-    @property
-    def labels(self):
-        return self._labels
-
-    @property
-    def name(self):
-        return self._name
 
     def to(self, **kwargs):
         mod = self._mod.to(**kwargs)
         return BasicOp(
-            mod, self._out.to(**kwargs), self._name,
-            self._labels, self._annotation
+            mod, self._out.to(**kwargs), self._info
         )
 
     
-ModType = typing.Union[typing.Type[nn.Module], Var]
-ModInstance = typing.Union[nn.Module, Var]
+ModType = typing.Union[typing.Type[nn.Module], var]
+ModInstance = typing.Union[nn.Module, var]
+
+
+def kwarg_pop(key, kwargs):
+
+    result = None
+    if '_out' in kwargs:
+        result = kwargs.get('_out')
+        del kwargs['_out']
+    
+    return result
+
+
+class NNMod(object):
+
+    def __init__(self, nnmodule: typing.Type[nn.Module]):
+
+        self._nnmodule = nnmodule
+
+    def __call__(self, *args, **kwargs) -> BasicOp:
+
+        out_ = to_out(kwarg_pop('_out', kwargs))
+        info = kwarg_pop('_info', kwargs)
+        
+        return BasicOp(ModFactory(self._nnmodule, *args, **kwargs), out_, info)
+
+
+class OpMod(object):
+
+    def __init__(self, mod):
+
+        self._mod = mod
+
+    def __getattribute__(self, __name: str) -> NNMod:
+        mod = super().__getattribute__('_mod')
+        nnmodule = getattr(mod, __name)
+
+        if not issubclass(nnmodule, nn.Module):
+            raise AttributeError(f'Attribute {__name} is not a valid nn.Module')
+
+        return NNMod(nnmodule)
 
 
 class ModFactory(BaseMod):
 
-    def __init__(self, module: ModType, args: ArgSet = None):
+    def __init__(self, module: ModType, *args, **kwargs):
 
         self._module = module
-        self._args = args or ArgSet
+        self._args = ArgSet(*args, **kwargs)
 
     def to(self, **kwargs):
         args = self._args.remap(kwargs)
-        module = self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
-        return ModFactory(module, args)
+        module = self._module.to(**kwargs) if isinstance(self._module, var) else self._module
+        return ModFactory(module, *args.args, *args.kwargs)
 
     @singledispatchmethod
     def produce(self, in_: typing.List[torch.Size], **kwargs):
         
-        module = self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
+        module = self._module.to(**kwargs) if isinstance(self._module, var) else self._module
         args = self._args.lookup(in_, kwargs)
         return module(*args.args, **args.kwargs)
     
@@ -381,8 +456,8 @@ class ModFactory(BaseMod):
     def kwargs(self):
         return self._args.kwargs
 
-    def op(self, out_: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
-        return BasicOp(self, out(out_), name, labels, annotation)
+    def op(self, out_: Out=None, info: Info=None) -> BasicOp:
+        return BasicOp(self, to_out(out_), info)
 
 
 class Instance(BaseMod):
@@ -392,48 +467,59 @@ class Instance(BaseMod):
         self._module = module
 
     def to(self, **kwargs):
-        module = self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
+        module = self._module.to(**kwargs) if isinstance(self._module, var) else self._module
         return module
 
     def produce(self, in_: typing.List[torch.Size], **kwargs):
         
-        return self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
+        return self._module.to(**kwargs) if isinstance(self._module, var) else self._module
     
     @property
     def module(self):
         return self._module
 
     def op(self, out_: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
-        return BasicOp(self, out(out_), name, labels, annotation)
+        return BasicOp(self, to_out(out_), name, labels, annotation)
 
 
 @singledispatch
-def fc(mod: ModType, *args, **kwargs):
-    return ModFactory(mod, ArgSet(*args, *kwargs))
+def factory(mod: ModType, *args, **kwargs):
+    return ModFactory(mod, *args, *kwargs)
 
-
-@fc.register
+@factory.register
 def _(mod: str, *args, **kwargs):
-    return ModFactory(Var(mod), ArgSet(*args, *kwargs))
+    return ModFactory(var(mod), *args, *kwargs)
 
-
-def inst(mod: ModInstance):
+@singledispatch
+def instance(mod: ModInstance):
     return Instance(mod)
 
+@instance.register
+def _(mod: str):
+    return Instance(var(mod))
+
+# TODO: Need to fix this
 
 class ListOut(Out):
 
-    def __init__(self, size: typing.List[int]):
+    def __init__(self, sizes: typing.List):
+
+        # TODO: Take care of the case that multiple lists can be output
+        if len(sizes) == 0 or not isinstance(sizes[0], list):
+            sizes = [sizes]
         
-        self._size = Args(*size)
+        self._sizes = [Args(*size) for size in sizes]
 
     def to(self, **kwargs):
-        size = self._size.remap(kwargs)
-        return ListOut(size.items)
+        
+        sizes = [list(size.remap(kwargs).items) for size in self._sizes]
+        return ListOut(sizes)
 
     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs): 
-        size = self._size.lookup(in_size, kwargs)
-        return torch.Size(size.items)
+        return [
+            torch.Size(size.lookup(in_size, kwargs).items) 
+            for size in self._sizes
+        ]
 
 
 class SizeOut(Out):
@@ -481,27 +567,27 @@ _func_type = type(_func_type)
 
 
 @singledispatch
-def out(out_=None):
+def to_out(out_=None):
     if out_ is not None:
         raise ValueError(f'Argument out_ is not a valid type {type(out_)}')
     return NullOut()
 
-@out.register
+@to_out.register
 def _(out_: list):
     return ListOut(out_)
 
 
-@out.register
+@to_out.register
 def _(out_: _func_type):
     return FuncOut(out_)
 
 
-@out.register
+@to_out.register
 def _(out_: torch.Size):
     return SizeOut(out_)
 
 
-@out.register
+@to_out.register
 def _(out_: Out):
     return out_
 
@@ -519,13 +605,10 @@ def over(factory: OpFactory):
 class DivergeFactory(OpFactory):
 
     def __init__(
-        self, op_factories: typing.List[OpFactory], 
-        name: str=None, labels: typing.List[str]=None, annotation: str=None
+        self, op_factories: typing.List[OpFactory], info: Info=None
     ):
+        super().__init__(info)
         self._op_factories = op_factories
-        self._name = name
-        self._labels = labels
-        self._annotation = annotation
     
     def __lshift__(self, other) -> Sequence:
         return Sequence([self, other])
@@ -552,18 +635,10 @@ class DivergeFactory(OpFactory):
             for node in op_factory.produce_nodes(in_i, **kwargs):
                 yield node
     
-    @property
-    def labels(self):
-        return self._labels
-
-    @property
-    def name(self):
-        return self._name
-
     def to(self, **kwargs):
         return DivergeFactory(
             [op_factory.to(**kwargs) for op_factory in self._op_factories],
-            self._name, self._labels, self._annotation
+            self._info
         )
 
 
@@ -573,13 +648,10 @@ diverge = DivergeFactory
 class ParallelFactory(OpFactory):
 
     def __init__(
-        self, op_factories: typing.List[OpFactory], 
-        name: str=None, labels: typing.List[str]=None, annotation: str=None
+        self, op_factories: typing.List[OpFactory], info: Info=None
     ):
+        super().__init__(info)
         self._op_factories = op_factories
-        self._name = name
-        self._labels = labels
-        self._annotation = annotation
     
     def __lshift__(self, other) -> Sequence:
         return Sequence([self, other])
@@ -617,7 +689,7 @@ class ParallelFactory(OpFactory):
     def to(self, **kwargs):
         return ParallelFactory(
             [op_factory.to(**kwargs) for op_factory in self._op_factories],
-            self._name, self._labels, self._annotation
+            self._info
         )
 
 
@@ -627,14 +699,12 @@ parallel = ParallelFactory
 class Chain(OpFactory):
     # need to allow for 
     def __init__(
-        self, op_factory: OpFactory, attributes: typing.Union[Var, typing.List[Kwargs]],
-        name: str=None, labels: typing.List[str]=None, annotation: str=None
+        self, op_factory: OpFactory, attributes: typing.Union[var, typing.List[Kwargs]],
+        info: Info=None
     ):
+        super().__init__(info)
         self._op_factory = op_factory
         self._attributes = attributes
-        self._name = name
-        self._labels = labels
-        self._annotation = annotation
     
     def __lshift__(self, other) -> Sequence:
         return Sequence([self, other])
@@ -644,7 +714,7 @@ class Chain(OpFactory):
         if isinstance(in_, Size):
             in_ = [in_]
         attributes = self._attributes
-        if isinstance(attributes, Var):
+        if isinstance(attributes, var):
             attributes = self._attributes.to(**kwargs)
         
         mods = []
@@ -659,7 +729,7 @@ class Chain(OpFactory):
         if isinstance(in_, Size):
             in_ = [in_]
         attributes = self._attributes
-        if isinstance(attributes, Var):
+        if isinstance(attributes, var):
             attributes = self._attributes.to(**kwargs)
         
         for attribute in self._attributes:
@@ -667,22 +737,14 @@ class Chain(OpFactory):
                 yield node
             # Use produce to get the next in_size
             _, in_ = self._op_factory.produce(in_, **attribute.items)
-    
-    @property
-    def labels(self):
-        return self._labels
-
-    @property
-    def name(self):
-        return self._name
 
     def to(self, **kwargs):
         attributes = self._attributes
-        if isinstance(self._attributes, Var):
+        if isinstance(self._attributes, var):
             attributes = self._attributes.to(**kwargs)
         return Chain(
             self._op_factory.to(kwargs), attributes,
-            self._name, self._labels, self._annotation
+            self._info
         )
 
 
@@ -690,6 +752,7 @@ chain = Chain
 
 class NetBuilder(object):
     pass
+
 
 
 # mod(nn.Linear, 2, 3).op(out=(-1, Sz(1))
