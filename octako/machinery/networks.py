@@ -73,7 +73,25 @@ class Multitap:
 
     ports: typing.List[Port]
 
-    # TODO: Define
+    def __getitem__(self, idx: int):
+        return self.ports[idx]
+    
+    @property
+    def sizes(self):
+        return [port.size for port in self.ports]
+
+    def select(self, by: typing.Dict):
+        result = []
+        for port in self.ports:
+            cur = port.select(by)
+            if isinstance(cur, list):
+                result.extend(cur)
+            else:
+                result.append(cur)
+        return result
+    
+    def clone(self):
+        return Multitap([*self.ports])
 
 
 @dataclasses.dataclass
@@ -141,7 +159,7 @@ class Node(nn.Module):
         raise NotImplementedError
 
     @property
-    def inputs(self) -> typing.List[Port]:
+    def inputs(self) -> Multitap:
         raise NotImplementedError
     
     @property
@@ -240,7 +258,7 @@ class OpNode(Node):
 
     def __init__(
         self, name: str, operation: nn.Module, 
-        inputs: typing.List[Port],
+        inputs: Multitap,
         out_size: typing.Union[torch.Size, typing.List[torch.Size]],
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
         annotation: str=None
@@ -248,7 +266,7 @@ class OpNode(Node):
         super().__init__(name, labels, annotation)
         self.op: nn.Module = operation
         self._out_size = out_size
-        self._inputs: typing.List[Port] = inputs
+        self._inputs: Multitap = inputs
 
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -269,8 +287,8 @@ class OpNode(Node):
         return Port(ModRef(self.name), self._out_size),
     
     @property
-    def inputs(self) -> typing.List[Port]:
-        return self._inputs
+    def inputs(self) -> Multitap:
+        return self._inputs.clone()
     
     @property
     def input_nodes(self) -> typing.List[str]:
@@ -340,8 +358,8 @@ class In(Node):
         return x
 
     @property
-    def inputs(self) -> typing.List[Port]:
-        return []
+    def inputs(self) -> Multitap:
+        return Multitap([])
 
     @property
     def input_nodes(self) -> typing.List[str]:
@@ -420,8 +438,8 @@ class Parameter(Node):
         return x
 
     @property
-    def inputs(self) -> typing.List[Port]:
-        return []
+    def inputs(self) -> Multitap:
+        return Multitap([])
 
     @property
     def input_nodes(self) -> typing.List[str]:
@@ -543,34 +561,6 @@ class Network(nn.Module):
         
         for name in self._roots:
             yield self._nodes[name]
-    # def get_node(self, name: str, t: typing.Type=None):
-    #     node = self._nodes.get(name)
-    #     if t is None or isinstance(node, t):
-    #         return node
-    
-    # def get_ports(self, names: typing.Union[str, typing.List[str]], flat=True) -> typing.List[Port]:
-
-    #     if isinstance(names, str):
-    #         return self._nodes[names].ports
-        
-    #     ports = []
-    #     for name in names:
-    #         if name not in self._nodes:
-    #             raise ValueError(f'There is no node named {name} in the network')
-    #         if flat:
-    #             ports.extend(self._nodes[name].ports)
-    #         else:
-    #             ports.append(self._nodes[name].ports)
-
-    #     return ports
-    
-    # def nodes_by_label(self, labels: typing.Iterable[str]):
-
-    #     for node in self._nodes:
-    #         node: Node = node
-            
-    #         if len(set(node.labels).intersection(labels)) == len(labels):
-    #             yield node
     
     def _get_input_names_helper(self, node: Node, use_input: typing.List[bool]):
 
@@ -750,10 +740,6 @@ class Network(nn.Module):
             result[output] = cur_result
         
         return result
-    
-    # # TODO: Depracate
-    # def get_node(self, key) -> Node:
-    #     return self._nodes[key]
 
     @singledispatchmethod
     def __getitem__(self, name):
@@ -821,17 +807,13 @@ class SubNetwork(object):
         self._labels = labels
         self._annotation = annotation
     
-    def get_ports(self, node_name: str) -> typing.List[Port]:
-
-        return self._network.get_ports(node_name)
-
     @property
     def ports(self) -> typing.Iterable[Port]:
         return []
 
     @property
-    def inputs(self) -> typing.List[Port]:
-        return []
+    def inputs(self) -> Multitap:
+        return Multitap([])
     
     @property
     def input_nodes(self) -> typing.List[str]:
@@ -879,14 +861,14 @@ class InterfaceNode(Node):
 
     def __init__(
         self, name: str, sub_network: SubNetwork, 
-        outputs: typing.List[Port],
+        outputs: Multitap,
         inputs: typing.List[Link],
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
         annotation: str=None
     ):
         super().__init__(name, labels, annotation)
         self._sub_network: SubNetwork = sub_network
-        self._outputs: typing.List[Port] = outputs
+        self._outputs: Multitap = outputs
         self._inputs: typing.List[Link] = inputs
 
     @property
@@ -908,9 +890,9 @@ class InterfaceNode(Node):
         return set([self.name, self._sub_network.name])
 
     @property
-    def inputs(self) -> typing.List[Port]:
+    def inputs(self) -> Multitap:
         # use self._inputs
-        return [in_.from_ for in_ in self._inputs]
+        return Multitap([in_.from_ for in_ in self._inputs])
     
     @property
     def input_nodes(self) -> typing.List[str]:
@@ -925,8 +907,8 @@ class InterfaceNode(Node):
         return self._sub_network
     
     @property
-    def outputs(self) -> typing.List[Port]:
-        return [output for output in self._outputs]
+    def outputs(self) -> Multitap:
+        return self._outputs.clone() #  Multitap([output for output in self._outputs])
     
     @property
     def clone(self):

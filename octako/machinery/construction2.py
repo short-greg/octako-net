@@ -3,14 +3,14 @@ from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
 from functools import partial, singledispatch, singledispatchmethod
 from os import path
-from typing import Any, Counter, TypeVar
+from typing import Any, Callable, Counter, TypeVar
 import typing
 import torch
 from torch import nn
 from torch import Size
 from torch.nn import modules
 from torch.nn.modules.container import Sequential
-from .networks import ModRef, Node, OpNode, Port
+from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
 from octako.modules.containers import Parallel, Diverge
 
 
@@ -677,14 +677,6 @@ class ParallelFactory(OpFactory):
         for op_factory in self._op_factories:
             for node in op_factory.produce_nodes(in_, **kwargs):
                 yield node
-    
-    @property
-    def labels(self):
-        return self._labels
-
-    @property
-    def name(self):
-        return self._name
 
     def to(self, **kwargs):
         return ParallelFactory(
@@ -750,10 +742,123 @@ class Chain(OpFactory):
 
 chain = Chain
 
+
+
+class InFactory(ABC):
+
+    def produce(self, **kwargs) -> Node:
+        pass
+
+
+class TensorInFactory(InFactory):
+
+    def __init__(self, size: torch.Size, default, call_default: bool=False, device: str='cpu', info: Info=None):
+        
+        self._default = default
+        self._sz = size
+        self._call_default = call_default
+        self._device = device
+        self._info = info
+
+    def produce(self, **kwargs) -> Node:
+
+        default = self._default(*self._sz, device=self._device) if self._call_default else self._default    
+        return In.from_tensor(self._info.name, self._type_, default, self._info.labels, self._info.annotation)
+
+tensor_in = TensorInFactory
+
+
+class ScalarInFactory(InFactory):
+
+    def __init__(self, type_: typing.Type, default, call_default: bool=False, info: Info=None):
+
+        self._type_ = type_
+        self._default = default
+        self._call_default = call_default
+        self._info = info or Info()
+
+    def produce(self, **kwargs) -> Node:
+
+        default = self._default() if self._call_default else self._default    
+        return In.from_scalar(self._info.name, self._type_, default, self._info.labels, self._info.annotation)
+
+scalar_in = ScalarInFactory
+
+
+class ParameterFactory(InFactory):
+
+    def __init__(self, size: torch.Size, default, call_default: bool=False, device: str='cpu', info: Info=None):
+        
+        self._default = default
+        self._sz = size
+        self._call_default = call_default
+        self._device = device
+        self._info = info
+
+    def produce(self, **kwargs) -> Node:
+
+        return Parameter(self._info.name, self._sz, self._reset_func, self._info.labels, self._info.annotation)
+        
+param_in = ParameterFactory
+
+
+
+class BuildMultitap(object):
+
+    def __init__(self, builder, multitap: Multitap):
+        
+        self._builder: NetBuilder = builder
+        self._multitap = multitap
+
+    def __lshift__(self, op_factory: OpFactory):
+        
+        multitap = self._multitap
+        for node in op_factory.produce_nodes(self._multitap.sizes):
+            multitap = self._builder.add_node(node)
+        return BuildMultitap(self._builder, multitap)
+
+
 class NetBuilder(object):
-    pass
+    """
+    Builder class with convenience methods for building networks
+    - Handles adding nodes to the network to simplify that process
+    - Do not need to specify the incoming ports if the incoming ports
+    -  are the outputs of the previously added node
+    - Can set base labels that will apply to all nodes added to the network
+    -  that use the convenience methods (not add_node)
+    """
 
+    # later add in 
 
+    def __init__(self):
+
+        self._net = Network()
+
+    def __getitem__(self, keys: list):
+        
+        node_set: NodeSet = self._net[keys]
+        return BuildMultitap(self, node_set.ports)
+
+    def add_ins(self, in_: typing.List[InFactory]):
+        return self._net.add_node(in_)
+
+    def add_in(self, in_: InFactory):
+        return self._net.add_node(in_)
+
+    def add_node(self, node: Node):
+        return self._net.add_node(node)
+
+    def __lshift__(self, in_: InFactory):
+        return BuildMultitap(self, self._net.add_node(in_.produce()))
+
+    @property
+    def net(self):
+        return self._net
+
+    def set_default_interface(self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]):
+        self._net.set_default_interface(
+            ins, outs
+        )
 
 # mod(nn.Linear, 2, 3).op(out=(-1, Sz(1))
 # mod(nn.Linear, 2, 3).op()

@@ -11,7 +11,7 @@ class TestNode:
 
         x = networks.Port('x', torch.Size([-1, 2]))
 
-        node = networks.OpNode("lineasr", nn.Linear(2, 4),  [x], torch.Size([-1, 4]))
+        node = networks.OpNode("linear", nn.Linear(2, 4),  [x], torch.Size([-1, 4]))
         assert node.inputs == [x]
 
     def test_node_name_after_creation(self):
