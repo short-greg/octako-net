@@ -802,7 +802,6 @@ class ParameterFactory(InFactory):
 param_in = ParameterFactory
 
 
-
 class BuildMultitap(object):
 
     def __init__(self, builder, multitap: Multitap):
