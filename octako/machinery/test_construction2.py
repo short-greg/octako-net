@@ -5,8 +5,8 @@ from torch.nn.modules import linear
 from torch.nn.modules.activation import Sigmoid
 from torch.nn.modules.container import Sequential
 
-from octako.machinery.networks import ModRef, Node, OpNode, Port
-from .construction2 import Args, BasicOp, ListOut, ModFactory, NullOut, OpMod, diverge, Sequence, SizeOut, sz, var, factory
+from octako.machinery.networks import In, ModRef, Node, OpNode, Parameter, Port
+from .construction2 import Args, BasicOp, Chain, InFactory, Kwargs, ListOut, ModFactory, NetBuilder, NullOut, OpFactory, OpMod, ParameterFactory, ScalarInFactory, TensorInFactory, diverge, Sequence, SizeOut, sz, var, factory
 import pytest
 # 1) out_size is a function
 # 2) 
@@ -255,4 +255,130 @@ class TestDiverge:
         assert p1.ref.module == 'x'
         assert p2.ref.module == 'y'
 
+
+class TestChain:
+
+    def test_chained_linear(self):
+
+        op = BasicOp(ModFactory(nn.Linear, 2, 2), out=[-1, 2])
+        chain = Chain(op, [Kwargs(), Kwargs()])
+        sequence, size = chain.produce([torch.Size([-1, 2])])
+
+        assert isinstance(sequence[0], nn.Linear)
+
+
+    def test_chained_linear_with_var(self):
+
+        op = BasicOp(ModFactory(nn.Linear, sz[1], var('x')), out=[-1, var('x')])
+        chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
+        sequence, size = chain.produce([torch.Size([-1, 2])])
+
+        assert isinstance(sequence[0], nn.Linear)
+
+    def test_chained_linear_size_is_correct(self):
+
+        op = BasicOp(ModFactory(nn.Linear, sz[1], var('x')), out=[-1, var('x')])
+        chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
+        sequence, size = chain.produce([torch.Size([-1, 2])])
+
+        assert size[0] == torch.Size([-1, 5])
+
+    def test_chained_produce_nodes(self):
+
+        op = BasicOp(ModFactory(nn.Linear, sz[1], var('x')), out=[-1, var('x')])
+        chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
+        nodes: typing.List[Node] = []
+        for node in chain.produce_nodes(Port("x", torch.Size([-1, 2]))):
+            nodes.append(node)
+
+        assert nodes[-1].ports[0].size == torch.Size([-1, 5])
+
+
+    def test_chain_to_produce_nodes(self):
+
+        op = BasicOp(ModFactory(nn.Linear, sz[1], var('x')), out=[-1, var('x')])
+        chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
+        chain = chain.to(x=var('y'))
+        nodes: typing.List[Node] = []
+        for node in chain.produce_nodes(Port("x", torch.Size([-1, 2]))):
+            nodes.append(node)
+
+        assert nodes[-1].ports[0].size == torch.Size([-1, 5])
+
+
+class TestTensorInFactory:
+
+    def test_produce_tensor_input_with_call_default(self):
+
+        op = TensorInFactory(
+            torch.Size([1, 2]), torch.ones, True
+        )
+        in_ = op.produce()
+        assert isinstance(in_, In)
+
+
+    def test_produce_tensor_input_with_no_call(self):
+
+        op = TensorInFactory(
+            torch.Size([1, 2]), torch.tensor([[2, 3]]), False
+        )
+        in_ = op.produce()
+        assert isinstance(in_, In)
+
+
+class TestScalarInFactory:
+
+    def test_produce_tensor_input(self):
+
+        op = ScalarInFactory(
+            int, 2, False
+        )
+        in_ = op.produce()
+
+        assert isinstance(in_, In)
+
+    def test_produce_tensor_input_with_call_default(self):
+
+        op = ScalarInFactory(
+            type(dict()), dict, True
+        )
+        in_ = op.produce()
+
+        assert isinstance(in_, In)
+
+
+class TestParameterFactory:
+
+    def test_produce_tensor_input_with_call_default(self):
+
+        op = ParameterFactory(
+            torch.Size([1, 2]), torch.ones
+        )
+        in_ = op.produce()
+        assert isinstance(in_, Parameter)
+
+    def test_produce_tensor_input_with_reset(self):
+
+        op = ParameterFactory(
+            torch.Size([1, 2]), torch.ones
+        )
+        parameter = op.produce()
+        parameter.reset()
+
+
+class TestNetBuilder:
+
+    def test_produce_simple_network(self):
+
+        op = TensorInFactory(
+            torch.Size([1, 2]), torch.ones, True
+        )
+        op2 = BasicOp(
+            ModFactory(nn.Linear, 2, 3), out=[-1, 3]
+        )
+        op3 = BasicOp(
+            ModFactory(nn.Linear, 3, 4), out=[-1, 4]
+        )
+        builder = NetBuilder()
+        builder << op << op2 << op3
 

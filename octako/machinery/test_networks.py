@@ -9,7 +9,7 @@ class TestNode:
 
     def test_node_inputs_after_creation(self):
 
-        x = Port('x', torch.Size([-1, 2]))
+        x = Port(ModRef('x'), torch.Size([-1, 2]))
 
         node = OpNode('linear', nn.Linear(2, 4),  [x], torch.Size([-1, 4]))
         print(node.cache_names_used)
@@ -17,15 +17,39 @@ class TestNode:
 
     def test_node_name_after_creation(self):
 
-        x = Port('x', torch.Size([-1, 2]))
+        x = Port(ModRef('x'), torch.Size([-1, 2]))
         node = OpNode("linear", nn.Linear(2, 2), [x], torch.Size([-1, 2]))
         assert node.name == 'linear'
 
     def test_node_forward(self):
 
-        x = Port('x', torch.Size([-1, 2]))
+        x = Port(ModRef('x'), torch.Size([-1, 2]))
         node = OpNode("linear", nn.Linear(2, 2), [x], torch.Size([-1, 2]))
         assert node.forward(torch.randn(3, 2)).size() == torch.Size([3, 2])
+
+    def test_node_input_nodes_equals_x(self):
+
+        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        node = OpNode("linear", nn.Linear(2, 2), [x], torch.Size([-1, 2]))
+        assert node.input_nodes[0] == 'x'
+
+    def test_node_ports_equals_x(self):
+
+        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        node = OpNode("linear", nn.Linear(2, 2), [x], torch.Size([-1, 2]))
+        assert node.inputs[0] == x
+
+    def test_node_ports_is_correct_size(self):
+
+        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        node = OpNode("linear", nn.Linear(2, 2), [x], torch.Size([-1, 2]))
+        assert node.ports[0].size == torch.Size([-1, 2])
+
+    def test_node_labels_are_correct(self):
+
+        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        node = OpNode("linear", nn.Linear(2, 2), [x], torch.Size([-1, 2]), labels=['linear'])
+        assert node.labels == ['linear']
 
 
 class TestNetwork:

@@ -91,16 +91,15 @@ class sz(object, metaclass=SizeMeta):
         return sizes[self._port_idx][self._dim_idx]
 
 
+# class PortSize(object):
 
-class PortSize(object):
-
-    @singledispatchmethod
-    def __init__(self, sizes: typing.List[torch.Size]):
-        self._sizes = sizes
+#     @singledispatchmethod
+#     def __init__(self, sizes: typing.List[torch.Size]):
+#         self._sizes = sizes
     
-    @__init__.register
-    def __init__(self, sizes: torch.Size):
-        self._sizes = [sizes]
+#     @__init__.register
+#     def __init__(self, sizes: torch.Size):
+#         self._sizes = [sizes]
 
 
 @dataclass
@@ -142,7 +141,7 @@ class OpFactory(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def produce_nodes(self, in_size: torch.Size, **kwargs) -> typing.Iterator[Node]:
+    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
         raise NotImplementedError
 
     @abstractmethod
@@ -255,6 +254,16 @@ class Kwargs(_ArgMap):
 
         return Kwargs(**{k: self._remap_arg(v, kwargs) for k, v in self._kwargs.items()})
 
+    def remap_keys(self, kwargs):
+
+        remapped = {}
+        for x, y in kwargs.items():
+            if x in self._kwargs:
+                y: var = y
+                remapped[y.name] = self._kwargs[x] 
+
+        return Kwargs(**remapped)
+
     @property
     def items(self):
         return self._kwargs
@@ -363,12 +372,16 @@ class BasicOp(OpFactory):
             in_ = [in_]
         
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        name = self._info.name or type(module).__name__
+        name = self._info.name if self._info.name != '' else type(module).__name__
 
-        yield OpNode(
-            name, module, in_, self._out.produce(module, in_), self._info.labels,
+        op_node = OpNode(
+            name, module, in_, self._out.produce(module, in_, **kwargs), self._info.labels,
             self._info.annotation
         )
+
+        print(op_node.input_nodes)
+
+        yield op_node
 
     def to(self, **kwargs):
         mod = self._mod.to(**kwargs)
@@ -718,7 +731,7 @@ class Chain(OpFactory):
     
     def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
         
-        if isinstance(in_, Size):
+        if isinstance(in_, Port):
             in_ = [in_]
         attributes = self._attributes
         if isinstance(attributes, var):
@@ -727,24 +740,29 @@ class Chain(OpFactory):
         for attribute in self._attributes:
             for node in self._op_factory.produce_nodes(in_, **attribute.items):
                 yield node
-            # Use produce to get the next in_size
-            _, in_ = self._op_factory.produce(in_, **attribute.items)
+                in_ = node.ports
 
     def to(self, **kwargs):
         attributes = self._attributes
         if isinstance(self._attributes, var):
             attributes = self._attributes.to(**kwargs)
+        
+        to_attributes = []
+        for attribute in attributes:
+            to_attributes.append(attribute.remap_keys(kwargs))
+            
         return Chain(
-            self._op_factory.to(kwargs), attributes,
+            self._op_factory.to(**kwargs), to_attributes,
             self._info
         )
-
 
 chain = Chain
 
 
-
 class InFactory(ABC):
+
+    def coalesce_name(self, name):
+        return name if name not in ('', None) else type(self).__name__
 
     def produce(self, **kwargs) -> Node:
         pass
@@ -755,15 +773,22 @@ class TensorInFactory(InFactory):
     def __init__(self, size: torch.Size, default, call_default: bool=False, device: str='cpu', info: Info=None):
         
         self._default = default
-        self._sz = size
+        self._size = size
         self._call_default = call_default
         self._device = device
-        self._info = info
+        self._info = info or Info(name='Tensor')
 
-    def produce(self, **kwargs) -> Node:
+    def produce(self) -> In:
 
-        default = self._default(*self._sz, device=self._device) if self._call_default else self._default    
-        return In.from_tensor(self._info.name, self._type_, default, self._info.labels, self._info.annotation)
+        # size = self._out.produce(None, None, **kwargs)
+        default = self._default(
+            *self._size, device=self._device
+        ) if self._call_default else self._default  
+        
+        return In.from_tensor(
+            self._info.name, self._size, default, 
+            self._info.labels, self._info.annotation
+        )
 
 tensor_in = TensorInFactory
 
@@ -775,7 +800,7 @@ class ScalarInFactory(InFactory):
         self._type_ = type_
         self._default = default
         self._call_default = call_default
-        self._info = info or Info()
+        self._info = info or Info(name='Scalar')
 
     def produce(self, **kwargs) -> Node:
 
@@ -787,13 +812,12 @@ scalar_in = ScalarInFactory
 
 class ParameterFactory(InFactory):
 
-    def __init__(self, size: torch.Size, default, call_default: bool=False, device: str='cpu', info: Info=None):
+    def __init__(self, size: torch.Size, reset_func, device: str='cpu', info: Info=None):
         
-        self._default = default
+        self._reset_func = reset_func
         self._sz = size
-        self._call_default = call_default
         self._device = device
-        self._info = info
+        self._info = info or Info(name='Param')
 
     def produce(self, **kwargs) -> Node:
 
@@ -806,14 +830,17 @@ class BuildMultitap(object):
 
     def __init__(self, builder, multitap: Multitap):
         
+        if isinstance(multitap, list) or isinstance(multitap, tuple):
+            multitap = Multitap(multitap)
         self._builder: NetBuilder = builder
         self._multitap = multitap
 
     def __lshift__(self, op_factory: OpFactory):
         
         multitap = self._multitap
-        for node in op_factory.produce_nodes(self._multitap.sizes):
-            multitap = self._builder.add_node(node)
+        for node in op_factory.produce_nodes(self._multitap.ports):
+            print(node.input_nodes)
+            multitap = Multitap(self._builder.add_node(node))
         return BuildMultitap(self._builder, multitap)
 
 
@@ -832,6 +859,7 @@ class NetBuilder(object):
     def __init__(self):
 
         self._net = Network()
+        self._names = Counter()
 
     def __getitem__(self, keys: list):
         
@@ -839,16 +867,23 @@ class NetBuilder(object):
         return BuildMultitap(self, node_set.ports)
 
     def add_ins(self, in_: typing.List[InFactory]):
-        return self._net.add_node(in_)
+        ports = []
+        for in_i in in_:
+            ports.extend(self.add_in(in_i))
+        return ports
 
     def add_in(self, in_: InFactory):
-        return self._net.add_node(in_)
+        node = in_.produce()
+        return self.add_node(node)
 
     def add_node(self, node: Node):
+        self._names.update(node.name)
+        if self._names[node.name] > 1:
+            node.name = f'{node.name}_{self._names[node.name]}'
         return self._net.add_node(node)
 
     def __lshift__(self, in_: InFactory):
-        return BuildMultitap(self, self._net.add_node(in_.produce()))
+        return BuildMultitap(self, self.add_in(in_))
 
     @property
     def net(self):

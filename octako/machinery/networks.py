@@ -157,24 +157,22 @@ class Node(nn.Module):
     def annotation(self, annotation: str) -> str:
         self._annotation = annotation
 
-    @abstractproperty
     def ports(self) -> typing.Iterable[Port]:
         raise NotImplementedError
     
-    @abstractproperty
     def cache_names_used(self):
         raise NotImplementedError
 
-    @abstractproperty
-    def inputs(self) -> Multitap:
-        raise NotImplementedError
-    
-    @abstractproperty
+    @property
     def input_nodes(self) -> typing.List[str]:
         """
         Returns:
             typing.List[str]: Names of the nodes input into the node
         """
+        raise NotImplementedError
+
+    @property
+    def inputs(self) -> Multitap:
         raise NotImplementedError
     
     def clone(self):
@@ -280,9 +278,10 @@ class OpNode(Node):
             inputs = Multitap([inputs])
         elif isinstance(inputs, type([])):
             inputs = Multitap(inputs)
-        self.op: nn.Module = operation
         self._out_size = out_size
         self._inputs: Multitap = inputs
+        self.op: nn.Module = operation
+        # self.input_nodes = [in_.module for in_ in self._inputs]
 
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -301,11 +300,6 @@ class OpNode(Node):
 
         return Port(ModRef(self.name), self._out_size),
     
-    # TODO: FIND OUT WHY NOT WORKING
-    @property
-    def inputs(self) -> Multitap:
-       return self._inputs.clone()
-    
     @property
     def input_nodes(self) -> typing.List[str]:
         """
@@ -313,6 +307,11 @@ class OpNode(Node):
             typing.List[str]: Names of the nodes input into the node
         """
         return [in_.module for in_ in self.inputs]
+
+    # TODO: FIND OUT WHY NOT WORKING
+    @property
+    def inputs(self) -> Multitap:
+       return self._inputs.clone()
     
     @property
     def cache_names_used(self) -> typing.Set[str]:
@@ -400,7 +399,10 @@ class In(Node):
         return by.get(self.name, self._default_value)
 
     @classmethod
-    def from_tensor(cls, name, sz: torch.Size, default_value: torch.Tensor=None, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None, device: str='cpu'):
+    def from_tensor(
+        cls, name, sz: torch.Size, default_value: torch.Tensor=None, 
+        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, 
+        annotation: str=None, device: str='cpu'):
         if default_value is None:
             sz2 = []
             for el in list(sz):
@@ -428,6 +430,7 @@ class In(Node):
 class Parameter(Node):
     """[Input node in a network.]"""
 
+    # value_type: typing.Type, default_value, 
     def __init__(
         self, name: str, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
         """[initializer]
@@ -452,7 +455,6 @@ class Parameter(Node):
         return Port(ModRef(self.name), self._out_size),
     
     def forward(x):
-
         return x
 
     @property
