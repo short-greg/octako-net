@@ -5,8 +5,8 @@ from torch.nn.modules import linear
 from torch.nn.modules.activation import Sigmoid
 from torch.nn.modules.container import Sequential
 
-from octako.machinery.networks import In, ModRef, Node, OpNode, Parameter, Port
-from .construction2 import Args, BasicOp, Chain, InFactory, Kwargs, ListOut, ModFactory, NetBuilder, NullOut, OpFactory, OpMod, ParameterFactory, ScalarInFactory, TensorInFactory, diverge, Sequence, SizeOut, sz, var, factory
+from octako.machinery.networks import In, ModRef, Multitap, Node, OpNode, Parameter, Port
+from .construction2 import Args, BasicOp, Chain, InFactory, Info, Kwargs, ListOut, ModFactory, NetBuilder, NullOut, OpFactory, OpMod, ParameterFactory, ScalarInFactory, TensorInFactory, diverge, Sequence, SizeOut, sz, var, factory
 import pytest
 # 1) out_size is a function
 # 2) 
@@ -164,7 +164,7 @@ class TestSequence:
     def test_sequence_produce_nodes_from_three_ops(self):
 
         # linear = mod(nn.Linear, Sz(1), Var('x')).op(linear_out)
-        port = Port("mod", torch.Size([1, 2]))
+        port = Port(ModRef('mod'), torch.Size([1, 2]))
         nodes = list((
             factory(nn.Linear, 2, 4).op(torch.Size([-1, 4])) << 
             factory(nn.Sigmoid).op() <<
@@ -246,7 +246,7 @@ class TestDiverge:
             factory(nn.Linear, 3, 4).op(torch.Size([-1, 4]))
         ])
         nodes: typing.List[OpNode] = []
-        for node in div.produce_nodes(ports):
+        for node in div.produce_nodes(Multitap(ports)):
             nodes.append(node)
         
         p1, = nodes[0].inputs
@@ -288,7 +288,7 @@ class TestChain:
         op = BasicOp(ModFactory(nn.Linear, sz[1], var('x')), out=[-1, var('x')])
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
         nodes: typing.List[Node] = []
-        for node in chain.produce_nodes(Port("x", torch.Size([-1, 2]))):
+        for node in chain.produce_nodes(Multitap([Port(ModRef('x'), torch.Size([-1, 2]))])):
             nodes.append(node)
 
         assert nodes[-1].ports[0].size == torch.Size([-1, 5])
@@ -300,7 +300,7 @@ class TestChain:
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
         chain = chain.to(x=var('y'))
         nodes: typing.List[Node] = []
-        for node in chain.produce_nodes(Port("x", torch.Size([-1, 2]))):
+        for node in chain.produce_nodes(Port(ModRef("x"), torch.Size([-1, 2]))):
             nodes.append(node)
 
         assert nodes[-1].ports[0].size == torch.Size([-1, 5])
@@ -368,10 +368,10 @@ class TestParameterFactory:
 
 class TestNetBuilder:
 
-    def test_produce_simple_network(self):
+    def test_produce_network_with_in(self):
 
         op = TensorInFactory(
-            torch.Size([1, 2]), torch.ones, True
+            torch.Size([1, 2]), torch.ones, True, info=Info(name='x')
         )
         op2 = BasicOp(
             ModFactory(nn.Linear, 2, 3), out=[-1, 3]
@@ -381,4 +381,47 @@ class TestNetBuilder:
         )
         builder = NetBuilder()
         builder << op << op2 << op3
+        assert builder.net['x'].ports[0].size == torch.Size([1, 2])
 
+    def test_produce_network_with_one_op(self):
+
+        op = TensorInFactory(
+            torch.Size([1, 2]), torch.ones, True, info=Info(name='x')
+        )
+        op2 = BasicOp(
+            ModFactory(nn.Linear, 2, 3), out=[-1, 3]
+        )
+        builder = NetBuilder()
+        builder << op << op2
+        assert builder.net['Linear'].ports[0].size == torch.Size([-1, 3])
+
+    def test_produce_network_with_two_ops_same_name(self):
+
+        op = TensorInFactory(
+            torch.Size([1, 2]), torch.ones, True, info=Info(name='x')
+        )
+        op2 = BasicOp(
+            ModFactory(nn.Linear, 2, 3), out=[-1, 3]
+        )
+        op3 = BasicOp(
+            ModFactory(nn.Linear, 3, 4), out=[-1, 4]
+        )
+        builder = NetBuilder()
+        builder << op << op2 << op3
+        assert builder.net['Linear_2'] != builder.net['Linear']
+
+    def test_produce_network_with_sequence(self):
+
+        sequence = BasicOp(
+            ModFactory(nn.Linear, 2, 3), out=[-1, 3]
+        ) << BasicOp(
+            ModFactory(nn.Linear, 3, 4), out=[-1, 4]
+        )
+
+        op = TensorInFactory(
+            torch.Size([1, 2]), torch.ones, True, info=Info(name='x')
+        )
+        
+        builder = NetBuilder()
+        builder << op << sequence
+        assert builder.net['Linear_2'] != builder.net['Linear']

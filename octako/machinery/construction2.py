@@ -12,6 +12,7 @@ from torch.nn import modules
 from torch.nn.modules.container import Sequential
 from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
 from octako.modules.containers import Parallel, Diverge
+from functools import wraps
 
 
 T = TypeVar('T')
@@ -35,6 +36,20 @@ class var(object):
     def to(self, **kwargs):
         return kwargs.get(self._name, self)
 
+
+def to_multitap(f):
+
+    @wraps(f)
+    def produce_nodes(self, in_, **kwargs):
+        if isinstance(in_, Port):
+            in_ = Multitap([in_])
+        
+        elif not isinstance(in_, Multitap):
+            # assume it is a list
+            in_ = Multitap([*in_])
+
+        return f(self, in_, **kwargs)
+    return produce_nodes
 
 #         # class SizeMeta(type):
 
@@ -141,7 +156,7 @@ class OpFactory(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         raise NotImplementedError
 
     @abstractmethod
@@ -186,10 +201,11 @@ class Sequence(OpFactory):
     
         return sequential, in_
 
-    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+    @to_multitap
+    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         for factory in self._op_factories:
             for node in factory.produce_nodes(in_, **kwargs):
-                in_ = node.ports  
+                in_ = Multitap(node.ports)  
                 yield node
     
     def to(self, **kwargs):
@@ -346,6 +362,7 @@ class Out(ABC):
 #     annotation: str=None
 
 
+
 class BasicOp(OpFactory):
 
     def __init__(
@@ -366,11 +383,10 @@ class BasicOp(OpFactory):
         module = self._mod.produce(in_, **kwargs)
         return module, self._out.produce(module, in_, **kwargs)
     
-    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+    @to_multitap
+    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         
-        if isinstance(in_, Port):
-            in_ = [in_]
-        
+        print(in_)
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
         name = self._info.name if self._info.name != '' else type(module).__name__
 
@@ -378,8 +394,6 @@ class BasicOp(OpFactory):
             name, module, in_, self._out.produce(module, in_, **kwargs), self._info.labels,
             self._info.annotation
         )
-
-        print(op_node.input_nodes)
 
         yield op_node
 
@@ -639,13 +653,14 @@ class DivergeFactory(OpFactory):
         mod = Diverge(mods)
         return mod, outs
     
-    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+    @to_multitap
+    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         
         if isinstance(in_, Port):
             in_ = [in_]
         
         for in_i, op_factory in zip(in_, self._op_factories):
-            for node in op_factory.produce_nodes(in_i, **kwargs):
+            for node in op_factory.produce_nodes(Multitap([in_i]), **kwargs):
                 yield node
     
     def to(self, **kwargs):
@@ -682,10 +697,8 @@ class ParallelFactory(OpFactory):
         mod = Parallel(mods)
         return mod, outs
     
-    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
-        
-        if isinstance(in_, Port):
-            in_ = [in_]
+    @to_multitap
+    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         
         for op_factory in self._op_factories:
             for node in op_factory.produce_nodes(in_, **kwargs):
@@ -729,10 +742,9 @@ class Chain(OpFactory):
             mods.append(mod)
         return nn.Sequential(*mods), out
     
-    def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
+    @to_multitap
+    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         
-        if isinstance(in_, Port):
-            in_ = [in_]
         attributes = self._attributes
         if isinstance(attributes, var):
             attributes = self._attributes.to(**kwargs)
@@ -740,7 +752,7 @@ class Chain(OpFactory):
         for attribute in self._attributes:
             for node in self._op_factory.produce_nodes(in_, **attribute.items):
                 yield node
-                in_ = node.ports
+                in_ = Multitap(node.ports)
 
     def to(self, **kwargs):
         attributes = self._attributes
@@ -839,7 +851,6 @@ class BuildMultitap(object):
         
         multitap = self._multitap
         for node in op_factory.produce_nodes(self._multitap.ports):
-            print(node.input_nodes)
             multitap = Multitap(self._builder.add_node(node))
         return BuildMultitap(self._builder, multitap)
 
@@ -877,13 +888,14 @@ class NetBuilder(object):
         return self.add_node(node)
 
     def add_node(self, node: Node):
-        self._names.update(node.name)
+        self._names.update([node.name])
         if self._names[node.name] > 1:
             node.name = f'{node.name}_{self._names[node.name]}'
         return self._net.add_node(node)
 
     def __lshift__(self, in_: InFactory):
-        return BuildMultitap(self, self.add_in(in_))
+        ports =  self.add_in(in_)
+        return BuildMultitap(self,ports)
 
     @property
     def net(self):
