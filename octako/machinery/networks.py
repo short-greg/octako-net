@@ -165,9 +165,9 @@ class Node(nn.Module):
     def cache_names_used(self):
         raise NotImplementedError
 
-    # @abstractproperty
-    # def inputs(self) -> Multitap:
-    #     raise NotImplementedError
+    @abstractproperty
+    def inputs(self) -> Multitap:
+        raise NotImplementedError
     
     @abstractproperty
     def input_nodes(self) -> typing.List[str]:
@@ -282,7 +282,7 @@ class OpNode(Node):
             inputs = Multitap(inputs)
         self.op: nn.Module = operation
         self._out_size = out_size
-        self.inputs: Multitap = inputs
+        self._inputs: Multitap = inputs
 
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -302,9 +302,9 @@ class OpNode(Node):
         return Port(ModRef(self.name), self._out_size),
     
     # TODO: FIND OUT WHY NOT WORKING
-    # @property
-    # def inputs(self) -> Multitap:
-    #    return self._inputs.clone()
+    @property
+    def inputs(self) -> Multitap:
+       return self._inputs.clone()
     
     @property
     def input_nodes(self) -> typing.List[str]:

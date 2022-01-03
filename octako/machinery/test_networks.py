@@ -303,10 +303,6 @@ class TestNetworkInterface:
               'linear2', nn.Linear(3, 3), y, torch.Size([-1, 4]), 
             ))
         return network
-    
-#     @staticmethod
-#     def _setup_subnetwork(network):
-#         return 
 
     def test_probe_results_returns_correct_size(self):
 
