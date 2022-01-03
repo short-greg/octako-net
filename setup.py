@@ -6,5 +6,5 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name='octako',
     version='0.1.0',
-    packages=['octako', 'octako.extensions', 'octako.machinery', 'octako.modules', 'octako.teaching']
+    packages=['octako', 'octako.machinery', 'octako.modules', 'octako.teaching']
 )

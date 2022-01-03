@@ -7,7 +7,7 @@ Classes related to Networks.
 They are a collection of modules connected together in a graph.
 
 """
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, abstractproperty
 import torch.nn as nn
 import torch
 import typing
@@ -93,6 +93,13 @@ class Multitap:
     def clone(self):
         return Multitap([*self.ports])
 
+    @classmethod
+    def from_nodes(cls, nodes: typing.List):
+        result = []
+        for node in nodes:
+            result.extend(node.ports)
+        return cls(result)
+
 
 @dataclasses.dataclass
 class NetworkPort(Port):
@@ -150,19 +157,19 @@ class Node(nn.Module):
     def annotation(self, annotation: str) -> str:
         self._annotation = annotation
 
-    @property
+    @abstractproperty
     def ports(self) -> typing.Iterable[Port]:
         raise NotImplementedError
     
-    @property
+    @abstractproperty
     def cache_names_used(self):
         raise NotImplementedError
 
-    @property
-    def inputs(self) -> Multitap:
-        raise NotImplementedError
+    # @abstractproperty
+    # def inputs(self) -> Multitap:
+    #     raise NotImplementedError
     
-    @property
+    @abstractproperty
     def input_nodes(self) -> typing.List[str]:
         """
         Returns:
@@ -191,12 +198,17 @@ class NodeSet(object):
         self.__sub__ = self.difference
 
     @property
+    def nodes(self) -> typing.List[Node]:
+
+        return [
+            self._nodes[name]
+            for name in self._order
+        ]
+
+    @property
     def ports(self):
 
-        result = []
-        for node in self._order:
-            result.extend(self._nodes[node].ports)
-        return result
+        return Multitap.from_nodes(self.nodes)
 
     @singledispatchmethod
     def __getitem__(self, key: typing.Union[str, int, list]):
@@ -258,15 +270,19 @@ class OpNode(Node):
 
     def __init__(
         self, name: str, operation: nn.Module, 
-        inputs: Multitap,
+        inputs: typing.Union[Multitap, Port, typing.List[Port]],
         out_size: typing.Union[torch.Size, typing.List[torch.Size]],
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
         annotation: str=None
     ):
         super().__init__(name, labels, annotation)
+        if isinstance(inputs, Port):
+            inputs = Multitap([inputs])
+        elif isinstance(inputs, type([])):
+            inputs = Multitap(inputs)
         self.op: nn.Module = operation
         self._out_size = out_size
-        self._inputs: Multitap = inputs
+        self.inputs: Multitap = inputs
 
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -280,15 +296,15 @@ class OpNode(Node):
         Returns:
             typing.Iterable[Port]: [The output ports for the node]
         """
-
         if type(self._out_size) == list:
             return [Port(IndexRef(self.name, i), sz) for i, sz in enumerate(self._out_size)]
 
         return Port(ModRef(self.name), self._out_size),
     
-    @property
-    def inputs(self) -> Multitap:
-        return self._inputs.clone()
+    # TODO: FIND OUT WHY NOT WORKING
+    # @property
+    # def inputs(self) -> Multitap:
+    #    return self._inputs.clone()
     
     @property
     def input_nodes(self) -> typing.List[str]:
@@ -318,7 +334,7 @@ class OpNode(Node):
             return by[self.name]
 
         try:
-            result = self.op(*[in_.select(by) for in_ in self._inputs])
+            result = self.op(*[in_.select(by) for in_ in self.inputs])
         except Exception as e:
             raise RuntimeError(f'Could not probe node {self.name} {type(self.op)}') from e
         if to_cache:
@@ -350,7 +366,6 @@ class In(Node):
 
     @property
     def ports(self) -> typing.Iterable[Port]:
-
         return Port(ModRef(self.name), self._out_size),
     
     def forward(x):
@@ -400,10 +415,13 @@ class In(Node):
         return cls(name, sz, torch.Tensor, default_value, labels, annotation)
     
     @classmethod
-    def from_scalar(cls, name, default_type: typing.Type, default_value, labels: typing.Set[str]=None, annotation: str=None):
+    def from_scalar(
+        cls, name, default_type: typing.Type, default_value, 
+        labels: typing.Set[str]=None, annotation: str=None):
 
         return cls(
-            name, torch.Size([]), default_type, default_value, labels, annotation
+            name, torch.Size([]), default_type, 
+            default_value, labels, annotation
         )
 
 
@@ -822,6 +840,9 @@ class SubNetwork(object):
             typing.List[str]: Names of the nodes input into the node
         """
         return []
+    
+    def __getitem__(self, name) -> NodeSet:
+        return self._network[name]
     
     def clone(self):
         return SubNetwork(
