@@ -167,8 +167,13 @@ class OpFactory(ABC):
     def alias(self, **kwargs):
         return self.to(**{k: var(v) for k, v in kwargs.items()})
 
+    @property
     def info(self):
         return self._info
+
+    def info_(self, _info):
+        self._info = _info
+        return self
 
 
 OpFactory.__call__ = OpFactory.to
@@ -620,16 +625,6 @@ def _(out_: Out):
     return out_
 
 
-class Override(OpFactory):
-
-    pass
-
-
-def over(factory: OpFactory):
-
-    pass
-
-
 class DivergeFactory(OpFactory):
 
     def __init__(
@@ -670,7 +665,6 @@ class DivergeFactory(OpFactory):
             self._info
         )
 
-
 diverge = DivergeFactory
 
 
@@ -710,7 +704,6 @@ class ParallelFactory(OpFactory):
             [op_factory.to(**kwargs) for op_factory in self._op_factories],
             self._info
         )
-
 
 parallel = ParallelFactory
 
@@ -865,8 +858,6 @@ class NetBuilder(object):
     - Can set base labels that will apply to all nodes added to the network
     -  that use the convenience methods (not add_node)
     """
-
-    # later add in 
 
     def __init__(self):
 
