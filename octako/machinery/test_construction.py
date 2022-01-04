@@ -6,11 +6,8 @@ from torch.nn.modules.activation import Sigmoid
 from torch.nn.modules.container import Sequential
 
 from octako.machinery.networks import In, ModRef, Multitap, Node, OpNode, Parameter, Port
-from .construction2 import Args, BasicOp, Chain, InFactory, Info, Kwargs, ListOut, ModFactory, NetBuilder, NullOut, OpFactory, OpMod, ParameterFactory, ScalarInFactory, TensorInFactory, diverge, Sequence, SizeOut, sz, var, factory
+from .construction import Args, BasicOp, Chain, InFactory, Info, Kwargs, ListOut, ModFactory, NetBuilder, NullOut, OpFactory, OpMod, ParameterFactory, ScalarInFactory, TensorInFactory, diverge, Sequence, SizeOut, sz, var, factory
 import pytest
-# 1) out_size is a function
-# 2) 
-# factory(nn.Linear, ).out()
 
 
 class TestVar:
@@ -105,38 +102,6 @@ class TestMod:
         sigmoid, out_size = m.produce(torch.Size([-1, 4]), x=3)
         
         assert isinstance(sigmoid, nn.Sigmoid)
-
-
-# class TestOp:
-
-#     def test_mod_with_sigmoid(self):
-
-#         cur_op = factory(nn.Sigmoid).op()
-#         sigmoid, _ = cur_op.produce(torch.Size([-1, 4]))
-#         assert isinstance(sigmoid, nn.Sigmoid)
-
-#     def test_mod_with_sigmoid(self):
-        
-#         cur_op = factory(nn.Sigmoid).op()
-#         nodes = list(cur_op.produce_nodes(Port("x", torch.Size([-1, 4]))))
-#         sigmoid = nodes[0].op
-#         assert isinstance(sigmoid, Sigmoid)
-
-#     def test_linear_layer(self):
-        
-#         cur_op = factory(nn.Linear, 2, 4).op(ListOut([-1, 4]))
-#         nodes = list(cur_op.produce_nodes(Port("x", torch.Size([-1, 4]))))
-#         linear = nodes[0].op
-#         assert isinstance(linear, nn.Linear)
-
-
-# # def linear_out(self, mod: nn.Linear, in_size: torch.Size):
-
-# #     return torch.Size([
-# #         in_size[0],
-# #         mod.weight.size(0) 
-# #     ])
-
 
 
 class TestSequence:

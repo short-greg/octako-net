@@ -52,22 +52,6 @@ def to_multitap(f):
         return f(self, in_, **kwargs)
     return produce_nodes
 
-#         # class SizeMeta(type):
-
-#         #     def __call__(cls, *args, **kwargs):
-
-#         #         obj = cls.__new__(cls, *args, **kwargs)
-#         #         obj.__init__(*args, **kwargs)
-#         #         return obj
-
-#         #     def __getitem__(cls, idx: int):
-#         #         return cls(idx)
-            
-#         # class Size(object, metaclass=SizeMeta):
-
-#         #     def __init__(self, idx):
-#         #         self.idx = idx
-
 
 class SizeMeta(type):
 
@@ -107,24 +91,6 @@ class sz(object, metaclass=SizeMeta):
         return sizes[self._port_idx][self._dim_idx]
 
 
-# class PortSize(object):
-
-#     @singledispatchmethod
-#     def __init__(self, sizes: typing.List[torch.Size]):
-#         self._sizes = sizes
-    
-#     @__init__.register
-#     def __init__(self, sizes: torch.Size):
-#         self._sizes = [sizes]
-
-
-@dataclass
-class BuildPort(object):
-
-    name: str
-    idx: int
-
-
 class LabelSet:
     
     def __init__(self, labels: typing.Iterable[str]=None):
@@ -145,6 +111,13 @@ class Info:
     def __post_init__(self):
         if isinstance(self.labels, typing.List):
             self.labels = LabelSet(self.labels)
+    
+    def spawn(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        return Info(
+            name if name is not None else self.name,
+            LabelSet(labels) if labels is not None else self.labels,
+            annotation if annotation is not None else self.annotation
+        )
 
 
 class OpFactory(ABC):
@@ -171,9 +144,8 @@ class OpFactory(ABC):
     def info(self):
         return self._info
 
-    def info_(self, _info):
-        self._info = _info
-        return self
+    def info_(self, name: str='', labels: typing.List[str]=None, annotation: str=None):
+        pass
 
 
 OpFactory.__call__ = OpFactory.to
@@ -223,6 +195,9 @@ class Sequence(OpFactory):
     def info(self):
         return self._info
 
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        
+        return Sequence(self._op_factories, self._info.spawn(name, labels, annotation))
 
 @abstractmethod
 def _lshift(self, op_factory) -> Sequence:
@@ -361,14 +336,6 @@ class Out(ABC):
         raise NotImplementedError
 
 
-# @dataclass
-# class NodeMeta:
-#     name: str=None
-#     labels: typing.List[str] = field(default_factory=list)
-#     annotation: str=None
-
-
-
 class BasicOp(OpFactory):
 
     def __init__(
@@ -408,6 +375,10 @@ class BasicOp(OpFactory):
         return BasicOp(
             mod, self._out.to(**kwargs), self._info
         )
+
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        
+        return BasicOp(self._mod, self._out, self._info.spawn(name, labels, annotation))
 
     
 ModType = typing.Union[typing.Type[nn.Module], var]
@@ -531,7 +502,6 @@ def instance(mod: ModInstance):
 def _(mod: str):
     return Instance(var(mod))
 
-# TODO: Need to fix this
 
 class ListOut(Out):
 
@@ -665,6 +635,10 @@ class DivergeFactory(OpFactory):
             self._info
         )
 
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        
+        return DivergeFactory(self._op_factories, self._info.spawn(name, labels, annotation))
+
 diverge = DivergeFactory
 
 
@@ -705,11 +679,15 @@ class ParallelFactory(OpFactory):
             self._info
         )
 
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        
+        return ParallelFactory(self._op_factories, self._info.spawn(name, labels, annotation))
+
+
 parallel = ParallelFactory
 
 
 class Chain(OpFactory):
-    # need to allow for 
     def __init__(
         self, op_factory: OpFactory, attributes: typing.Union[var, typing.List[Kwargs]],
         info: Info=None
@@ -762,6 +740,10 @@ class Chain(OpFactory):
             self._info
         )
 
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        
+        return Chain(self._op_factory, self._attributes, self._info.spawn(name, labels, annotation))
+
 chain = Chain
 
 
@@ -786,7 +768,6 @@ class TensorInFactory(InFactory):
 
     def produce(self) -> In:
 
-        # size = self._out.produce(None, None, **kwargs)
         default = self._default(
             *self._size, device=self._device
         ) if self._call_default else self._default  
@@ -795,6 +776,10 @@ class TensorInFactory(InFactory):
             self._info.name, self._size, default, 
             self._info.labels, self._info.annotation
         )
+
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        
+        return TensorInFactory(self._size, self._default, self._call_default, self._device, self._info.spawn(name, labels, annotation))
 
 tensor_in = TensorInFactory
 
@@ -813,6 +798,11 @@ class ScalarInFactory(InFactory):
         default = self._default() if self._call_default else self._default    
         return In.from_scalar(self._info.name, self._type_, default, self._info.labels, self._info.annotation)
 
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        
+        return ScalarInFactory(self._type_, self._default, self._call_default, self._info.spawn(name, labels, annotation))
+
+
 scalar_in = ScalarInFactory
 
 
@@ -829,6 +819,10 @@ class ParameterFactory(InFactory):
 
         return Parameter(self._info.name, self._sz, self._reset_func, self._info.labels, self._info.annotation)
         
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        
+        return ParameterFactory(self._sz, self._reset_func, self._device, self._info.spawn(name, labels, annotation))
+
 param_in = ParameterFactory
 
 
@@ -897,20 +891,6 @@ class NetBuilder(object):
         self._net.set_default_interface(
             ins, outs
         )
-
-    # def build_learner(self, name: str, learn: Learn, test: Test, machine_mixins: typing.List[MachineMixin]=None) -> Learner:
-        
-    #     machine_mixins = machine_mixins or []
-
-    #     class _LearnerClass(learn, test, *machine_mixins, Learner):
-
-    #         __qualname__ = name
-
-    #         def __init__(self, *args, **kwargs):
-    #             super().__init__(*args, **kwargs)
-        
-    #     _LearnerClass.__name__ = name
-    #     return _LearnerClass(self.net)
         
 
 # define interface that must be defined in learn, test, machine mixins
@@ -921,25 +901,6 @@ class NetBuilder(object):
 # creates your learner object with the correct class
 # checks the interface of the network!
 
-
-# def mix(cls1, cls2):
-
-#     class cls3(cls1, cls2):
-
-#         pass
-
-#     return cls3
-
-# class Class1:
-
-#     def act(self):
-#         print('hi')
-
-# class Class2:
-#     def speak(self):
-#         print('hello')
-
-# Class3 = mix(Class1, Class2)
 
 # mod(nn.Linear, 2, 3).op(out=(-1, Sz(1))
 # mod(nn.Linear, 2, 3).op()
@@ -952,42 +913,7 @@ class NetBuilder(object):
 
 
 
-# labels
-
-
-# class Mod(object):
-
-#     def __init__(self, module: typing.Type[nn.Module], *args, **kwargs):
-
-#         self._module = module
-#         self._args = args
-#         self._kwargs = kwargs
-
-#     def to(self, **kwargs):
-#         my_kwargs = self._kwargs.remap(kwargs)
-#         my_args = self._args.remap(kwargs)
-#         return BasicOp(
-#             self._module, self._out, my_args, my_kwargs
-#         )
-
-
 # override(linear, )
-
-
-# class Override(OpFactory):
-
-#     def __init__(self, op_factory: OpFactory):
-        
-#         self._op_factory = op_factory
-
-#     def produce(self, in_: typing.List[Port], **kwargs) -> nn.Module:
-#         pass
-
-#     def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
-#         pass
-
-#     def remap(self, **kwargs):
-#         pass
 
 
 # @singledispatch
@@ -1008,100 +934,3 @@ class NetBuilder(object):
 # @op.register
 # def _(module, out: torch.Size, *args, **kwargs):
 #     return BasicOp(module, args, kwargs, [out_size])
-
-
-
-# class Var(Generic[T]):
-
-#     def __init__(self, value: T):
-#         self._value = value
-
-#     @property
-#     def value(self) -> T:
-#         return self._value
-
-
-# class Shared(Generic[T]):
-
-#     def __init__(self, var: Var[T]):
-#         self._var = var
-
-#     @property
-#     def value(self) -> T:
-#         return self._var.value
-
-
-# class DefinedOp(OpFactory):
-
-#     def __init__(
-#         self, module: typing.Union[typing.Type[nn.Module], Var], out_size: typing.List[torch.Size], name: str=None, labels: typing.List[str]=None,
-#         annotation: str=None
-#     ):
-#         self._var_module = VarModule(module)
-#         self._out_size = out_size
-#         self._annotation = annotation or ''
-#         self._name = name
-#         self._labels = labels or []
-    
-#     def produce_nodes(self, in_: typing.List[Port], **kwargs) -> typing.Iterator[Node]:
-#         var_module = self._var_module.produce(in_, **kwargs)
-#         name = self._name or type(var_module.module).__name__
-#         yield OpNode(name, var_module.module, in_, self._out_size, self._labels, self._annotation)
-
-#     def produce(self, in_size: torch.Size, **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
-#         var_module = self._var_module.produce(in_size, **kwargs)
-#         return var_module, self._out_size
-
-#     def to(self, **kwargs):
-#         var_module = self._var_module.to(**kwargs)
-
-#         return DefinedOp(
-#             var_module.module, self._out_size, self._name, self._labels, self._annotation
-#         )
-
-
-
-
-# class Mod(object):
-
-#     def __init__(self, mod: typing.Type[nn.Module], *args, **kwargs):
-
-#         self._module = mod
-#         self._args = Args(*args)
-#         self._kwargs = Kwargs(**kwargs)
-    
-#     @singledispatchmethod
-#     def _out(self, out_size):
-#         if out_size is None:
-#             return null_out
-#         if isinstance(out_size, _func_type):
-#             return out_size
-#         raise TypeError(f"Cannot process out_size of type {type(out_size).__name__}")
-    
-#     @_out.register
-#     def _(self, out_size: tuple):
-#         return TupleOut(out_size)
-
-#     @_out.register
-#     def _(self, out_size: Out):
-#         return out_size
-
-#     def op(self, out_size=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
-
-#         # name = name or self._module.__name__
-#         out_size = self._out(out_size)
-#         return BasicOp(
-#             self._module, out_size, self._args, self._kwargs, name=name, labels=labels, annotation=annotation
-#         )
-
-#     def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
-#         if isinstance(in_, Size):
-#             in_ = [in_]
-        
-#         my_kwargs = self._kwargs.lookup(in_, kwargs)
-#         my_args = self._args.lookup(in_, kwargs)
-#         module = self._module.to(**kwargs) if isinstance(self._module, Var) else self._module
-#         module = module(*my_args, **my_kwargs)
-#         return module
-
-# mod = Mod
