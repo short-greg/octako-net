@@ -6,19 +6,11 @@ for learning that operation and a testing algorithm for testing the operation.
 """
 
 from dataclasses import dataclass
-from torch.nn.modules.loss import CrossEntropyLoss, MSELoss
-from octako.modules.objectives import BinaryClassificationFitness, ClassificationFitness, Loss
 import typing
 import torch
 from . import networks
 import torch.optim
 import torch.nn
-from .construction import (
-    FeedForwardDirector,
-    NetworkBuilder,
-    TorchLossFactory,
-    ValidationFactory
-)
 from abc import ABC, abstractmethod
 
 
@@ -54,7 +46,24 @@ def dict_result_to_cpu(f):
     return wrapper
 
 
-class Learner(ABC):
+class LearnerMixin(object):
+
+    def check_interface(self, in_, out):
+        if in_ not in self._net:
+            raise ValueError(f"Inputs {in_} not in the network.")
+        
+        if out not in self._net:
+            raise ValueError(f'Outputs {out} not in the network.')
+
+    def __init__(self, net: networks.Network):
+
+        try:
+            getattr(self, '_net')
+        except AttributeError:
+            self._net = net
+
+
+class Learner(LearnerMixin):
     """Base learning machine class
     """
 
@@ -68,6 +77,10 @@ class Learner(ABC):
         """
         raise NotImplementedError
 
+
+class Tester(LearnerMixin):
+    """Base learning machine class
+    """
     @abstractmethod
     def test(self, x, t):
         """Function for evaluating the mapping from x to t
@@ -77,328 +90,360 @@ class Learner(ABC):
             t ([type]): The target values to map to
         """
         raise NotImplementedError
-    
-    @property
-    def fields(self):
+
+
+class Regressor(LearnerMixin):
+
+    @abstractmethod
+    def regress(self, x, t):
+
         raise NotImplementedError
 
 
-class LearningAlgorithm(ABC):
+class SimpleRegressor(Regressor):
 
-    @abstractmethod
-    def step(self, x, y):
-        pass
-
-
-class TestingAlgorithm(ABC):
-
-    @abstractmethod
-    def step(self, x, y):
-        pass
-
-
-class MinibatchLearningAlgorithm(LearningAlgorithm):
-
-    def __init__(self, optim_factory, network: networks.Network, x_name: str, target_name: str, agg_loss_name: str, validation_name: str, loss_names: str):
-
-        self._network = network
-        self._optim: torch.optim.Optimizer = optim_factory(self._network.parameters())
-        self._agg_loss_name = agg_loss_name
-        self._validation_name = validation_name
-        self._loss_names = loss_names
-        self._target_name = target_name
-        self._x_name = x_name
-
-    def step(self, x, t):
+    def __init__(self, net):
+        super().__init__(net)
+        self.check_interface(self, 'x', 'y')
     
-        self._optim.zero_grad()
-        results = self._network.probe(
-            [self._agg_loss_name, self._validation_name, *self._loss_names], by={self._x_name: x, self._target_name: t}
-        )
-        loss: torch.Tensor = results[self._agg_loss_name]
-        loss.backward()
-        self._optim.step()
-        return results
+    def regress(self, x: torch.Tensor):
+        return self._net.probe('y', by={x: x})['y']
 
 
-class MinibatchTestingAlgorithm(TestingAlgorithm):
-
-    def __init__(self, network: networks.Network, x_name: str, target_name: str, agg_loss_name: str, validation_name: str, loss_names: str):
-
-        self._network = network
-        self._agg_loss_name = agg_loss_name
-        self._validation_name = validation_name
-        self._loss_names = loss_names
-        self._target_name = target_name
-        self._x_name = x_name
-
-    def step(self, x, t):
-        
-        return self._network.probe(
-            [self._agg_loss_name, self._validation_name, *self._loss_names], by={self._x_name: x, self._target_name: t}
-        )
-
-
-class IMachine(torch.nn.Module, ABC):
-
-    @abstractmethod
-    def forward(self, *x: torch.Tensor):
-        pass
-
-
-class IClassifier(IMachine):
+class Classifier(LearnerMixin):
 
     @abstractmethod
     def classify(self, x: torch.Tensor):
-        pass
+        raise NotImplementedError
 
 
-class IRegressor(IMachine):
+class BinaryClassifier(Classifier):
 
-    @abstractmethod
-    def regress(self, x: torch.Tensor):
-        pass
+    def __init__(self, net):
+        super().__init__(net)
+        self.check_interface(self, 'x', 'y')
+
+    def classify(self, x: torch.Tensor):
+        y = self._net.probe('y', by={x: x})['y']
+        return (y >= 0.5).float()
 
 
-class IUpdater(ABC):
+
+# class MinibatchLearningAlgorithm(LearningAlgorithm):
+
+#     def __init__(self, optim_factory, network: networks.Network, x_name: str, target_name: str, agg_loss_name: str, validation_name: str, loss_names: str):
+
+#         self._network = network
+#         self._optim: torch.optim.Optimizer = optim_factory(self._network.parameters())
+#         self._agg_loss_name = agg_loss_name
+#         self._validation_name = validation_name
+#         self._loss_names = loss_names
+#         self._target_name = target_name
+#         self._x_name = x_name
+
+#     def step(self, x, t):
     
-    @abstractmethod
-    def learn(self, x: torch.Tensor, t: torch.Tensor):
-        pass
+#         self._optim.zero_grad()
+#         results = self._network.probe(
+#             [self._agg_loss_name, self._validation_name, *self._loss_names], by={self._x_name: x, self._target_name: t}
+#         )
+#         loss: torch.Tensor = results[self._agg_loss_name]
+#         loss.backward()
+#         self._optim.step()
+#         return results
 
 
-class ITester(object):
+# class MinibatchTestingAlgorithm(TestingAlgorithm):
 
-    @abstractmethod
-    def test(self, x: torch.Tensor, t: torch.Tensor):
-        pass
+#     def __init__(self, network: networks.Network, x_name: str, target_name: str, agg_loss_name: str, validation_name: str, loss_names: str):
 
+#         self._network = network
+#         self._agg_loss_name = agg_loss_name
+#         self._validation_name = validation_name
+#         self._loss_names = loss_names
+#         self._target_name = target_name
+#         self._x_name = x_name
 
-class BinaryClassifier(Learner):
-
-    OUT_NAME = 'y'
-    TARGET_NAME = 't'
-    INPUT_NAME = 'x'
-    LOSS_NAME = 'Loss'
-    VALIDATION_NAME = 'Classification'
-
-    def __init__(
-        self, director: FeedForwardDirector, 
-        learning_algorithm_cls: typing.Type[LearningAlgorithm],
-        testing_algorithm_cls: typing.Type[TestingAlgorithm],
-        optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
-        device='cpu'
-    ):
-        self._device = device
-        director.input_name = self.INPUT_NAME
-        director.output_name = self.OUT_NAME 
-        self._network = self._add_objective(director.produce())
-
-        self._learning_algorithm = learning_algorithm_cls(
-            optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 
-            self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
-        )
-        self._testing_algorithm = testing_algorithm_cls(
-            self._network, self.INPUT_NAME, self.TARGET_NAME, self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
-        )
-        self._classification_interface = networks.NetworkInterface(
-            self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
-        )
-
-    def _add_objective(self, network: networks.Network) -> networks.Network:
-
-        constructor = NetworkBuilder(network)
-        target_size = torch.Size([-1])
-        out, = constructor[[self.OUT_NAME]].ports
-
-        target, = constructor.add_tensor_input(self.TARGET_NAME, target_size, labels=["target"])
-        constructor.add_op(
-            self.LOSS_NAME, 
-            TorchLossFactory(torch_loss_cls=torch.nn.BCELoss).produce(out.size), 
-            [out, target], "loss"
-        )
-        constructor.add_op(
-            self.VALIDATION_NAME, 
-            ValidationFactory(validation_cls=BinaryClassificationFitness).produce(out.size), 
-            [out, target], "validation"
-        )
+#     def step(self, x, t):
         
-        constructor.net.to(self._device)
-        return constructor.net
+#         return self._network.probe(
+#             [self._agg_loss_name, self._validation_name, *self._loss_names], by={self._x_name: x, self._target_name: t}
+#         )
 
-    @property
-    def fields(self):
-        return ['Loss', 'Classification']
+
+# class LearningAlgorithm(ABC):
+
+#     @abstractmethod
+#     def step(self, x, y):
+#         pass
+
+
+# class TestingAlgorithm(ABC):
+
+#     @abstractmethod
+#     def step(self, x, y):
+#         pass
+
+# class IMachine(torch.nn.Module, ABC):
+
+#     @abstractmethod
+#     def forward(self, *x: torch.Tensor):
+#         pass
+
+
+# class IClassifier(IMachine):
+
+#     @abstractmethod
+#     def classify(self, x: torch.Tensor):
+#         pass
+
+
+# class IRegressor(IMachine):
+
+#     @abstractmethod
+#     def regress(self, x: torch.Tensor):
+#         pass
+
+
+# class IUpdater(ABC):
     
-    @args_to_device
-    @result_to_cpu
-    def classify(self, x):
-        p = self._classification_interface.forward(x)
-        return (p >= 0.5).float().to(self._device)
-
-    @args_to_device
-    @dict_result_to_cpu
-    def learn(self, x, t):
-        return self._learning_algorithm.step(x, t)
-
-    @args_to_device
-    @dict_result_to_cpu
-    def test(self, x, t):
-        return self._testing_algorithm.step(x, t)
-
-    @property
-    def maximize_validation(self):
-        return True
+#     @abstractmethod
+#     def learn(self, x: torch.Tensor, t: torch.Tensor):
+#         pass
 
 
-class Multiclass(Learner):
+# class ITester(object):
 
-    OUT_NAME = 'y'
-    TARGET_NAME = 't'
-    INPUT_NAME = 'x'
-    LOSS_NAME = 'loss'
-    VALIDATION_NAME = 'classification'
-    FUZZY_OUT_NAME = 'fuzzy_y'
+#     @abstractmethod
+#     def test(self, x: torch.Tensor, t: torch.Tensor):
+#         pass
 
-    def __init__(
-        self, director: FeedForwardDirector, n_classes: int,
-        learning_algorithm_cls: typing.Type[LearningAlgorithm],
-        testing_algorithm_cls: typing.Type[TestingAlgorithm],
-        optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
-        device='cpu'
-    ):
-        self._device = device
 
-        director.input_name = self.INPUT_NAME
-        director.output_name = self.OUT_NAME 
-        self._network = self._add_objective(director)
+# class BinaryClassifier(Learner):
 
-        self._learning_algorithm = learning_algorithm_cls(
-            optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 
-            self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
-        )
-        self._testing_algorithm = testing_algorithm_cls(
-            self._network, self.INPUT_NAME, self.TARGET_NAME, self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
-        )
-        self._classification_interface = networks.NetworkInterface(
-            self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
-        )
-        self._device = device
+#     OUT_NAME = 'y'
+#     TARGET_NAME = 't'
+#     INPUT_NAME = 'x'
+#     LOSS_NAME = 'Loss'
+#     VALIDATION_NAME = 'Classification'
 
-    def _add_objective(self, network: networks.Network):
+#     def __init__(
+#         self, director: FeedForwardDirector, 
+#         learning_algorithm_cls: typing.Type[LearningAlgorithm],
+#         testing_algorithm_cls: typing.Type[TestingAlgorithm],
+#         optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
+#         device='cpu'
+#     ):
+#         self._device = device
+#         director.input_name = self.INPUT_NAME
+#         director.output_name = self.OUT_NAME 
+#         self._network = self._add_objective(director.produce())
 
-        constructor = NetworkBuilder(network)
-        out, = constructor[[self.FUZZY_OUT_NAME]].ports
-        target, = constructor.add_tensor_input(self.TARGET_NAME, out.size, labels=["target"])
+#         self._learning_algorithm = learning_algorithm_cls(
+#             optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 
+#             self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
+#         )
+#         self._testing_algorithm = testing_algorithm_cls(
+#             self._network, self.INPUT_NAME, self.TARGET_NAME, self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
+#         )
+#         self._classification_interface = networks.NetworkInterface(
+#             self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
+#         )
 
-        out, = constructor.add_lambda_op(
-            self.OUT_NAME, lambda x: torch.log(x), out.size, [out], "out"
-        )
-        constructor.add_op(
-            self.LOSS_NAME, TorchLossFactory(torch_loss_cls=CrossEntropyLoss).produce(out.size), [out, target], "loss"
-        )
-        constructor.add_op(
-            self.VALIDATION_NAME, 
-            ValidationFactory(validation_cls=ClassificationFitness).produce(out.size), 
-            [out, target], "validation"
-        )
+#     def _add_objective(self, network: networks.Network) -> networks.Network:
+
+#         constructor = NetworkBuilder(network)
+#         target_size = torch.Size([-1])
+#         out, = constructor[[self.OUT_NAME]].ports
+
+#         target, = constructor.add_tensor_input(self.TARGET_NAME, target_size, labels=["target"])
+#         constructor.add_op(
+#             self.LOSS_NAME, 
+#             TorchLossFactory(torch_loss_cls=torch.nn.BCELoss).produce(out.size), 
+#             [out, target], "loss"
+#         )
+#         constructor.add_op(
+#             self.VALIDATION_NAME, 
+#             ValidationFactory(validation_cls=BinaryClassificationFitness).produce(out.size), 
+#             [out, target], "validation"
+#         )
         
-        network = constructor.net
-        network.to(self._device)
-        return network
+#         constructor.net.to(self._device)
+#         return constructor.net
 
-    @property
-    def fields(self):
-        return ['Loss', 'Classification']
+#     @property
+#     def fields(self):
+#         return ['Loss', 'Classification']
     
-    @args_to_device
-    @result_to_cpu
-    def classify(self, x):
-        p = torch.nn.Softmax(self._classification_interface.forward(x), dim=1)(x)
-        return torch.argmax(p, dim=1)
+#     @args_to_device
+#     @result_to_cpu
+#     def classify(self, x):
+#         p = self._classification_interface.forward(x)
+#         return (p >= 0.5).float().to(self._device)
 
-    @args_to_device
-    @dict_result_to_cpu
-    def learn(self, x, t):
-        return self._learning_algorithm.step(x, t)
+#     @args_to_device
+#     @dict_result_to_cpu
+#     def learn(self, x, t):
+#         return self._learning_algorithm.step(x, t)
 
-    @args_to_device
-    @dict_result_to_cpu
-    def test(self, x, t):
-        return self._testing_algorithm.step(x, t)
+#     @args_to_device
+#     @dict_result_to_cpu
+#     def test(self, x, t):
+#         return self._testing_algorithm.step(x, t)
 
-    @property
-    def maximize_validation(self):
-        return True
+#     @property
+#     def maximize_validation(self):
+#         return True
 
 
-class Regressor(Learner):
+# class Multiclass(Learner):
 
-    OUT_NAME = 'y'
-    TARGET_NAME = 't'
-    INPUT_NAME = 'x'
-    LOSS_NAME = 'loss'
-    VALIDATION_NAME = 'validation'
+#     OUT_NAME = 'y'
+#     TARGET_NAME = 't'
+#     INPUT_NAME = 'x'
+#     LOSS_NAME = 'loss'
+#     VALIDATION_NAME = 'classification'
+#     FUZZY_OUT_NAME = 'fuzzy_y'
 
-    def __init__(
-        self, director: FeedForwardDirector, 
-        learning_algorithm_cls: typing.Type[LearningAlgorithm],
-        testing_algorithm_cls: typing.Type[TestingAlgorithm],
-        optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
-        device='cpu'
-    ):
-        self._device = device
-        director.input_name = self.INPUT_NAME
-        director.output_name = self.OUT_NAME 
-        self._network = self._add_objective(director.produce())
+#     def __init__(
+#         self, director: FeedForwardDirector, n_classes: int,
+#         learning_algorithm_cls: typing.Type[LearningAlgorithm],
+#         testing_algorithm_cls: typing.Type[TestingAlgorithm],
+#         optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
+#         device='cpu'
+#     ):
+#         self._device = device
 
-        self._learning_algorithm = learning_algorithm_cls(
-            optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 
-            self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
-        )
-        self._testing_algorithm = testing_algorithm_cls(
-            self._network, self.INPUT_NAME, self.TARGET_NAME, self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
-        )
-        self._classification_interface = networks.NetworkInterface(
-            self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
-        )
+#         director.input_name = self.INPUT_NAME
+#         director.output_name = self.OUT_NAME 
+#         self._network = self._add_objective(director)
 
-    def _add_objective(self, network: networks.Network):
+#         self._learning_algorithm = learning_algorithm_cls(
+#             optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 
+#             self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
+#         )
+#         self._testing_algorithm = testing_algorithm_cls(
+#             self._network, self.INPUT_NAME, self.TARGET_NAME, self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
+#         )
+#         self._classification_interface = networks.NetworkInterface(
+#             self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
+#         )
+#         self._device = device
 
-        # Can probably put this in the base class
-        constructor = NetworkBuilder(network)
-        in_, out = constructor[[self.INPUT_NAME, self.OUT_NAME]].ports
-        target = constructor.add_tensor_input(self.TARGET_NAME, out.size, labels=["target"])
+#     def _add_objective(self, network: networks.Network):
 
-        constructor.add_op(
-            self.LOSS_NAME, TorchLossFactory(torch_loss_cls=MSELoss), [out, target], "loss"
-        )
-        constructor.add_op(
-            self.VALIDATION_NAME, TorchLossFactory(torch_loss_cls=MSELoss), [out, target], "validation"
-        )
+#         constructor = NetworkBuilder(network)
+#         out, = constructor[[self.FUZZY_OUT_NAME]].ports
+#         target, = constructor.add_tensor_input(self.TARGET_NAME, out.size, labels=["target"])
 
-        constructor.net.to(self._device)
-        return constructor.net
+#         out, = constructor.add_lambda_op(
+#             self.OUT_NAME, lambda x: torch.log(x), out.size, [out], "out"
+#         )
+#         constructor.add_op(
+#             self.LOSS_NAME, TorchLossFactory(torch_loss_cls=CrossEntropyLoss).produce(out.size), [out, target], "loss"
+#         )
+#         constructor.add_op(
+#             self.VALIDATION_NAME, 
+#             ValidationFactory(validation_cls=ClassificationFitness).produce(out.size), 
+#             [out, target], "validation"
+#         )
+        
+#         network = constructor.net
+#         network.to(self._device)
+#         return network
 
-    @property
-    def fields(self):
-        return ['Loss', 'Regression']
+#     @property
+#     def fields(self):
+#         return ['Loss', 'Classification']
     
-    @args_to_device
-    @result_to_cpu
-    def regress(self, x):
-        return self._regression_interface.forward(x)
+#     @args_to_device
+#     @result_to_cpu
+#     def classify(self, x):
+#         p = torch.nn.Softmax(self._classification_interface.forward(x), dim=1)(x)
+#         return torch.argmax(p, dim=1)
 
-    @args_to_device
-    @dict_result_to_cpu
-    def learn(self, x, t):
-        return self._learning_algorithm.step(x, t)
+#     @args_to_device
+#     @dict_result_to_cpu
+#     def learn(self, x, t):
+#         return self._learning_algorithm.step(x, t)
 
-    @args_to_device
-    @dict_result_to_cpu
-    def test(self, x, t):
-        return self._testing_algorithm.step(x, t)
+#     @args_to_device
+#     @dict_result_to_cpu
+#     def test(self, x, t):
+#         return self._testing_algorithm.step(x, t)
+
+#     @property
+#     def maximize_validation(self):
+#         return True
+
+
+# class Regressor(Learner):
+
+#     OUT_NAME = 'y'
+#     TARGET_NAME = 't'
+#     INPUT_NAME = 'x'
+#     LOSS_NAME = 'loss'
+#     VALIDATION_NAME = 'validation'
+
+#     def __init__(
+#         self, director: FeedForwardDirector, 
+#         learning_algorithm_cls: typing.Type[LearningAlgorithm],
+#         testing_algorithm_cls: typing.Type[TestingAlgorithm],
+#         optim_factory: typing.Callable[[torch.nn.ParameterList], torch.optim.Optimizer]=torch.optim.Adam, 
+#         device='cpu'
+#     ):
+#         self._device = device
+#         director.input_name = self.INPUT_NAME
+#         director.output_name = self.OUT_NAME 
+#         self._network = self._add_objective(director.produce())
+
+#         self._learning_algorithm = learning_algorithm_cls(
+#             optim_factory, self._network, self.INPUT_NAME, self.TARGET_NAME, 
+#             self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
+#         )
+#         self._testing_algorithm = testing_algorithm_cls(
+#             self._network, self.INPUT_NAME, self.TARGET_NAME, self.LOSS_NAME, self.VALIDATION_NAME, [self.LOSS_NAME]
+#         )
+#         self._classification_interface = networks.NetworkInterface(
+#             self._network, [self.INPUT_NAME, self.TARGET_NAME], [self.OUT_NAME]
+#         )
+
+#     def _add_objective(self, network: networks.Network):
+
+#         # Can probably put this in the base class
+#         constructor = NetworkBuilder(network)
+#         in_, out = constructor[[self.INPUT_NAME, self.OUT_NAME]].ports
+#         target = constructor.add_tensor_input(self.TARGET_NAME, out.size, labels=["target"])
+
+#         constructor.add_op(
+#             self.LOSS_NAME, TorchLossFactory(torch_loss_cls=MSELoss), [out, target], "loss"
+#         )
+#         constructor.add_op(
+#             self.VALIDATION_NAME, TorchLossFactory(torch_loss_cls=MSELoss), [out, target], "validation"
+#         )
+
+#         constructor.net.to(self._device)
+#         return constructor.net
+
+#     @property
+#     def fields(self):
+#         return ['Loss', 'Regression']
     
-    @property
-    def maximize_validation(self):
-        return False
+#     @args_to_device
+#     @result_to_cpu
+#     def regress(self, x):
+#         return self._regression_interface.forward(x)
+
+#     @args_to_device
+#     @dict_result_to_cpu
+#     def learn(self, x, t):
+#         return self._learning_algorithm.step(x, t)
+
+#     @args_to_device
+#     @dict_result_to_cpu
+#     def test(self, x, t):
+#         return self._testing_algorithm.step(x, t)
+    
+#     @property
+#     def maximize_validation(self):
+#         return False

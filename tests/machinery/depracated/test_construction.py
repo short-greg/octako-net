@@ -7,8 +7,8 @@ from torch._C import Size
 from torch.nn.modules import dropout
 from torch.nn.modules.activation import Sigmoid
 from torch.nn.modules.linear import Linear
-from octako.machinery.construction import UNDEFINED, ActivationFactory, AggregateFactory, BaseInput, BaseNetwork, ConvolutionFactory, DimAggregateFactory, DropoutFactory, LinearFactory, NetworkBuilder, NormalizerFactory, NullFactory, RegularizerFactory, RepeatFactory, ScalerFactory, TorchLossFactory, ValidationFactory, ViewFactory
-from octako.machinery.construction import check_undefined, is_undefined
+from octako.machinery.depracated.construction import UNDEFINED, ActivationFactory, AggregateFactory, BaseInput, BaseNetwork, ConvolutionFactory, DimAggregateFactory, DropoutFactory, LinearFactory, NetworkBuilder, NormalizerFactory, NullFactory, RegularizerFactory, RepeatFactory, ScalerFactory, TorchLossFactory, ValidationFactory, ViewFactory
+from octako.machinery.depracated.construction import check_undefined, is_undefined
 from octako.modules import objectives
 
 
