@@ -6,7 +6,6 @@ for learning that operation and a testing algorithm for testing the operation.
 """
 
 from dataclasses import dataclass
-import typing
 import torch
 from . import networks
 import torch.optim
@@ -48,19 +47,21 @@ def dict_result_to_cpu(f):
 
 class LearnerMixin(object):
 
-    def check_interface(self, in_, out):
-        if in_ not in self._net:
+    def check_interface(self, net: networks.Network, in_, out):
+        if in_ not in net:
             raise ValueError(f"Inputs {in_} not in the network.")
         
-        if out not in self._net:
+        if out not in net:
             raise ValueError(f'Outputs {out} not in the network.')
 
-    def __init__(self, net: networks.Network):
+    def __init__(self, net):
+        """initializer for learner. Will only be executed once
 
-        try:
-            getattr(self, '_net')
-        except AttributeError:
-            self._net = net
+        Args:
+            net : Network used by learner. Can be a "Network" or an
+            object composed of multiple networks
+        """
+        self._net = net
 
 
 class Learner(LearnerMixin):
@@ -96,7 +97,6 @@ class Regressor(LearnerMixin):
 
     @abstractmethod
     def regress(self, x, t):
-
         raise NotImplementedError
 
 
@@ -169,54 +169,6 @@ class BinaryClassifier(Classifier):
 #         return self._network.probe(
 #             [self._agg_loss_name, self._validation_name, *self._loss_names], by={self._x_name: x, self._target_name: t}
 #         )
-
-
-# class LearningAlgorithm(ABC):
-
-#     @abstractmethod
-#     def step(self, x, y):
-#         pass
-
-
-# class TestingAlgorithm(ABC):
-
-#     @abstractmethod
-#     def step(self, x, y):
-#         pass
-
-# class IMachine(torch.nn.Module, ABC):
-
-#     @abstractmethod
-#     def forward(self, *x: torch.Tensor):
-#         pass
-
-
-# class IClassifier(IMachine):
-
-#     @abstractmethod
-#     def classify(self, x: torch.Tensor):
-#         pass
-
-
-# class IRegressor(IMachine):
-
-#     @abstractmethod
-#     def regress(self, x: torch.Tensor):
-#         pass
-
-
-# class IUpdater(ABC):
-    
-#     @abstractmethod
-#     def learn(self, x: torch.Tensor, t: torch.Tensor):
-#         pass
-
-
-# class ITester(object):
-
-#     @abstractmethod
-#     def test(self, x: torch.Tensor, t: torch.Tensor):
-#         pass
 
 
 # class BinaryClassifier(Learner):
