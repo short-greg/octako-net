@@ -1,7 +1,7 @@
 import dataclasses
 import typing
 from attr import field
-from octako.machinery import learners
+from octako import learners
 from abc import ABC, abstractmethod, abstractproperty
 import pandas as pd
 from . import events

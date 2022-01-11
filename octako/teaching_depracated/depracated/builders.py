@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import dataclasses
 import typing
 from torch.utils import data as torch_data
-from octako.machinery import learners
+from octako import learners
 from octako.teaching.dojos import GoalSetter, LearnerType, ObserverInviter, StandardGoal, StandardTeacher, StandardTeachingNetwork, Teacher, TeacherInviter
 from octako.teaching.observers import ProgressBar, TriggerInviter
 

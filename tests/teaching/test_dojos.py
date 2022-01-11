@@ -1,5 +1,5 @@
 from octako.teaching import dojos
-from octako.machinery import learners
+from octako import learners
 import torch.utils.data
 import torch
 import pandas as pd

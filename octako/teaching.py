@@ -1,149 +1,205 @@
-from sango.nodes import Action, Conditional, Status, Task, TickDecorator, Tree, action, decorate, loads_, loads, task, task_, until, var
-from sango.vars import Ref, Var
+import typing
+from sango.nodes import STORE_REF, Action, Conditional, Status, Task, TaskDecorator, TickDecorator, TickDecorator2nd, Tree, action, cond, decorate, loads_, loads, task, task_, until, var
+from sango.vars import Ref, Var, ref
 from torch.types import Storage
+from torch.utils.data.dataset import Dataset
+from octako.machinery.networks import Network
+
+from octako.modules import Parallel
 from .construction import Sequence
 from .learners import Learner, Tester
 from tqdm import tqdm
 from functools import partial
+from dataclasses import dataclass, is_dataclass
+import pandas as pd
 
 
-def progress_bar(iterations: int):
 
-    pbar: tqdm = None
-    final_status = None
+@dataclass
+class Progress:
 
-    def _(node: Task):
-    
-        nonlocal iterations
-        if isinstance(iterations, Ref):
-            iterations = iterations.shared(node._storage)
+    name: str
+    total_epochs: int
+    cur_epoch: int = 0
+    total_iterations: int = 0 
+    cur_iteration: int = 0
 
-        def tick(node: Action, wrapped_tick):
-            nonlocal pbar
-            nonlocal final_status
-            if pbar is None:
-                pbar = tqdm(total=iterations)
-                pbar.set_description_str(f'{node.name}')
-                pbar.update(1)
-                # TODO: How to get the results ub
-                # self.pbar.total = lecture.n_lesson_iterations
-                # self.pbar.set_postfix(lecture.results.mean(axis=0).to_dict())
-                pbar.refresh()
-                return Status.RUNNING
-            
-            if final_status is None:
 
-                status = wrapped_tick()
-                if status.done:
-                    final_status = status
-                return Status.RUNNING
+class ProgressRecorder(object):
 
-            pbar.close()
-            return final_status
+    def __init__(self):
+        self._progresses = {}
+        self._cur_progress: str = None
+
+    def add(self, name: str, n_epochs: int):
+        if name not in self._progresses:
+            raise ValueError(f'Progress named {name} already exists.')
         
-        return TickDecorator(node, tick)
-    return _
+        self._progresses[name] = Progress(name, n_epochs)
 
-
-def upto(iterations: int):
-
-    def _(node: Task):
-    
-        i = 0
-        nonlocal iterations
-        if isinstance(iterations, Ref):
-            iterations = iterations.shared(node._storage)
-
-        def tick(node: Action, wrapped_tick):
-            nonlocal i
-            if i >= iterations:
-                return Status.DONE
-            result = wrapped_tick()
-            if result == Status.FAILURE:
-                return result
-            
-            i += 1
-            if i == iterations:
-                return Status.SUCCESS
-            return Status.RUNNING
+    def change(self, name: str):
+        if name not in self._progresses:
+            raise ValueError(f'Progress named {name} does not exist.')
         
-        return TickDecorator(node, tick)
-    return _
+        self._cur_progress = name
+
+    @property
+    def cur(self) -> Progress:
+        return self._progresses[self._cur_progress]
+    
+    def adv_epoch(self):
+        self.cur.cur_epoch += 1
+
+    def adv_iter(self):
+        self.cur.cur_iteration += 1
 
 
-def progress_bar_(iterations: int):
+class Results:
+    
+    def __init__(self):
+        
+        self.df = pd.DataFrame()
+        self._progress_cols = set()
+        self._result_cols = set
+    
+    def add_result(self, teacher: str, progress: Progress, results: typing.Dict[str, float]):
 
-    return partial(progress_bar, iterations=iterations)
+        self._progress_cols.update(
+            progress.to_dict().keys()
+        )
+
+        self._result_cols.update(
+            results.keys()
+        )
+
+        self.df.loc[len[self.df]] = {
+            self.teacher_col: teacher,
+            **progress.to_dict(),
+            **results
+        }
+    
+    @property
+    def teacher_col(self):
+        return "Teacher"
+    
+    @property
+    def result_cols(self):
+        return set(*self._result_cols)
+    
+    @property
+    def progress_cols(self):
+        return set(*self._progress_cols)
 
 
 class Train(Action):
     
-    dataset = Var()
-    learner: Learner = Var()
     result = Var()
 
-    def __init__(self, optim):
+    def __init__(self, learner: Var[Learner], dataset: Var[Dataset], results: Var[Results]):
 
-        self._optim = optim
+        self._learner = learner
+        self._dataset = dataset
         self._iter = None
-        self._results = []
+        self._results = results
 
     def act(self):
 
         if self._iter is None:
-            self._iter = iter(self.dataset)
+            self._iter = iter(self._dataset.value)
         
         try:
             x, t = next(self._iter)
-            self._results.append(self.learner.learn(x, t))
-            return Status.RUNNING
         except StopIteration:
-            pass
-        
-        yield Status.SUCCESS
+            return Status.SUCCESS
+
+        result = self._learner.value.learn(x, t)
+        self._results.value.store('Validation', self._progress.cur, result)
+        return Status.RUNNING
 
 
-class Test(Action):
+class Validate(Action):
     
-    dataset = Var()
-    tester: Tester = Var()
     result = Var()
 
-    def __init__(self, optim):
+    def __init__(self, tester: Var[Tester], dataset: Var[Dataset], results: Var[Results]):
 
-        self._optim = optim
-        self._results = []
-
-    def reset(self):
-
-        self._results = []
+        self._tester = tester
+        self._dataset = dataset
+        self._iter = None
+        self._results = results
 
     def act(self):
-        
+
         if self._iter is None:
-            self._iter = iter(self.dataset)
+            self._iter = iter(self._dataset.value)
         
         try:
             x, t = next(self._iter)
-            self._results.append(self.tester.test(x, t))
-            return Status.RUNNING
         except StopIteration:
-            pass
+            return Status.SUCCESS
+
+        result = self._tester.value.test(x, t)
+        self._results.value.store('Validation', self._progress.cur, result)
+        return Status.RUNNING
+
+
+class Trainer(Tree):
+
+    n_batches = var(10)
+    batch_size = var(32)
+    validation_dataset = var()
+    training_dataset = var()
+    network = var()
+
+    @task
+    class entry(Parallel):
+        update_progress = action('update_progress_bar')
+
+        @task
+        class train(Sequence):
+            execute = action('execute', STORE_REF)
+            class epoch(Sequence):
+                train = task_(Train, ref.network, ref.training_dataset, ref.results)
+                validate = task_(Validate, ref.network, ref.validation_dataset, ref.results)
+
+
+    def __init__(self, name: str, network: Network):
+        super().__init__(name)
+        self._progress = ProgressRecorder()
+        self._network.value = network
+
+    def load_datasets(self):
+        pass
+
+    def execute(self, store: Storage):
+        cur_batch = store.get_or_create('cur_batch', 0)
+
+        if cur_batch.val == self._n_batches:
+            return Status.FAILURE
+
+        cur_batch.val += 1
+        self._progress.complete()
+
+        return Status.SUCCESS
+
+    def update_progress_bar(self, store: Storage):
         
-        yield Status.SUCCESS
+        pbar = store.get_or_create('pbar')
 
+        if self._progress.completed:
+            if not pbar.empty(): pbar.close()
+            return Status.SUCCESS
+        
+        if pbar.is_empty():
+            pbar.val = tqdm(total=self._progress.cur.total_iterations)
+        pbar.set_description_str(self._progress.cur.name)
+        pbar.update(1)
 
-# def neg(node: Task):
+        # self.pbar.total = lecture.n_lesson_iterations
+        # self.pbar.set_postfix(lecture.results.mean(axis=0).to_dict())
+        # pbar.refresh()
+        return Status.RUNNING
 
-#     def tick(node: Task, wrapped_tick):
-#         status = wrapped_tick()
-#         if status == Status.SUCCESS:
-#             return Status.FAILURE
-#         elif status == Status.FAILURE:
-#             return Status.SUCCESS
-#         return status
-    
-#     return TickDecorator(node, tick)
 
 class LoadDatasets(Action):
     
@@ -163,6 +219,90 @@ class LoadDatasets(Action):
         
         # load the material
         pass
+
+
+
+# def progress_bar(iterations: int):
+
+#     pbar: tqdm = None
+#     final_status = None
+
+#     def _(node: Task):
+    
+#         nonlocal iterations
+#         if isinstance(iterations, Ref):
+#             iterations = iterations.shared(node._storage)
+
+#         def tick(node: Action, wrapped_tick):
+#             nonlocal pbar
+#             nonlocal final_status
+#             if pbar is None:
+#                 pbar = tqdm(total=iterations)
+#                 pbar.set_description_str(f'{node.name}')
+#                 pbar.update(1)
+#                 # TODO: How to get the results ub
+#                 # self.pbar.total = lecture.n_lesson_iterations
+#                 # self.pbar.set_postfix(lecture.results.mean(axis=0).to_dict())
+#                 pbar.refresh()
+#                 return Status.RUNNING
+            
+#             if final_status is None:
+
+#                 status = wrapped_tick()
+#                 if status.done:
+#                     final_status = status
+#                 return Status.RUNNING
+
+#             pbar.close()
+#             return final_status
+        
+#         return TickDecorator(node, tick)
+#     return _
+
+
+
+# def neg(node: Task):
+
+#     def tick(node: Task, wrapped_tick):
+#         status = wrapped_tick()
+#         if status == Status.SUCCESS:
+#             return Status.FAILURE
+#         elif status == Status.FAILURE:
+#             return Status.SUCCESS
+#         return status
+    
+#     return TickDecorator(node, tick)
+
+# def upto(iterations: int):
+
+#     def _(node: Task):
+    
+#         i = 0
+#         nonlocal iterations
+#         if isinstance(iterations, Ref):
+#             iterations = iterations.shared(node._storage)
+
+#         def tick(node: Action, wrapped_tick):
+#             nonlocal i
+#             if i >= iterations:
+#                 return Status.DONE
+#             result = wrapped_tick()
+#             if result == Status.FAILURE:
+#                 return result
+            
+#             i += 1
+#             if i == iterations:
+#                 return Status.SUCCESS
+#             return Status.RUNNING
+        
+#         return TickDecorator(node, tick)
+#     return _
+
+
+# def progress_bar_(iterations: int):
+
+#     return partial(progress_bar, iterations=iterations)
+
 
 
 # class Trainer(Tree):

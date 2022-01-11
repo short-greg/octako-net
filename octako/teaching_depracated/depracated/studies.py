@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from octako.machinery import learners
+from octako import learners
 from . import dojos
 from dataclasses import dataclass
 import typing
