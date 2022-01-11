@@ -1,6 +1,7 @@
+from abc import abstractmethod
 import typing
 from sango.nodes import STORE_REF, Action, Conditional, Status, Task, TaskDecorator, TickDecorator, TickDecorator2nd, Tree, action, cond, decorate, loads_, loads, task, task_, until, var
-from sango.vars import Ref, Var, ref
+from sango.vars import Const, Ref, Var, ref
 from torch.types import Storage
 from torch.utils.data.dataset import Dataset
 from octako.machinery.networks import Network
@@ -12,6 +13,8 @@ from tqdm import tqdm
 from functools import partial
 from dataclasses import dataclass, is_dataclass
 import pandas as pd
+from torch.utils.data import Dataset, DataLoader
+from typing import Union
 
 
 
@@ -27,28 +30,44 @@ class Progress:
 
 class ProgressRecorder(object):
 
-    def __init__(self):
+    def __init__(self, default_epochs: int=1):
         self._progresses = {}
         self._cur_progress: str = None
+        self._default_epochs = default_epochs
 
-    def add(self, name: str, n_epochs: int):
+    def add(self, name: str, n_epochs: int=None, total_iterations: int=0, switch=True):
         if name not in self._progresses:
             raise ValueError(f'Progress named {name} already exists.')
         
-        self._progresses[name] = Progress(name, n_epochs)
+        n_epochs = n_epochs if n_epochs is not None else self._default_epochs
 
-    def change(self, name: str):
+        self._progresses[name] = Progress(
+            name, n_epochs, total_iterations=total_iterations
+        )
+        if switch: self.switch(name)
+
+    def switch(self, name: str):
         if name not in self._progresses:
             raise ValueError(f'Progress named {name} does not exist.')
         
         self._cur_progress = name
+    
+    def get(self, name: str):
+        return self._progresses[name]
+    
+    def names(self):
+        return list(self._progresses.keys())
 
     @property
     def cur(self) -> Progress:
         return self._progresses[self._cur_progress]
     
-    def adv_epoch(self):
+    def complete(self):
+        self._completed = True
+    
+    def adv_epoch(self, total_iterations=0):
         self.cur.cur_epoch += 1
+        self.cur.total_iterations = total_iterations
 
     def adv_iter(self):
         self.cur.cur_iteration += 1
@@ -91,56 +110,76 @@ class Results:
         return set(*self._progress_cols)
 
 
-class Train(Action):
+class Teach(Action):
     
     result = Var()
 
-    def __init__(self, learner: Var[Learner], dataset: Var[Dataset], results: Var[Results]):
-
+    def __init__(
+        self, name: str, learner: Const[Union[Learner, Tester]], 
+        dataset: Const[Dataset], 
+        results: Const[Results],
+        progress: Const[ProgressRecorder],
+        batch_size: Const[int]
+    ):
+        
+        self._name = name
         self._learner = learner
         self._dataset = dataset
         self._iter = None
         self._results = results
+        self._progress = progress
+        self._batch_size = batch_size
 
-    def act(self):
-
-        if self._iter is None:
-            self._iter = iter(self._dataset.value)
-        
-        try:
-            x, t = next(self._iter)
-        except StopIteration:
-            return Status.SUCCESS
-
-        result = self._learner.value.learn(x, t)
-        self._results.value.store('Validation', self._progress.cur, result)
-        return Status.RUNNING
-
-
-class Validate(Action):
+    def _setup_progress(self):
+        self._iter = DataLoader(
+            self._dataset.val, self._batch_size, shuffle=True
+        )
+        n_iterations = len(self._iter)
+        if self._name in self._progress:
+            self._progress.val.switch(self._name)
+            self._progress.val.adv_epoch(n_iterations)
+        else:
+            self._progress.val.add(
+                self._name, total_iterations=n_iterations, switch=True
+            )
     
-    result = Var()
+    def _setup_iter(self):
 
-    def __init__(self, tester: Var[Tester], dataset: Var[Dataset], results: Var[Results]):
+        is_setup = self._iter is not None
+        if not is_setup:
+            self._setup_progress()
+        else:
+            self._progress.val.adv_iter()
 
-        self._tester = tester
-        self._dataset = dataset
-        self._iter = None
-        self._results = results
+    @abstractmethod
+    def perform_action(self, x, t):
+        pass
 
     def act(self):
+        self._setup_iter()
 
-        if self._iter is None:
-            self._iter = iter(self._dataset.value)
-        
         try:
             x, t = next(self._iter)
         except StopIteration:
+            self._iter = None
             return Status.SUCCESS
+        
+        result = self.perform_action(x, t)
 
-        result = self._tester.value.test(x, t)
-        self._results.value.store('Validation', self._progress.cur, result)
+        self._results.val.store(self._name, self._progress.cur, result)
         return Status.RUNNING
+
+
+class Train(Teach):
+
+    def perform_action(self, x, t):
+        return self._learner.val.learn(x, t)
+
+
+class Validate(Teach):
+    
+    def perform_action(self, x, t):
+        return self._learner.val.test(x, t)
 
 
 class Trainer(Tree):
@@ -159,8 +198,16 @@ class Trainer(Tree):
         class train(Sequence):
             execute = action('execute', STORE_REF)
             class epoch(Sequence):
-                train = task_(Train, ref.network, ref.training_dataset, ref.results)
-                validate = task_(Validate, ref.network, ref.validation_dataset, ref.results)
+                train = task_(
+                    Train, 'Trainer', ref.learner, 
+                    ref.training_dataset, ref.results, 
+                    ref.batch_size
+                )
+                validate = task_(
+                    Validate, 'Validator', 
+                    ref.learner, ref.validation_dataset, 
+                    ref.results, ref.batch_size
+                )
 
 
     def __init__(self, name: str, network: Network):
