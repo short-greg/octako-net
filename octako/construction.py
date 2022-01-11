@@ -9,9 +9,8 @@ import torch
 from torch import nn
 from torch import Size
 from torch.nn import modules
-from torch.nn.modules.container import Sequential
 from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
-from octako.modules.containers import Parallel, Diverge
+from octako.modules import Parallel, Diverge, Sequential
 from functools import wraps
 from .learners import Learn, Learner, MachineMixin, Test
 

@@ -1,4 +1,4 @@
-from . networks import NodeVisitor, Node, Port, Network, SubNetwork, OpNode, InterfaceNode
+from .networks import NodeVisitor, Node, Port, Network, SubNetwork, OpNode, InterfaceNode
 from abc import ABC, abstractmethod
 import typing
 

@@ -1,8 +1,8 @@
-from sango.nodes import Action, Status, Task, TickDecorator, Tree, decorate, loads_, loads, task_, var
+from sango.nodes import Action, Conditional, Status, Task, TickDecorator, Tree, action, decorate, loads_, loads, task, task_, until, var
 from sango.vars import Ref, Var
 from torch.types import Storage
-from octako.machinery.construction import Sequence
-from octako.machinery.learners import Learner, Tester
+from .construction import Sequence
+from .learners import Learner, Tester
 from tqdm import tqdm
 from functools import partial
 
@@ -165,32 +165,104 @@ class LoadDatasets(Action):
         pass
 
 
-class Trainer(Tree):
+# class Trainer(Tree):
 
-    n_batches = var(10)
-    batch_size = var(32)
-    progress = var()
-    material = var()
+#     n_batches = var(10)
+#     batch_size = var(32)
+#     progress = var()
+#     material = var()
 
-    class entry(Sequence):
+#     class entry(Sequence):
         
-        # variables
-        training_dataset = var()
-        validation_dataset = var()
+#         # variables
+#         training_dataset = var()
+#         validation_dataset = var()
 
-        # tasks
-        load_datasets = task_(LoadDatasets, Ref('material'))
-        @upto(Ref('n_batches'))
-        class train(Sequence):
-            train = (
-                loads_(progress_bar, Ref('progress'), Ref('training')) <<
-                task_(Train, batch_size=Ref('batch_size'), progress=Ref('progress'), training=Ref('training'))
-            )
-            validate = (
-                loads_(progress_bar, Ref('progress'), Ref('validation')) <<
-                task_(Tester, batch_size=Ref('batch_size'), progress=Ref('progress'), validation=Ref('validation'))
-            )
+#         # tasks
+#         load_datasets = task_(LoadDatasets, Ref('material'))
 
+#         @upto(Ref('n_batches'))
+#         class train(Sequence):
+#             train = (
+#                 loads_(progress_bar, ref.progress, ref.training) <<
+#                 task_(Train, batch_size=ref.batch_size, progress=ref.progress, training=Ref('training'))
+#             )
+#             validate = (
+#                 loads_(progress_bar, Ref('progress'), Ref('validation')) <<
+#                 task_(Tester, batch_size=Ref('batch_size'), progress=Ref('progress'), validation=Ref('validation'))
+#             )
+
+
+# The major benefit is I can put this "trainer" tree in another
+# module and just need to implement the functions
+
+# class TrainerTree(Tree):
+
+#     # if class is defined it will use "itself"
+
+#     def __init__(self, train, validate, training_dataset, test_dataset, n_iterations):
+#         pass
+
+#     @task
+#     class entry(Sequence):
+
+#         load_datasets = action('load_datasets')
+#         init_progress = action('init_progress')
+#
+#         @until
+#         class T(Parallel):
+    #         
+    #         @task
+    #         class train(Sequence):
+    #             train = action('train', ref.learner, ref.dataset, store=store_ref())
+    #             validate = action('validate')
+    #             finished = cond('check_finished')
+    #             update_progress = action('update_progress')
+    #         @until
+    #         check_stop = )
+    # 
+
+#     def reset(self):
+#         pass
+
+#     # tasks
+#     def _load_datasets(self):
+#         pass
+
+#     def _train(self, learner, store):
+#         pass
+
+#     def _validate(self, learner, store):
+#         pass
+
+#     def _check_finished(self, store):
+#         pass
+
+#     def train(self, learner):
+
+#         self.load_datasets()
+#         self.initiate_progress()
+#         while True:
+#             self.update_progress()
+#             self.train()
+#             self.validate()
+#             if self.check_finished():
+#                 break
+
+
+# class Trainer:
+
+#     def __init__(self):
+#         pass
+
+#     def load_datasets(self):
+#         pass
+
+#     def train(self):
+#         pass
+
+#     def validate(self):
+#         pass
 
 # class Trainer:
 

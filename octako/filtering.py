@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from functools import reduce
 import typing
-from octako.machinery.networks import Node, NodeSet
+from .networks import Node, NodeSet
 
 
 class Q(ABC):

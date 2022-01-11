@@ -1,5 +1,5 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
 import typing
 
 
@@ -363,3 +363,5 @@ class CompoundLoss(nn.Module):
     def forward(self, xs: typing.List[torch.Tensor]):
         weighted = [x * w for x, w in zip(xs, self._weights)]
         return sum(weighted)
+
+

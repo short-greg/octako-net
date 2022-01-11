@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch
-from octako.machinery.networks import In, Link, ModRef, Network, InterfaceNode, Node, Operation, OpNode, Port, SubNetwork
-from octako.machinery.visitors import NetworkBuilder, NullNodeProcessor, UpdateNodeName
+from octako.networks import In, Link, ModRef, Network, InterfaceNode, Node, Operation, OpNode, Port, SubNetwork
+from octako.visitors import NetworkBuilder, NullNodeProcessor, UpdateNodeName
 
 
 class TestNullNodeProcessor:

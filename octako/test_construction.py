@@ -5,7 +5,7 @@ from torch.nn.modules import linear
 from torch.nn.modules.activation import Sigmoid
 from torch.nn.modules.container import Sequential
 
-from octako.machinery.networks import In, ModRef, Multitap, Node, OpNode, Parameter, Port
+from .networks import In, ModRef, Multitap, Node, OpNode, Parameter, Port
 from .construction import Args, BasicOp, Chain, InFactory, Info, Kwargs, ListOut, ModFactory, NetBuilder, NullOut, OpFactory, OpMod, ParameterFactory, ScalarInFactory, TensorInFactory, diverge, Sequence, SizeOut, sz, var, factory
 import pytest
 

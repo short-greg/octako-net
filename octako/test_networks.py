@@ -1,5 +1,5 @@
 import pytest
-from . import networks
+from .. import networks
 import torch.nn as nn
 import torch
 from .networks import In, Link, ModRef, Multitap, Network, InterfaceNode, Node, Operation, OpNode, Port, SubNetwork
