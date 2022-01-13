@@ -1,6 +1,6 @@
 from abc import abstractmethod
 import typing
-from sango.nodes import STORE_REF, Action, Conditional, Status, Task, TaskDecorator, TickDecorator, TickDecorator2nd, Tree, action, cond, decorate, loads_, loads, task, task_, until, var
+from sango.nodes import STORE_REF, Action, Status, Tree, action, cond, loads_, loads, task, task_, var_, const_
 from sango.vars import Const, Ref, Var, ref
 from torch.types import Storage
 from torch.utils.data.dataset import Dataset
@@ -13,9 +13,7 @@ from tqdm import tqdm
 from functools import partial
 from dataclasses import dataclass, is_dataclass
 import pandas as pd
-from torch.utils.data import Dataset, DataLoader
-from typing import Union
-
+from torch.utils.data import  DataLoader
 
 
 @dataclass
@@ -112,34 +110,26 @@ class Results:
 
 class Teach(Action):
     
-    result = Var()
+    result = const_()
+    dataset = const_()
+    progress = const_()
+    batch_size = const_()
+    learner = const_()
 
-    def __init__(
-        self, name: str, learner: Const[Union[Learner, Tester]], 
-        dataset: Const[Dataset], 
-        results: Const[Results],
-        progress: Const[ProgressRecorder],
-        batch_size: Const[int]
-    ):
-        
-        self._name = name
-        self._learner = learner
-        self._dataset = dataset
+    def __init__(self, name: str):
+        super().__init__(name)
         self._iter = None
-        self._results = results
-        self._progress = progress
-        self._batch_size = batch_size
 
     def _setup_progress(self):
         self._iter = DataLoader(
-            self._dataset.val, self._batch_size, shuffle=True
+            self.dataset.val, self._batch_size, shuffle=True
         )
         n_iterations = len(self._iter)
-        if self._name in self._progress:
-            self._progress.val.switch(self._name)
-            self._progress.val.adv_epoch(n_iterations)
+        if self._name in self.progress:
+            self.progress.val.switch(self._name)
+            self.progress.val.adv_epoch(n_iterations)
         else:
-            self._progress.val.add(
+            self.progress.val.add(
                 self._name, total_iterations=n_iterations, switch=True
             )
     
@@ -149,11 +139,15 @@ class Teach(Action):
         if not is_setup:
             self._setup_progress()
         else:
-            self._progress.val.adv_iter()
+            self.progress.val.adv_iter()
 
     @abstractmethod
     def perform_action(self, x, t):
         pass
+
+    def reset(self):
+
+        self._iter = None
 
     def act(self):
         self._setup_iter()
@@ -166,37 +160,37 @@ class Teach(Action):
         
         result = self.perform_action(x, t)
 
-        self._results.val.store(self._name, self._progress.cur, result)
+        self.result.val.store(self._name, self.progress.cur, result)
         return Status.RUNNING
 
 
 class Train(Teach):
 
     def perform_action(self, x, t):
-        return self._learner.val.learn(x, t)
+        return self.learner.val.learn(x, t)
 
 
 class Validate(Teach):
     
     def perform_action(self, x, t):
-        return self._learner.val.test(x, t)
+        return self.learner.val.test(x, t)
 
 
 class Trainer(Tree):
 
-    n_batches = var(10)
-    batch_size = var(32)
-    validation_dataset = var()
-    training_dataset = var()
-    network = var()
+    n_batches = var_(10)
+    batch_size = var_(32)
+    validation_dataset = var_()
+    training_dataset = var_()
+    network = var_()
 
     @task
     class entry(Parallel):
-        update_progress = action('update_progress_bar')
+        update_progress_bar = action('update_progress_bar')
 
         @task
         class train(Sequence):
-            execute = action('execute', STORE_REF)
+            to_finish = cond('to_finish', STORE_REF)
             class epoch(Sequence):
                 train = task_(
                     Train, 'Trainer', ref.learner, 
@@ -209,11 +203,9 @@ class Trainer(Tree):
                     ref.results, ref.batch_size
                 )
 
-
-    def __init__(self, name: str, network: Network):
+    def __init__(self, name: str):
         super().__init__(name)
         self._progress = ProgressRecorder()
-        self._network.value = network
 
     def load_datasets(self):
         pass
@@ -231,7 +223,7 @@ class Trainer(Tree):
 
     def update_progress_bar(self, store: Storage):
         
-        pbar = store.get_or_create('pbar')
+        pbar = store.get_or_add('pbar', recursive=False)
 
         if self._progress.completed:
             if not pbar.empty(): pbar.close()
@@ -246,232 +238,4 @@ class Trainer(Tree):
         # self.pbar.set_postfix(lecture.results.mean(axis=0).to_dict())
         # pbar.refresh()
         return Status.RUNNING
-
-
-class LoadDatasets(Action):
-    
-    training_dataset = var()
-    validation_dataset = var()
-    material = var()
-
-    def __init__(self, train_for_all: bool):
-
-        self._train_for_all = train_for_all
-
-    def reset(self):
-
-        pass
-
-    def act(self):
-        
-        # load the material
-        pass
-
-
-
-# def progress_bar(iterations: int):
-
-#     pbar: tqdm = None
-#     final_status = None
-
-#     def _(node: Task):
-    
-#         nonlocal iterations
-#         if isinstance(iterations, Ref):
-#             iterations = iterations.shared(node._storage)
-
-#         def tick(node: Action, wrapped_tick):
-#             nonlocal pbar
-#             nonlocal final_status
-#             if pbar is None:
-#                 pbar = tqdm(total=iterations)
-#                 pbar.set_description_str(f'{node.name}')
-#                 pbar.update(1)
-#                 # TODO: How to get the results ub
-#                 # self.pbar.total = lecture.n_lesson_iterations
-#                 # self.pbar.set_postfix(lecture.results.mean(axis=0).to_dict())
-#                 pbar.refresh()
-#                 return Status.RUNNING
-            
-#             if final_status is None:
-
-#                 status = wrapped_tick()
-#                 if status.done:
-#                     final_status = status
-#                 return Status.RUNNING
-
-#             pbar.close()
-#             return final_status
-        
-#         return TickDecorator(node, tick)
-#     return _
-
-
-
-# def neg(node: Task):
-
-#     def tick(node: Task, wrapped_tick):
-#         status = wrapped_tick()
-#         if status == Status.SUCCESS:
-#             return Status.FAILURE
-#         elif status == Status.FAILURE:
-#             return Status.SUCCESS
-#         return status
-    
-#     return TickDecorator(node, tick)
-
-# def upto(iterations: int):
-
-#     def _(node: Task):
-    
-#         i = 0
-#         nonlocal iterations
-#         if isinstance(iterations, Ref):
-#             iterations = iterations.shared(node._storage)
-
-#         def tick(node: Action, wrapped_tick):
-#             nonlocal i
-#             if i >= iterations:
-#                 return Status.DONE
-#             result = wrapped_tick()
-#             if result == Status.FAILURE:
-#                 return result
-            
-#             i += 1
-#             if i == iterations:
-#                 return Status.SUCCESS
-#             return Status.RUNNING
-        
-#         return TickDecorator(node, tick)
-#     return _
-
-
-# def progress_bar_(iterations: int):
-
-#     return partial(progress_bar, iterations=iterations)
-
-
-
-# class Trainer(Tree):
-
-#     n_batches = var(10)
-#     batch_size = var(32)
-#     progress = var()
-#     material = var()
-
-#     class entry(Sequence):
-        
-#         # variables
-#         training_dataset = var()
-#         validation_dataset = var()
-
-#         # tasks
-#         load_datasets = task_(LoadDatasets, Ref('material'))
-
-#         @upto(Ref('n_batches'))
-#         class train(Sequence):
-#             train = (
-#                 loads_(progress_bar, ref.progress, ref.training) <<
-#                 task_(Train, batch_size=ref.batch_size, progress=ref.progress, training=Ref('training'))
-#             )
-#             validate = (
-#                 loads_(progress_bar, Ref('progress'), Ref('validation')) <<
-#                 task_(Tester, batch_size=Ref('batch_size'), progress=Ref('progress'), validation=Ref('validation'))
-#             )
-
-
-# The major benefit is I can put this "trainer" tree in another
-# module and just need to implement the functions
-
-# class TrainerTree(Tree):
-
-#     # if class is defined it will use "itself"
-
-#     def __init__(self, train, validate, training_dataset, test_dataset, n_iterations):
-#         pass
-
-#     @task
-#     class entry(Sequence):
-
-#         load_datasets = action('load_datasets')
-#         init_progress = action('init_progress')
-#
-#         @until
-#         class T(Parallel):
-    #         
-    #         @task
-    #         class train(Sequence):
-    #             train = action('train', ref.learner, ref.dataset, store=store_ref())
-    #             validate = action('validate')
-    #             finished = cond('check_finished')
-    #             update_progress = action('update_progress')
-    #         @until
-    #         check_stop = )
-    # 
-
-#     def reset(self):
-#         pass
-
-#     # tasks
-#     def _load_datasets(self):
-#         pass
-
-#     def _train(self, learner, store):
-#         pass
-
-#     def _validate(self, learner, store):
-#         pass
-
-#     def _check_finished(self, store):
-#         pass
-
-#     def train(self, learner):
-
-#         self.load_datasets()
-#         self.initiate_progress()
-#         while True:
-#             self.update_progress()
-#             self.train()
-#             self.validate()
-#             if self.check_finished():
-#                 break
-
-
-# class Trainer:
-
-#     def __init__(self):
-#         pass
-
-#     def load_datasets(self):
-#         pass
-
-#     def train(self):
-#         pass
-
-#     def validate(self):
-#         pass
-
-# class Trainer:
-
-#     def __init__(self, validator, trainer):
-#        
-#         # then you have to make sure that the arguments align
-#         self._validator = validator
-#         self._trainer = trainer
-
-#     def _validate(self):
-#         # need to write a validator for each trainer... or
-#         # use composition
-#         pass
-    
-#     def _train(self):
-#         pass
-
-#     def train(self):
-        
-#         for i in range(self._n_epochs):
-#             self._train()
-#             self._validate()
-#     
-#    behavior tree version is mor modular than this
 
