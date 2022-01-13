@@ -7,7 +7,7 @@ Classes related to Networks.
 They are a collection of modules connected together in a graph.
 
 """
-from abc import ABC, abstractmethod, abstractproperty
+from abc import abstractmethod
 import torch.nn as nn
 import torch
 import typing
@@ -15,8 +15,7 @@ import copy
 import dataclasses
 import itertools
 from functools import singledispatch, singledispatchmethod
-from octako.machinery.utils import coalesce
-from itertools import chain
+from .utils import coalesce
 
 
 @dataclasses.dataclass
@@ -482,14 +481,6 @@ class Parameter(Node):
     
     def probe(self, by: typing.Dict, to_cache: bool=True):
         return by.get(self.name, self._value)
-
-
-# labelq = (
-#     LabelQ(['']) | LabelQ([''])
-# ).filter(net.nodes)
-
-# labelq(net.nodes)
-
 
 
 class Network(nn.Module):

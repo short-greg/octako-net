@@ -1,18 +1,17 @@
  
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
-from functools import partial, singledispatch, singledispatchmethod
+from functools import singledispatch, singledispatchmethod
 from os import path
-from typing import Any, Callable, Counter, TypeVar
+from typing import Any, Counter, TypeVar
 import typing
 import torch
 from torch import nn
 from torch import Size
-from torch.nn import modules
-from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
-from octako.modules import Parallel, Diverge, Sequential
+from .networks import In, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
+from octako.modules import Parallel, Diverge
 from functools import wraps
-from .learners import Learn, Learner, MachineMixin, Test
+from .learners import Learner, Validator
 
 
 T = TypeVar('T')

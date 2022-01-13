@@ -10,7 +10,7 @@ import torch
 from . import networks
 import torch.optim
 import torch.nn
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
 
 def args_to_device(f):
@@ -79,7 +79,7 @@ class Learner(LearnerMixin):
         raise NotImplementedError
 
 
-class Tester(LearnerMixin):
+class Validator(LearnerMixin):
     """Base learning machine class
     """
     @abstractmethod
