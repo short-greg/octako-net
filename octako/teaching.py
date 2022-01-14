@@ -2,7 +2,7 @@ from abc import abstractmethod
 import dataclasses
 import typing
 from sango.nodes import STORE_REF, Action, Status, Tree, Sequence, Parallel, action, cond, loads_, loads, neg, task, task_, until, var_, const_
-from sango.vars import Const, Ref, Var, ref
+from sango.vars import Const, Ref, Var, ref_
 from torch.types import Storage
 
 from tqdm import tqdm
@@ -116,7 +116,7 @@ class Results:
 
 class Teach(Action):
     
-    result = const_()
+    results = const_()
     dataset = const_()
     progress = const_()
     batch_size = const_()
@@ -166,7 +166,7 @@ class Teach(Action):
         
         result = self.perform_action(x, t)
 
-        self.result.val.add_result(self._name, self.progress.val.cur, result)
+        self.results.val.add_result(self._name, self.progress.val.cur, result)
         return Status.RUNNING
 
 
@@ -200,18 +200,25 @@ class Trainer(Tree):
         @until
         @neg
         class train(Sequence):
-            to_finish = cond('to_finish', store=STORE_REF)
+            to_continue = cond('to_continue', store=STORE_REF)
+
+            @task
             class epoch(Sequence):
+                output = cond('output')
                 train = task_(
-                    Train, 'Trainer', ref.learner, 
-                    ref.training_dataset, ref.results, 
-                    ref.batch_size
+                    Train, learner=ref_.learner, 
+                    dataset=ref_.training_dataset, results=ref_.results, 
+                    batch_size=ref_.batch_size
                 )
                 validate = task_(
-                    Validate, 'Validator', 
-                    ref.learner, ref.validation_dataset, 
-                    ref.results, ref.batch_size
+                    Validate, 
+                    learner=ref_.learner, dataset=ref_.validation_dataset, 
+                    results=ref_.results, batch_size=ref_.batch_size
                 )
+
+    def output(self):
+        print('OUTTPUTTING A GAIN')
+        return True
 
     def __init__(self, name: str):
         super().__init__(name)
@@ -220,16 +227,16 @@ class Trainer(Tree):
     def load_datasets(self):
         pass
 
-    def to_finish(self, store: Storage):
+    def to_continue(self, store: Storage):
         cur_batch = store.get_or_add('cur_batch', 0)
 
         if cur_batch.val < self.n_batches.val:
             cur_batch.val += 1
-            return Status.SUCCESS
+            return True
 
         self._progress.complete()
 
-        return Status.FAILURE
+        return False
 
     def update_progress_bar(self, store: Storage):
         

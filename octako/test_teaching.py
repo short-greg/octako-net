@@ -84,7 +84,7 @@ class TestTrain:
 
         return teaching.Train(
             name='str', 
-            result=teaching.Results(), 
+            results=teaching.Results(), 
             dataset=dataset, batch_size=32, learner=LearnerTest(), 
             progress=teaching.ProgressRecorder(10)
         )
@@ -120,7 +120,7 @@ class TestTest:
 
         return teaching.Validate(
             name='str', 
-            result=teaching.Results(), 
+            results=teaching.Results(), 
             dataset=dataset, batch_size=32, learner=LearnerTest(), 
             progress=teaching.ProgressRecorder(10)
         )
@@ -133,7 +133,7 @@ class TestTest:
 
         return teaching.Validate(
             name='str', 
-            result=teaching.Results(), 
+            results=teaching.Results(), 
             dataset=dataset, batch_size=32, learner=LearnerTest(), 
             progress=teaching.ProgressRecorder(10)
         )
@@ -157,7 +157,6 @@ class TestTest:
         teach.tick()
         teach.reset()
         assert teach.tick() == Status.RUNNING
-
 
 
 class TestTrainer:
@@ -189,6 +188,8 @@ class TestTrainer:
 
     def test_teach_tick_returns_succcess(self):
         teach = self._create_teach()
+        teach.tick()
+        teach.tick()
         teach.tick()
         teach.tick()
         teach.tick()
