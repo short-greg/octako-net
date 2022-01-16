@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 import typing
 
 
-
 class NodeProcessor(ABC):
     
     @abstractmethod
