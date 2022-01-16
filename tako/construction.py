@@ -749,9 +749,12 @@ class InFactory(ABC):
 
 class TensorInFactory(InFactory):
 
-    def __init__(self, size: torch.Size, default, call_default: bool=False, device: str='cpu', info: Info=None):
+    def __init__(self, size: typing.Union[torch.Size, typing.Iterable], default, call_default: bool=False, device: str='cpu', info: Info=None):
         
         self._default = default
+        if not isinstance(size, torch.Size):
+            size = torch.Size(size)
+
         self._size = size
         self._call_default = call_default
         self._device = device

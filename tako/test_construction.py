@@ -5,7 +5,7 @@ from torch.nn.modules.container import Sequential
 from .networks import In, ModRef, Multitap, Node, OpNode, Parameter, Port
 from .construction import (
     Chain, Info, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, 
-    ParameterFactory, ScalarInFactory, TensorInFactory, diverge, 
+    ParameterFactory, ScalarInFactory, TensorInFactory, tensor_in, scalar_in, diverge, 
     SequenceFactory, sz, arg, factory
 )
 import pytest
@@ -391,3 +391,18 @@ class TestNetBuilder:
         builder = NetBuilder()
         builder << op << sequence
         assert builder.net['Linear_2'] != builder.net['Linear']
+
+    def test_produce_network_with_tensor_in(self):
+
+        sequence = OpFactory(
+            ModFactory(nn.Linear, 2, 3), out=[-1, 3]
+        ) << OpFactory(
+            ModFactory(nn.Linear, 3, 4), out=[-1, 4]
+        )
+        
+        builder = NetBuilder()
+        multitap = builder << tensor_in([1, 2], torch.ones, True, info=Info(name='x'))
+        multitap << sequence
+    
+        assert builder.net['Linear_2'] != builder.net['Linear']
+

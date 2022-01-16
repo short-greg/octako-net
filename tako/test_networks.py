@@ -1,7 +1,7 @@
 import pytest
 import torch.nn as nn
 import torch
-from .networks import In, Link, ModRef, Multitap, Network, InterfaceNode, Node, Operation, OpNode, Port, SubNetwork
+from .networks import In, Link, ModRef, Multitap, Network, InterfaceNode, OpNode, Port, SubNetwork
 
 
 class TestNode:
@@ -225,9 +225,6 @@ class Concat2(nn.Module):
 
         return torch.cat([x, t], dim=1)
 
-
-# Link should connect two ports...
-# Need to refactor it
 
 class TestLink:
 
