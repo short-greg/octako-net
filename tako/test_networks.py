@@ -1,5 +1,4 @@
 import pytest
-from .. import networks
 import torch.nn as nn
 import torch
 from .networks import In, Link, ModRef, Multitap, Network, InterfaceNode, Node, Operation, OpNode, Port, SubNetwork
@@ -56,8 +55,8 @@ class TestNetwork:
 
     def test_get_one_input_ports(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x', torch.Size([-1, 16]))
+        network = Network([
+            In.from_tensor('x', torch.Size([-1, 16]))
         ])
         
         x, = network['x'].ports
@@ -66,9 +65,9 @@ class TestNetwork:
 
     def test_get_two_input_ports(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x', torch.Size([-1, 16])),
-            networks.In.from_tensor('y', torch.Size([-1, 24]))
+        network = Network([
+            In.from_tensor('x', torch.Size([-1, 16])),
+            In.from_tensor('y', torch.Size([-1, 24]))
         ])
         x, y = network[['x', 'y']].ports
         
@@ -77,8 +76,8 @@ class TestNetwork:
     
     def test_add_node_ports_are_equal(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x', torch.Size([-1, 2])),
+        network = Network([
+            In.from_tensor('x', torch.Size([-1, 2])),
         ])
         x, = network.add_node(
             OpNode(
@@ -89,8 +88,8 @@ class TestNetwork:
 
     def test_output_with_one_node(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x', torch.Size([-1, 2])),
+        network = Network([
+            In.from_tensor('x', torch.Size([-1, 2])),
         ])
         x, = network.add_node(
             OpNode(
@@ -107,8 +106,8 @@ class TestNetwork:
 
     def test_output_with_two_nodes(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x', torch.Size([-1, 2])),
+        network = Network([
+            In.from_tensor('x', torch.Size([-1, 2])),
         ])
         x, = network.add_node(
             OpNode(
@@ -127,22 +126,11 @@ class TestNetwork:
         result, = network.forward(torch.randn(3, 2))
 
         assert result.size() == torch.Size([3, 3])
-
-    # def test_get_input_names_with_one_input_is_x(self):
-
-    #     network = networks.Network([
-    #         networks.In.from_tensor('x', torch.Size([-1, 16]))
-    #     ])
-    #     x, = network.add_op(
-    #         'linear', Operation(nn.Linear(2, 4), torch.Size([-1, 4])), network.get_ports('x')
-    #     )
-    #     names = network.get_input_names(['linear'])
-    #     assert names[0] == 'x'
     
     def test_are_inputs_with_real_input(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x', torch.Size([-1, 16]))
+        network = Network([
+            In.from_tensor('x', torch.Size([-1, 16]))
         ])
         x, = network.add_node(
             OpNode(
@@ -152,9 +140,9 @@ class TestNetwork:
 
     def test_are_inputs_with_multiple_inputs(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x1', torch.Size([-1, 16])),
-            networks.In.from_tensor('x2', torch.Size([-1, 16])),
+        network = Network([
+            In.from_tensor('x1', torch.Size([-1, 16])),
+            In.from_tensor('x2', torch.Size([-1, 16])),
         ])
         x1, x2 = network[['x1', 'x2']].ports
 
@@ -170,9 +158,9 @@ class TestNetwork:
 
     def test_are_inputs_with_multiple_layers(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x1', torch.Size([-1, 16])),
-            networks.In.from_tensor('x2', torch.Size([-1, 16])),
+        network = Network([
+            In.from_tensor('x1', torch.Size([-1, 16])),
+            In.from_tensor('x2', torch.Size([-1, 16])),
         ])
         x1, x2 = network[['x1', 'x2']].ports
         y1, = network.add_node(
@@ -190,9 +178,9 @@ class TestNetwork:
 
     def test_are_inputs_fails_with_single_layers(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x1', torch.Size([-1, 16])),
-            networks.In.from_tensor('x2', torch.Size([-1, 16])),
+        network = Network([
+            In.from_tensor('x1', torch.Size([-1, 16])),
+            In.from_tensor('x2', torch.Size([-1, 16])),
         ])
         x1, x2 = network[['x1', 'x2']].ports
         y1, = network.add_node(
@@ -207,8 +195,8 @@ class TestNetwork:
 
     def test_are_inputs_fails_with_invalid_output(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x1', torch.Size([-1, 16]))
+        network = Network([
+            In.from_tensor('x1', torch.Size([-1, 16]))
         ])
         x1,  = network['x1'].ports
         y1, = network.add_node(
@@ -220,8 +208,8 @@ class TestNetwork:
 
     def test_are_inputs_fails_with_invalid_input(self):
 
-        network = networks.Network([
-            networks.In.from_tensor('x1', torch.Size([-1, 16]))
+        network = Network([
+            In.from_tensor('x1', torch.Size([-1, 16]))
         ])
         x1,  = network['x1'].ports
         y1, = network.add_node(
