@@ -75,7 +75,7 @@ class Diverge(nn.Module):
         return [mod(x_i) for mod, x_i in zip(self._mods, x)]
 
 
-class Parallel(nn.Module):
+class Multi(nn.Module):
 
     def __init__(self, mods):
 

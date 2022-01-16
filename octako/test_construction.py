@@ -3,7 +3,11 @@ import torch
 from torch import nn
 from torch.nn.modules.container import Sequential
 from .networks import In, ModRef, Multitap, Node, OpNode, Parameter, Port
-from .construction import BasicOp, Chain, Info, Kwargs, ModFactory, NetBuilder, OpMod, ParameterFactory, ScalarInFactory, TensorInFactory, diverge, Sequence, SizeOut, sz, arg, factory
+from .construction import (
+    Chain, Info, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, 
+    ParameterFactory, ScalarInFactory, TensorInFactory, diverge, 
+    SequenceFactory, sz, arg, factory
+)
 import pytest
 
 
@@ -110,7 +114,7 @@ class TestSequence:
             factory(nn.Sigmoid).op() <<
             factory(nn.Linear, 4, 3).op(torch.Size([-1, 3]))
         )
-        assert isinstance(sequence, Sequence)
+        assert isinstance(sequence, SequenceFactory)
 
     def test_sequence_produce_from_two_ops(self):
 
@@ -222,7 +226,7 @@ class TestChain:
 
     def test_chained_linear(self):
 
-        op = BasicOp(ModFactory(nn.Linear, 2, 2), out=[-1, 2])
+        op = OpFactory(ModFactory(nn.Linear, 2, 2), out=[-1, 2])
         chain = Chain(op, [Kwargs(), Kwargs()])
         sequence, size = chain.produce([torch.Size([-1, 2])])
 
@@ -231,7 +235,7 @@ class TestChain:
 
     def test_chained_linear_with_arg(self):
 
-        op = BasicOp(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
+        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
         sequence, size = chain.produce([torch.Size([-1, 2])])
 
@@ -239,7 +243,7 @@ class TestChain:
 
     def test_chained_linear_size_is_correct(self):
 
-        op = BasicOp(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
+        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
         sequence, size = chain.produce([torch.Size([-1, 2])])
 
@@ -247,7 +251,7 @@ class TestChain:
 
     def test_chained_produce_nodes(self):
 
-        op = BasicOp(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
+        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
         nodes: typing.List[Node] = []
         for node in chain.produce_nodes(Multitap([Port(ModRef('x'), torch.Size([-1, 2]))])):
@@ -258,7 +262,7 @@ class TestChain:
 
     def test_chain_to_produce_nodes(self):
 
-        op = BasicOp(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
+        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
         chain = chain.to(x=arg('y'))
         nodes: typing.List[Node] = []
@@ -335,10 +339,10 @@ class TestNetBuilder:
         op = TensorInFactory(
             torch.Size([1, 2]), torch.ones, True, info=Info(name='x')
         )
-        op2 = BasicOp(
+        op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3), out=[-1, 3]
         )
-        op3 = BasicOp(
+        op3 = OpFactory(
             ModFactory(nn.Linear, 3, 4), out=[-1, 4]
         )
         builder = NetBuilder()
@@ -350,7 +354,7 @@ class TestNetBuilder:
         op = TensorInFactory(
             torch.Size([1, 2]), torch.ones, True, info=Info(name='x')
         )
-        op2 = BasicOp(
+        op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3), out=[-1, 3]
         )
         builder = NetBuilder()
@@ -362,10 +366,10 @@ class TestNetBuilder:
         op = TensorInFactory(
             torch.Size([1, 2]), torch.ones, True, info=Info(name='x')
         )
-        op2 = BasicOp(
+        op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3), out=[-1, 3]
         )
-        op3 = BasicOp(
+        op3 = OpFactory(
             ModFactory(nn.Linear, 3, 4), out=[-1, 4]
         )
         builder = NetBuilder()
@@ -374,9 +378,9 @@ class TestNetBuilder:
 
     def test_produce_network_with_sequence(self):
 
-        sequence = BasicOp(
+        sequence = OpFactory(
             ModFactory(nn.Linear, 2, 3), out=[-1, 3]
-        ) << BasicOp(
+        ) << OpFactory(
             ModFactory(nn.Linear, 3, 4), out=[-1, 4]
         )
 

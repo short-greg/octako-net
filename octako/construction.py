@@ -9,18 +9,11 @@ import torch
 from torch import nn
 from torch import Size
 from .networks import In, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
-from octako.modules import Parallel, Diverge
+from octako.modules import Multi, Multi, Diverge
 from functools import wraps
-from .learners import Learner, Validator
 
 
 T = TypeVar('T')
-
-# class BaseVar(ABC):
-
-#     @property
-#     def value(self):
-#         raise NotADirectoryError
 
 
 class arg(object):
@@ -118,7 +111,7 @@ class Info:
         )
 
 
-class OpFactory(ABC):
+class NetFactory(ABC):
 
     def __init__(self, info: Info=None):
         self._info = info or Info()
@@ -146,26 +139,26 @@ class OpFactory(ABC):
         pass
 
 
-OpFactory.__call__ = OpFactory.to
+NetFactory.__call__ = NetFactory.to
 
 
-class Sequence(OpFactory):
+class SequenceFactory(NetFactory):
 
-    def __init__(self, op_factories: typing.List[OpFactory], info: Info=None):
+    def __init__(self, op_factories: typing.List[NetFactory], info: Info=None):
         super().__init__(info)
         self._op_factories = op_factories
     
-    def add(self, op_factory: OpFactory, position: int=None):
+    def add(self, op_factory: NetFactory, position: int=None):
 
         if position is None:
             self._op_factories.append(op_factory)
         else:
             self._op_factories.insert(op_factory, position)
 
-    def __lshift__(self, other: OpFactory):
-        if isinstance(other, Sequence):
-            return Sequence(self._op_factories + other._op_factories)
-        return Sequence(self._op_factories + [other])
+    def __lshift__(self, other: NetFactory):
+        if isinstance(other, SequenceFactory):
+            return SequenceFactory(self._op_factories + other._op_factories)
+        return SequenceFactory(self._op_factories + [other])
     
     def produce(self, in_: typing.List[torch.Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -185,7 +178,7 @@ class Sequence(OpFactory):
                 yield node
     
     def to(self, **kwargs):
-        return Sequence(
+        return SequenceFactory(
             [factory.to(**kwargs) for factory in self._op_factories]
         )
     
@@ -195,13 +188,13 @@ class Sequence(OpFactory):
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
         
-        return Sequence(self._op_factories, self._info.spawn(name, labels, annotation))
+        return SequenceFactory(self._op_factories, self._info.spawn(name, labels, annotation))
 
 @abstractmethod
-def _lshift(self, op_factory) -> Sequence:
+def _lshift(self, net_factory) -> SequenceFactory:
     raise NotImplementedError
 
-OpFactory.__lshift__ = _lshift
+SequenceFactory.__lshift__ = _lshift
 
 
 class _ArgMap(ABC):
@@ -334,7 +327,7 @@ class Out(ABC):
         raise NotImplementedError
 
 
-class BasicOp(OpFactory):
+class OpFactory(NetFactory):
 
     def __init__(
         self, module: BaseMod, out: Out=None, info: Info=None
@@ -343,8 +336,8 @@ class BasicOp(OpFactory):
         self._out = to_out(out)
         self._mod = module
     
-    def __lshift__(self, other) -> Sequence:
-        return Sequence([self, other])
+    def __lshift__(self, other) -> SequenceFactory:
+        return SequenceFactory([self, other])
 
     def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -370,13 +363,13 @@ class BasicOp(OpFactory):
 
     def to(self, **kwargs):
         mod = self._mod.to(**kwargs)
-        return BasicOp(
+        return OpFactory(
             mod, self._out.to(**kwargs), self._info
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
         
-        return BasicOp(self._mod, self._out, self._info.spawn(name, labels, annotation))
+        return OpFactory(self._mod, self._out, self._info.spawn(name, labels, annotation))
 
     
 ModType = typing.Union[typing.Type[nn.Module], arg]
@@ -399,12 +392,12 @@ class NNMod(object):
 
         self._nnmodule = nnmodule
 
-    def __call__(self, *args, **kwargs) -> BasicOp:
+    def __call__(self, *args, **kwargs) -> OpFactory:
 
         out_ = to_out(kwarg_pop('_out', kwargs))
         info = kwarg_pop('_info', kwargs)
         
-        return BasicOp(ModFactory(self._nnmodule, *args, **kwargs), out_, info)
+        return OpFactory(ModFactory(self._nnmodule, *args, **kwargs), out_, info)
 
 
 class OpMod(object):
@@ -458,8 +451,8 @@ class ModFactory(BaseMod):
     def kwargs(self):
         return self._args.kwargs
 
-    def op(self, out_: Out=None, info: Info=None) -> BasicOp:
-        return BasicOp(self, to_out(out_), info)
+    def op(self, out_: Out=None, info: Info=None) -> OpFactory:
+        return OpFactory(self, to_out(out_), info)
 
 
 class Instance(BaseMod):
@@ -480,8 +473,8 @@ class Instance(BaseMod):
     def module(self):
         return self._module
 
-    def op(self, out_: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> BasicOp:
-        return BasicOp(self, to_out(out_), name, labels, annotation)
+    def op(self, out_: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> OpFactory:
+        return OpFactory(self, to_out(out_), name, labels, annotation)
 
 
 @singledispatch
@@ -593,16 +586,16 @@ def _(out_: Out):
     return out_
 
 
-class DivergeFactory(OpFactory):
+class DivergeFactory(NetFactory):
 
     def __init__(
-        self, op_factories: typing.List[OpFactory], info: Info=None
+        self, op_factories: typing.List[NetFactory], info: Info=None
     ):
         super().__init__(info)
         self._op_factories = op_factories
     
-    def __lshift__(self, other) -> Sequence:
-        return Sequence([self, other])
+    def __lshift__(self, other) -> SequenceFactory:
+        return SequenceFactory([self, other])
 
     def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -640,16 +633,16 @@ class DivergeFactory(OpFactory):
 diverge = DivergeFactory
 
 
-class ParallelFactory(OpFactory):
+class MultiFactory(NetFactory):
 
     def __init__(
-        self, op_factories: typing.List[OpFactory], info: Info=None
+        self, op_factories: typing.List[NetFactory], info: Info=None
     ):
         super().__init__(info)
         self._op_factories = op_factories
     
-    def __lshift__(self, other) -> Sequence:
-        return Sequence([self, other])
+    def __lshift__(self, other) -> SequenceFactory:
+        return SequenceFactory([self, other])
 
     def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -661,7 +654,7 @@ class ParallelFactory(OpFactory):
             mod, out = op_factory.produce(in_, **kwargs)
             mods.append(mod)
             outs.append(out)
-        mod = Parallel(mods)
+        mod = Multi(mods)
         return mod, outs
     
     @to_multitap
@@ -672,30 +665,30 @@ class ParallelFactory(OpFactory):
                 yield node
 
     def to(self, **kwargs):
-        return ParallelFactory(
+        return MultiFactory(
             [op_factory.to(**kwargs) for op_factory in self._op_factories],
             self._info
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
         
-        return ParallelFactory(self._op_factories, self._info.spawn(name, labels, annotation))
+        return MultiFactory(self._op_factories, self._info.spawn(name, labels, annotation))
 
 
-parallel = ParallelFactory
+multi = MultiFactory
 
 
-class Chain(OpFactory):
+class Chain(NetFactory):
     def __init__(
-        self, op_factory: OpFactory, attributes: typing.Union[arg, typing.List[Kwargs]],
+        self, op_factory: NetFactory, attributes: typing.Union[arg, typing.List[Kwargs]],
         info: Info=None
     ):
         super().__init__(info)
         self._op_factory = op_factory
         self._attributes = attributes
     
-    def __lshift__(self, other) -> Sequence:
-        return Sequence([self, other])
+    def __lshift__(self, other) -> SequenceFactory:
+        return SequenceFactory([self, other])
 
     def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -833,10 +826,10 @@ class BuildMultitap(object):
         self._builder: NetBuilder = builder
         self._multitap = multitap
 
-    def __lshift__(self, op_factory: OpFactory):
+    def __lshift__(self, net_factory: NetFactory):
         
         multitap = self._multitap
-        for node in op_factory.produce_nodes(self._multitap.ports):
+        for node in net_factory.produce_nodes(self._multitap.ports):
             multitap = Multitap(self._builder.add_node(node))
         return BuildMultitap(self._builder, multitap)
 
