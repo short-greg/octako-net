@@ -1,4 +1,4 @@
-# Octako: For building 
+# Octako: Flexible building of neural networks
 
 *Octako* is a library using Pytorch for flexible construction of neural networks. 
 
