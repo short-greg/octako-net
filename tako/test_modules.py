@@ -1,6 +1,6 @@
 import torch
 import pytest
-from octako.machinery import modules
+from . import modules
 
 
 class TestNetworkReorder:

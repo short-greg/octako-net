@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch import Size
 from .networks import In, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
-from octako.modules import Multi, Multi, Diverge
+from .modules import Multi, Multi, Diverge
 from functools import wraps
 
 
