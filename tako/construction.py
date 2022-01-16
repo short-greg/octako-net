@@ -186,15 +186,15 @@ class SequenceFactory(NetFactory):
     def info(self):
         return self._info
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
-        
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):        
         return SequenceFactory(self._op_factories, self._info.spawn(name, labels, annotation))
+
 
 @abstractmethod
 def _lshift(self, net_factory) -> SequenceFactory:
     raise NotImplementedError
 
-SequenceFactory.__lshift__ = _lshift
+NetFactory.__lshift__ = _lshift
 
 
 class _ArgMap(ABC):

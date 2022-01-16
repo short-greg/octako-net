@@ -59,7 +59,6 @@ class Scaler(nn.Module):
         return scaled_x
 
 
-
 class Diverge(nn.Module):
 
     def __init__(self, mods):
@@ -87,11 +86,6 @@ class Multi(nn.Module):
         if len(x) != len(self._mods):
             raise ValueError(f"Number of inputs {len(x)} must equal number of modules {len(self._mods)}")
         return [mod(x) for mod in self._mods]
-
-
-import typing
-import torch
-import torch.nn as nn
 
 
 class Lambda(nn.Module):
@@ -204,4 +198,3 @@ class Stack(nn.Module):
     
     def forward(self, *x: torch.Tensor):
         return torch.stack(x)
-
