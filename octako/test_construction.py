@@ -3,24 +3,24 @@ import torch
 from torch import nn
 from torch.nn.modules.container import Sequential
 from .networks import In, ModRef, Multitap, Node, OpNode, Parameter, Port
-from .construction import BasicOp, Chain, Info, Kwargs, ModFactory, NetBuilder, OpMod, ParameterFactory, ScalarInFactory, TensorInFactory, diverge, Sequence, SizeOut, sz, var, factory
+from .construction import BasicOp, Chain, Info, Kwargs, ModFactory, NetBuilder, OpMod, ParameterFactory, ScalarInFactory, TensorInFactory, diverge, Sequence, SizeOut, sz, arg, factory
 import pytest
 
 
-class TestVar:
+class TestArg:
 
-    def test_to_var_to_var(self):
-        v = var("x")
-        res = v.to(x=var('y'))
-        assert isinstance(res, var)
+    def test_to_arg_to_arg(self):
+        v = arg("x")
+        res = v.to(x=arg('y'))
+        assert isinstance(res, arg)
 
-    def test_to_var_to_value(self):
-        v = var("x")
+    def test_to_arg_to_value(self):
+        v = arg("x")
         res = v.to(x=1)
         assert res == 1
     
     def test_to_var_to_val_not_contained(self):
-        v = var('x')
+        v = arg('x')
         res = v.to(y=2)
         assert res.name == "x"
 
@@ -81,19 +81,19 @@ class TestMod:
         linear = m.produce(torch.Size([-1, 4]))
         assert isinstance(linear, nn.Linear)
     
-    def test_mod_with_nn_linear_and_var(self):
+    def test_mod_with_nn_linear_and_arg(self):
 
-        m = factory(nn.Linear, sz[1], var('x'))
+        m = factory(nn.Linear, sz[1], arg('x'))
         linear = m.produce(torch.Size([-1, 4]), x=3)
         assert isinstance(linear, nn.Linear)
 
-    def test_mod_with_nn_linear_and_var(self):
+    def test_mod_with_nn_linear_and_arg(self):
 
-        m = factory(nn.Linear, sz[1], var('x'))
+        m = factory(nn.Linear, sz[1], arg('x'))
         linear = m.produce(torch.Size([-1, 4]), x=3)
         assert isinstance(linear, nn.Linear)
 
-    def test_op_with_nn_linear_and_var(self):
+    def test_op_with_nn_linear_and_arg(self):
 
         m = factory(nn.Sigmoid).op()
         sigmoid, out_size = m.produce(torch.Size([-1, 4]), x=3)
@@ -134,7 +134,7 @@ class TestSequence:
         ).produce_nodes(port))
         assert len(nodes) == 3
 
-    def test_sequence_produce_nodes_from_three_ops_and_vars(self):
+    def test_sequence_produce_nodes_from_three_ops_and_args(self):
 
         # linear = mod(nn.Linear, Sz(1), Var('x')).op(linear_out)
         port = Port("mod", torch.Size([1, 2]))
@@ -149,20 +149,20 @@ class TestSequence:
 
     
     # change factory to factory
-    def test_sequence_produce_from_three_ops_and_vars(self):
+    def test_sequence_produce_from_three_ops_and_args(self):
 
         size = torch.Size([1, 2])
 
         linear = (
-            factory(nn.Linear, sz[1], var('out'), bias=False).op(
-                [-1, var('x')]
+            factory(nn.Linear, sz[1], arg('out'), bias=False).op(
+                [-1, arg('x')]
             ) << 
             factory('activation').op()
         )
 
         sequence, _ = (
-            linear.to(out=var('x')) << 
-            linear.to(out=var('y'), activation=nn.Sigmoid)
+            linear.to(out=arg('x')) << 
+            linear.to(out=arg('y'), activation=nn.Sigmoid)
         ).produce(size, activation=nn.ReLU, x=4, y=3)
         assert isinstance(sequence[1], nn.ReLU) and isinstance(sequence[3], nn.Sigmoid)
         assert sequence(torch.rand(1, 2)).size() == torch.Size([1, 3])
@@ -172,15 +172,15 @@ class TestSequence:
         size = torch.Size([1, 2])
         layer = (
             
-            factory(nn.Linear, sz[1], var('out'), bias=False).op(
-                [sz[0], var('out')]
+            factory(nn.Linear, sz[1], arg('out'), bias=False).op(
+                [sz[0], arg('out')]
             ) << 
             factory('activation').op()
         )
 
         sequence, sizes = (
             layer.alias(out='x') << 
-            layer.to(out=var('y'), activation=nn.Sigmoid)
+            layer.to(out=arg('y'), activation=nn.Sigmoid)
         ).produce(size, activation=nn.ReLU, x=4, y=3)
         assert isinstance(sequence[1], nn.ReLU) and isinstance(sequence[3], nn.Sigmoid)
         assert sequence(torch.rand(1, 2)).size() == torch.Size([1, 3])
@@ -229,9 +229,9 @@ class TestChain:
         assert isinstance(sequence[0], nn.Linear)
 
 
-    def test_chained_linear_with_var(self):
+    def test_chained_linear_with_arg(self):
 
-        op = BasicOp(ModFactory(nn.Linear, sz[1], var('x')), out=[-1, var('x')])
+        op = BasicOp(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
         sequence, size = chain.produce([torch.Size([-1, 2])])
 
@@ -239,7 +239,7 @@ class TestChain:
 
     def test_chained_linear_size_is_correct(self):
 
-        op = BasicOp(ModFactory(nn.Linear, sz[1], var('x')), out=[-1, var('x')])
+        op = BasicOp(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
         sequence, size = chain.produce([torch.Size([-1, 2])])
 
@@ -247,7 +247,7 @@ class TestChain:
 
     def test_chained_produce_nodes(self):
 
-        op = BasicOp(ModFactory(nn.Linear, sz[1], var('x')), out=[-1, var('x')])
+        op = BasicOp(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
         nodes: typing.List[Node] = []
         for node in chain.produce_nodes(Multitap([Port(ModRef('x'), torch.Size([-1, 2]))])):
@@ -258,9 +258,9 @@ class TestChain:
 
     def test_chain_to_produce_nodes(self):
 
-        op = BasicOp(ModFactory(nn.Linear, sz[1], var('x')), out=[-1, var('x')])
+        op = BasicOp(ModFactory(nn.Linear, sz[1], arg('x')), out=[-1, arg('x')])
         chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
-        chain = chain.to(x=var('y'))
+        chain = chain.to(x=arg('y'))
         nodes: typing.List[Node] = []
         for node in chain.produce_nodes(Port(ModRef("x"), torch.Size([-1, 2]))):
             nodes.append(node)

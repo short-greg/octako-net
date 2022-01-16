@@ -16,14 +16,14 @@ from .learners import Learner, Validator
 
 T = TypeVar('T')
 
-class BaseVar(ABC):
+# class BaseVar(ABC):
 
-    @property
-    def value(self):
-        raise NotADirectoryError
+#     @property
+#     def value(self):
+#         raise NotADirectoryError
 
 
-class var(object):
+class arg(object):
 
     def __init__(self, name: str):
         self._name = name
@@ -136,7 +136,7 @@ class OpFactory(ABC):
         raise NotImplementedError
     
     def alias(self, **kwargs):
-        return self.to(**{k: var(v) for k, v in kwargs.items()})
+        return self.to(**{k: arg(v) for k, v in kwargs.items()})
 
     @property
     def info(self):
@@ -211,7 +211,7 @@ class _ArgMap(ABC):
         return val
 
     @_remap_arg.register
-    def _(self, val: var, kwargs):
+    def _(self, val: arg, kwargs):
         return val.to(**kwargs)
 
     @singledispatchmethod
@@ -219,7 +219,7 @@ class _ArgMap(ABC):
         return val
 
     @_lookup_arg.register
-    def _(self, val: var, in_size: torch.Size, kwargs):
+    def _(self, val: arg, in_size: torch.Size, kwargs):
         return val.to(**kwargs)
 
     @_lookup_arg.register
@@ -254,7 +254,7 @@ class Kwargs(_ArgMap):
         remapped = {}
         for x, y in kwargs.items():
             if x in self._kwargs:
-                y: var = y
+                y: arg = y
                 remapped[y.name] = self._kwargs[x] 
 
         return Kwargs(**remapped)
@@ -379,8 +379,8 @@ class BasicOp(OpFactory):
         return BasicOp(self._mod, self._out, self._info.spawn(name, labels, annotation))
 
     
-ModType = typing.Union[typing.Type[nn.Module], var]
-ModInstance = typing.Union[nn.Module, var]
+ModType = typing.Union[typing.Type[nn.Module], arg]
+ModInstance = typing.Union[nn.Module, arg]
 
 
 def kwarg_pop(key, kwargs):
@@ -432,13 +432,13 @@ class ModFactory(BaseMod):
 
     def to(self, **kwargs):
         args = self._args.remap(kwargs)
-        module = self._module.to(**kwargs) if isinstance(self._module, var) else self._module
+        module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
         return ModFactory(module, *args.args, *args.kwargs)
 
     @singledispatchmethod
     def produce(self, in_: typing.List[torch.Size], **kwargs):
         
-        module = self._module.to(**kwargs) if isinstance(self._module, var) else self._module
+        module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
         args = self._args.lookup(in_, kwargs)
         return module(*args.args, **args.kwargs)
     
@@ -469,12 +469,12 @@ class Instance(BaseMod):
         self._module = module
 
     def to(self, **kwargs):
-        module = self._module.to(**kwargs) if isinstance(self._module, var) else self._module
+        module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
         return module
 
     def produce(self, in_: typing.List[torch.Size], **kwargs):
         
-        return self._module.to(**kwargs) if isinstance(self._module, var) else self._module
+        return self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
     
     @property
     def module(self):
@@ -490,7 +490,7 @@ def factory(mod: ModType, *args, **kwargs):
 
 @factory.register
 def _(mod: str, *args, **kwargs):
-    return ModFactory(var(mod), *args, *kwargs)
+    return ModFactory(arg(mod), *args, *kwargs)
 
 @singledispatch
 def instance(mod: ModInstance):
@@ -498,7 +498,7 @@ def instance(mod: ModInstance):
 
 @instance.register
 def _(mod: str):
-    return Instance(var(mod))
+    return Instance(arg(mod))
 
 
 class ListOut(Out):
@@ -687,7 +687,7 @@ parallel = ParallelFactory
 
 class Chain(OpFactory):
     def __init__(
-        self, op_factory: OpFactory, attributes: typing.Union[var, typing.List[Kwargs]],
+        self, op_factory: OpFactory, attributes: typing.Union[arg, typing.List[Kwargs]],
         info: Info=None
     ):
         super().__init__(info)
@@ -702,7 +702,7 @@ class Chain(OpFactory):
         if isinstance(in_, Size):
             in_ = [in_]
         attributes = self._attributes
-        if isinstance(attributes, var):
+        if isinstance(attributes, arg):
             attributes = self._attributes.to(**kwargs)
         
         mods = []
@@ -716,7 +716,7 @@ class Chain(OpFactory):
     def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         
         attributes = self._attributes
-        if isinstance(attributes, var):
+        if isinstance(attributes, arg):
             attributes = self._attributes.to(**kwargs)
         
         for attribute in self._attributes:
@@ -726,7 +726,7 @@ class Chain(OpFactory):
 
     def to(self, **kwargs):
         attributes = self._attributes
-        if isinstance(self._attributes, var):
+        if isinstance(self._attributes, arg):
             attributes = self._attributes.to(**kwargs)
         
         to_attributes = []
