@@ -887,10 +887,10 @@ class NetBuilder(object):
             ins, outs
         )
     
-    def build_learner(self, learner_mixins: typing.Type[LearnerMixin]):
+    def build_learner(self, name: str, learner_mixins: typing.Type[LearnerMixin]):
         
         class _(*learner_mixins):
-            pass
+            __qualname__ = name
 
         return _(self.net)
         
