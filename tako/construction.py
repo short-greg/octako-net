@@ -11,6 +11,7 @@ from torch import Size
 from .networks import In, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
 from .modules import Multi, Multi, Diverge
 from functools import wraps
+from learners import LearnerMixin
 
 
 T = TypeVar('T')
@@ -885,6 +886,13 @@ class NetBuilder(object):
         self._net.set_default_interface(
             ins, outs
         )
+    
+    def build_learner(self, learner_mixins: typing.Type[LearnerMixin]):
+        
+        class _(*learner_mixins):
+            pass
+
+        return _(self.net)
         
 
 # define interface that must be defined in learn, test, machine mixins
@@ -905,26 +913,3 @@ class NetBuilder(object):
 
 # mod(nn.Conv2d, kw=2, kh=kl, stride=2, stride=3 ).op(fc)
 
-
-
-# override(linear, )
-
-
-# @singledispatch
-# def op(module_factory: typing.Callable[[], nn.Module], out: typing.List[torch.Size], name: str=None, labels: typing.List[str]=None, annotation: str=None):
-#     pass
-
-
-# @op.register
-# def _(module, out: typing.List[torch.Size], *args, **kwargs):
-#     return BasicOp(module, args, kwargs, out_size)
-
-
-# @op.register
-# def _(module, out: torch.Size, *args, **kwargs):
-#     return BasicOp(module, args, kwargs, [out_size])
-
-
-# @op.register
-# def _(module, out: torch.Size, *args, **kwargs):
-#     return BasicOp(module, args, kwargs, [out_size])
