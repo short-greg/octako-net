@@ -3,15 +3,15 @@ from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
 from functools import singledispatch, singledispatchmethod
 from os import path
-from typing import Any, Counter, TypeVar
+from typing import Any, Counter, Iterator, TypeVar
 import typing
 import torch
 from torch import nn
 from torch import Size
-from .networks import In, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
+from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
 from .modules import Multi, Multi, Diverge
 from functools import wraps
-from learners import LearnerMixin
+from learners import MachineComponent
 
 
 T = TypeVar('T')
@@ -29,6 +29,15 @@ class arg(object):
     def to(self, **kwargs):
         return kwargs.get(self._name, self)
 
+
+# use this to have functions that process the args
+# class ArgFunc(object):
+
+#     def __init__(self, args, f):
+
+#         self._f = f
+#         self._args = args
+    
 
 def to_multitap(f):
 
@@ -99,16 +108,18 @@ class Info:
     name: str=''
     labels: LabelSet=field(default_factory=LabelSet)
     annotation: str=''
+    fix: bool=False
 
     def __post_init__(self):
         if isinstance(self.labels, typing.List):
             self.labels = LabelSet(self.labels)
     
-    def spawn(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+    def spawn(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         return Info(
             name if name is not None else self.name,
             LabelSet(labels) if labels is not None else self.labels,
-            annotation if annotation is not None else self.annotation
+            annotation if annotation is not None else self.annotation, 
+            fix if fix is not None else self.fix
         )
 
 
@@ -136,7 +147,7 @@ class NetFactory(ABC):
     def info(self):
         return self._info
 
-    def info_(self, name: str='', labels: typing.List[str]=None, annotation: str=None):
+    def info_(self, name: str='', labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         pass
 
 
@@ -187,8 +198,8 @@ class SequenceFactory(NetFactory):
     def info(self):
         return self._info
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):        
-        return SequenceFactory(self._op_factories, self._info.spawn(name, labels, annotation))
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):        
+        return SequenceFactory(self._op_factories, self._info.spawn(name, labels, annotation, fix))
 
 
 @abstractmethod
@@ -368,9 +379,9 @@ class OpFactory(NetFactory):
             mod, self._out.to(**kwargs), self._info
         )
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return OpFactory(self._mod, self._out, self._info.spawn(name, labels, annotation))
+        return OpFactory(self._mod, self._out, self._info.spawn(name, labels, annotation, fix))
 
     
 ModType = typing.Union[typing.Type[nn.Module], arg]
@@ -627,9 +638,9 @@ class DivergeFactory(NetFactory):
             self._info
         )
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return DivergeFactory(self._op_factories, self._info.spawn(name, labels, annotation))
+        return DivergeFactory(self._op_factories, self._info.spawn(name, labels, annotation, fix))
 
 diverge = DivergeFactory
 
@@ -671,9 +682,9 @@ class MultiFactory(NetFactory):
             self._info
         )
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return MultiFactory(self._op_factories, self._info.spawn(name, labels, annotation))
+        return MultiFactory(self._op_factories, self._info.spawn(name, labels, annotation, fix))
 
 
 multi = MultiFactory
@@ -732,9 +743,9 @@ class Chain(NetFactory):
             self._info
         )
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return Chain(self._op_factory, self._attributes, self._info.spawn(name, labels, annotation))
+        return Chain(self._op_factory, self._attributes, self._info.spawn(name, labels, annotation, fix))
 
 chain = Chain
 
@@ -772,9 +783,9 @@ class TensorInFactory(InFactory):
             self._info.labels, self._info.annotation
         )
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return TensorInFactory(self._size, self._default, self._call_default, self._device, self._info.spawn(name, labels, annotation))
+        return TensorInFactory(self._size, self._default, self._call_default, self._device, self._info.spawn(name, labels, annotation, fix))
 
 tensor_in = TensorInFactory
 
@@ -793,9 +804,9 @@ class ScalarInFactory(InFactory):
         default = self._default() if self._call_default else self._default    
         return In.from_scalar(self._info.name, self._type_, default, self._info.labels, self._info.annotation)
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return ScalarInFactory(self._type_, self._default, self._call_default, self._info.spawn(name, labels, annotation))
+        return ScalarInFactory(self._type_, self._default, self._call_default, self._info.spawn(name, labels, annotation, fix))
 
 
 scalar_in = ScalarInFactory
@@ -814,9 +825,9 @@ class ParameterFactory(InFactory):
 
         return Parameter(self._info.name, self._sz, self._reset_func, self._info.labels, self._info.annotation)
         
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return ParameterFactory(self._sz, self._reset_func, self._device, self._info.spawn(name, labels, annotation))
+        return ParameterFactory(self._sz, self._reset_func, self._device, self._info.spawn(name, labels, annotation, fix))
 
 param_in = ParameterFactory
 
@@ -829,6 +840,27 @@ class BuildMultitap(object):
             multitap = Multitap(multitap)
         self._builder: NetBuilder = builder
         self._multitap = multitap
+    
+    # TODO: consider whether to keep this
+    @property
+    def multitap(self):
+        return self._multitap
+    
+    @property
+    def ports(self):
+        return [*self._multitap.ports]
+    
+    @singledispatchmethod
+    def __getitem__(self, idx: typing.Iterable) -> Multitap:
+        return self._multitap[idx]
+
+    @__getitem__.register
+    def _(self, idx: int) -> Port:
+        return self._multitap[idx]
+    
+    def __iter__(self) -> typing.Iterator:
+        for port in self._multitap:
+            yield port
 
     def __lshift__(self, net_factory: NetFactory):
         
@@ -836,6 +868,24 @@ class BuildMultitap(object):
         for node in net_factory.produce_nodes(self._multitap.ports):
             multitap = Multitap(self._builder.add_node(node))
         return BuildMultitap(self._builder, multitap)
+
+
+def to_multitap(**mapping):
+    ports = []
+
+    for k, v in mapping.items():
+        if isinstance(v, str):
+            ports.append(Port(ModRef(k)))
+        elif isinstance(v, Port):
+            ports.append(v)
+        elif isinstance(v, Multitap):
+            ports.extend(v.ports)
+        elif isinstance(v, BuildMultitap):
+            ports.extend(v.ports)
+        else:
+            # TODO: make this more ammenable to extension
+            raise ValueError("Cannot process mapping")
+    return Multitap(ports)
 
 
 class NetBuilder(object):
@@ -849,14 +899,12 @@ class NetBuilder(object):
     """
 
     def __init__(self):
-
         self._net = Network()
         self._names = Counter()
 
     def __getitem__(self, keys: list):
-        
-        node_set: NodeSet = self._net[keys]
-        return BuildMultitap(self, node_set.ports)
+        multitap: Multitap = to_multitap(keys)
+        return BuildMultitap(self, multitap.ports)
 
     def add_ins(self, in_: typing.List[InFactory]):
         ports = []
@@ -875,8 +923,8 @@ class NetBuilder(object):
         return self._net.add_node(node)
 
     def __lshift__(self, in_: InFactory):
-        ports =  self.add_in(in_)
-        return BuildMultitap(self,ports)
+        ports = self.add_in(in_)
+        return BuildMultitap(self, ports)
 
     @property
     def net(self):
@@ -887,12 +935,14 @@ class NetBuilder(object):
             ins, outs
         )
     
-    def build_learner(self, name: str, learner_mixins: typing.Type[LearnerMixin]):
-        
-        class _(*learner_mixins):
-            __qualname__ = name
+    # add in port mapping
+    # TODO: Figure out how to implement
+    # def build_machine(self, name: str, *learner_mixins: typing.Type[MachineComponent], **name_map):
 
-        return _(self.net)
+    #     class _(*learner_mixins):
+    #         __qualname__ = name
+
+    #     return _(self.net)
         
 
 # define interface that must be defined in learn, test, machine mixins

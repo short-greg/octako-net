@@ -6,11 +6,12 @@ for learning that operation and a testing algorithm for testing the operation.
 """
 
 from dataclasses import dataclass
+import typing
 import torch
 from . import networks
 import torch.optim
-import torch.nn
-from abc import abstractmethod
+import torch.nn as nn
+from abc import abstractclassmethod, abstractmethod, abstractproperty
 
 
 def args_to_device(f):
@@ -45,28 +46,55 @@ def dict_result_to_cpu(f):
     return wrapper
 
 
-class LearnerMixin(object):
+class MachineComponent(nn.Module):
 
-    def check_interface(self, net: networks.Network, in_, out):
-        if in_ not in net:
-            raise ValueError(f"Inputs {in_} not in the network.")
+    op = None
+
+    def __call__(self, *t: torch.Tensor):
+        raise NotImplementedError
+
+    def is_(self, component_cls):
+        if isinstance(self, component_cls):
+            return True
+
+
+class LearningMachine(nn.Module):
+
+    def __init__(self, components: typing.List[MachineComponent]):
         
-        if out not in net:
-            raise ValueError(f'Outputs {out} not in the network.')
+        # TODO: Check they do not conflict
+        for v in components:
+            setattr(self, v.name(), v)
+        self._components = components
+    
+    @property
+    def components(self):
+        return self._components
+    
+    def is_(self, component_cls: typing.Type):
+        
+        for component in self._components:
+            if component.is_(component_cls):
+                return True
+        return False
 
-    def __init__(self, net):
-        """initializer for learner. Will only be executed once
 
-        Args:
-            net : Network used by learner. Can be a "Network" or an
-            object composed of multiple networks
-        """
-        self._net = net
+def is_machine(obj: LearningMachine, cls: typing.Type[MachineComponent]):
+    """Check if a learning machine contains component cls"""
+
+    return isinstance(getattr(obj, cls.op), cls)
 
 
-class Learner(LearnerMixin):
+# TODO: Think a little more about the components
+# add in a compound component?
+
+
+# TODO: Update these components
+
+class Learner(MachineComponent):
     """Base learning machine class
     """
+    op = 'learn'
 
     @abstractmethod
     def learn(self, x, t):
@@ -79,9 +107,11 @@ class Learner(LearnerMixin):
         raise NotImplementedError
 
 
-class Validator(LearnerMixin):
+class Validator(MachineComponent):
     """Base learning machine class
     """
+    op = 'test'
+
     @abstractmethod
     def test(self, x, t):
         """Function for evaluating the mapping from x to t
@@ -93,7 +123,9 @@ class Validator(LearnerMixin):
         raise NotImplementedError
 
 
-class Regressor(LearnerMixin):
+class Regressor(MachineComponent):
+
+    op = 'regress'
 
     @abstractmethod
     def regress(self, x, t):
@@ -110,7 +142,9 @@ class SimpleRegressor(Regressor):
         return self._net.probe('y', by={x: x})['y']
 
 
-class Classifier(LearnerMixin):
+class Classifier(MachineComponent):
+
+    op = 'classify'
 
     @abstractmethod
     def classify(self, x: torch.Tensor):

@@ -75,6 +75,14 @@ class Multitap:
     def __getitem__(self, idx: int):
         return self.ports[idx]
     
+    @singledispatchmethod
+    def __getitem__(self, idx: typing.Iterable):
+        return Multitap([self.ports[i] for i in idx])
+
+    @__getitem__.register
+    def _(self, idx: int) -> Port:
+        return self.ports[idx]
+
     @property
     def sizes(self):
         return [port.size for port in self.ports]
