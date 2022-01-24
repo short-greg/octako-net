@@ -11,7 +11,7 @@ from torch import Size
 from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
 from .modules import Multi, Multi, Diverge
 from functools import wraps
-from learners import MachineComponent
+from .learners import MachineComponent
 
 
 T = TypeVar('T')
@@ -935,8 +935,8 @@ class NetBuilder(object):
             ins, outs
         )
     
-    # add in port mapping
     # TODO: Figure out how to implement
+    # add in port mapping
     # def build_machine(self, name: str, *learner_mixins: typing.Type[MachineComponent], **name_map):
 
     #     class _(*learner_mixins):
