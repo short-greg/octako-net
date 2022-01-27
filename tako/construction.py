@@ -30,6 +30,15 @@ class arg(object):
         return kwargs.get(self._name, self)
 
 
+class __arg(object):
+
+    def __getattribute__(self, __name: str) -> arg:
+        return arg(__name)
+
+
+arg_ = __arg()
+
+
 # use this to have functions that process the args
 # class ArgFunc(object):
 

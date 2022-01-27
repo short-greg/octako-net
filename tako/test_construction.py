@@ -6,7 +6,7 @@ from .networks import In, ModRef, Multitap, Node, OpNode, Parameter, Port
 from .construction import (
     Chain, Info, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, 
     ParameterFactory, ScalarInFactory, TensorInFactory, tensor_in, scalar_in, diverge, 
-    SequenceFactory, sz, arg, factory
+    SequenceFactory, sz, arg, factory, arg_
 )
 import pytest
 
@@ -27,6 +27,11 @@ class TestArg:
         v = arg('x')
         res = v.to(y=2)
         assert res.name == "x"
+    
+    def test_arg__creates_an_arg(self):
+
+        v = arg_.x
+        assert v.name == 'x'
 
 
 class TestSz:
@@ -405,4 +410,5 @@ class TestNetBuilder:
         multitap << sequence
     
         assert builder.net['Linear_2'] != builder.net['Linear']
+
 
