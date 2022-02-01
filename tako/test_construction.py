@@ -415,5 +415,3 @@ class TestNetBuilder:
         multitap << sequence
     
         assert builder.net['Linear_2'] != builder.net['Linear']
-
-
