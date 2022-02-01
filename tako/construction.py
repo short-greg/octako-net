@@ -200,8 +200,10 @@ class SequenceFactory(NetFactory):
             return SequenceFactory(self._op_factories + other._op_factories)
         return SequenceFactory(self._op_factories + [other])
     
-    def produce(self, in_: typing.List[torch.Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
+        if isinstance(in_, Out):
+            in_ = [in_]
         sequential = nn.Sequential()
 
         for i, factory in enumerate(self._op_factories):
@@ -332,9 +334,9 @@ class ArgSet(_ArgMap):
         self._args = Args(*args)
         self._kwargs = Kwargs(*kwargs)
     
-    def lookup(self, in_size: torch.Size, kwargs):
+    def lookup(self, sizes: typing.List[torch.Size], kwargs):
 
-        return ArgSet(*self._args.lookup(in_size, kwargs).items, **self._kwargs.lookup(in_size, kwargs).items)
+        return ArgSet(*self._args.lookup(sizes, kwargs).items, **self._kwargs.lookup(sizes, kwargs).items)
     
     def remap(self, kwargs):
 
@@ -367,15 +369,25 @@ class BaseMod(ABC):
 def compute_out_sizes(mod, in_: typing.List[Port]) -> typing.Tuple[torch.Size]:
 
     in_tensors = []
+
+    # get in_tensors
     for in_i in in_:
-        x = torch.zeros(*[
-            s if s != -1 else 1 for s in in_.size
-        ], dtype=in_i.dtype)
+        size = [*in_i.size]
+        if size[0] == -1:
+            size[0] = 1
+        x = torch.zeros(*size, dtype=in_i.dtype)
         in_tensors.append(x)
-    y = mod(*x)
+    y = mod(*in_tensors)
     if isinstance(y, torch.Tensor):
         y = [y]
-    return list(Out(y_i.size(), y_i.dtype) for y_i in y)
+    
+    outs = []
+    for y_i in y:
+        size = [*y_i.size()]
+        print(y_i.size())
+        size[0] = -1
+        outs.append(Out(torch.Size(size), y_i.dtype))
+    return outs
 
 
 class OpFactory(NetFactory):
@@ -389,12 +401,12 @@ class OpFactory(NetFactory):
     def __lshift__(self, other) -> SequenceFactory:
         return SequenceFactory([self, other])
 
-    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
-        if isinstance(in_, Size):
+        if isinstance(in_, Out):
             in_ = [in_]
 
-        module = self._mod.produce(in_, **kwargs)
+        module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
         return module, compute_out_sizes(module, in_)
     
     @to_multitap
@@ -481,7 +493,10 @@ class ModFactory(BaseMod):
     @singledispatchmethod
     def produce(self, in_: typing.List[torch.Size], **kwargs):
         
+        if isinstance(in_, torch.Size):
+            in_ = [in_]
         module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
+
         args = self._args.lookup(in_, kwargs)
         return module(*args.args, **args.kwargs)
     
@@ -555,9 +570,9 @@ class DivergeFactory(NetFactory):
     def __lshift__(self, other) -> SequenceFactory:
         return SequenceFactory([self, other])
 
-    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
-        if isinstance(in_, Size):
+        if isinstance(in_, Out):
             in_ = [in_]
         mods = []
         outs = []
@@ -602,9 +617,9 @@ class MultiFactory(NetFactory):
     def __lshift__(self, other) -> SequenceFactory:
         return SequenceFactory([self, other])
 
-    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
-        if isinstance(in_, Size):
+        if isinstance(in_, Out):
             in_ = [in_]
         mods = []
         outs = []
