@@ -132,14 +132,14 @@ class Regressor(MachineComponent):
         raise NotImplementedError
 
 
-class SimpleRegressor(Regressor):
+# class SimpleRegressor(Regressor):
 
-    def __init__(self, net):
-        super().__init__(net)
-        self.check_interface(self, 'x', 'y')
+#     def __init__(self, net):
+#         super().__init__(net)
+#         self.check_interface(self, 'x', 'y')
     
-    def regress(self, x: torch.Tensor):
-        return self._net.probe('y', by={x: x})['y']
+#     def regress(self, x: torch.Tensor):
+#         return self._net.probe('y', by={x: x})['y']
 
 
 class Classifier(MachineComponent):
@@ -151,12 +151,12 @@ class Classifier(MachineComponent):
         raise NotImplementedError
 
 
-class BinaryClassifier(Classifier):
+# class BinaryClassifier(Classifier):
 
-    def __init__(self, net):
-        super().__init__(net)
-        self.check_interface(self, 'x', 'y')
+#     def __init__(self, net):
+#         super().__init__(net)
+#         self.check_interface(self, 'x', 'y')
 
-    def classify(self, x: torch.Tensor):
-        y = self._net.probe('y', by={x: x})['y']
-        return (y >= 0.5).float()
+#     def classify(self, x: torch.Tensor):
+#         y = self._net.probe('y', by={x: x})['y']
+#         return (y >= 0.5).float()

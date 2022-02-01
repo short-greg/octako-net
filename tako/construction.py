@@ -5,6 +5,7 @@ from functools import singledispatch, singledispatchmethod
 from os import path
 from typing import Any, Counter, Iterator, TypeVar
 import typing
+from numpy import isin
 import torch
 from torch import nn
 from torch import Size
@@ -38,15 +39,6 @@ class __arg(object):
 
 arg_ = __arg()
 
-
-# use this to have functions that process the args
-# class ArgFunc(object):
-
-#     def __init__(self, args, f):
-
-#         self._f = f
-#         self._args = args
-    
 
 def to_multitap(f):
 
@@ -99,6 +91,34 @@ class sz(object, metaclass=SizeMeta):
         if len(sizes[self._port_idx]) <= self._dim_idx:
             raise ValueError(f"Size dimension {len(sizes)} is smaller than the dimension index {self._dim_idx}")
         return sizes[self._port_idx][self._dim_idx]
+
+
+class argf(object):
+
+    def __init__(self, args, f):
+
+        self._f = f
+        self._args = args
+    
+    def to(self, **kw):
+        args = []
+        for a in self._args:
+            if isinstance(a, arg):
+                args.append(a.to(kw))
+            else:
+                args.append(a)
+        return argf(args, self._f)
+    
+    def process(self, sizes: typing.List[torch.Size], **kwargs):
+        _args = []
+        for a in self._args:
+            if isinstance(a, sz):
+                _args.append(a.process(sizes))
+            elif isinstance(a, arg):
+                _args.append(a.to(kwargs))
+            else:
+                _args.append(a)
+        return self._f(*_args)
 
 
 class LabelSet:
@@ -228,6 +248,10 @@ class _ArgMap(ABC):
     def _(self, val: arg, kwargs):
         return val.to(**kwargs)
 
+    @_remap_arg.register
+    def _(self, val: argf, kwargs):
+        return val.to(**kwargs)
+
     @singledispatchmethod
     def _lookup_arg(self, val, in_size: torch.Size, kwargs):
         return val
@@ -239,6 +263,10 @@ class _ArgMap(ABC):
     @_lookup_arg.register
     def _(self, val: sz, in_size: torch.Size, kwargs):
         return val.process(in_size)
+
+    @_lookup_arg.register
+    def _(self, val: argf, in_size: torch.Size, kwargs):
+        return val.process(in_size, kwargs)
 
     @abstractmethod
     def lookup(self, in_size: torch.Size, kwargs):        
@@ -371,7 +399,6 @@ class OpFactory(NetFactory):
     @to_multitap
     def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         
-        print(in_)
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
         name = self._info.name if self._info.name != '' else type(module).__name__
 
@@ -526,7 +553,6 @@ class ListOut(Out):
         self._sizes = [Args(*size) for size in sizes]
 
     def to(self, **kwargs):
-        
         sizes = [list(size.remap(kwargs).items) for size in self._sizes]
         return ListOut(sizes)
 
@@ -541,7 +567,7 @@ class SizeOut(Out):
 
     def __init__(self, size: torch.Size):
         
-        self._size =size
+        self._size = size
     
     def to(self, **kwargs):
         return SizeOut(self._size)
@@ -572,8 +598,20 @@ class FuncOut(Out):
         return FuncOut(self._f)
 
     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
-        return FuncOut(mod, in_size, kwargs)
+        return self._f(mod, in_size, kwargs)
 
+
+class ArgfOut(Out):
+
+    def __init__(self, f: argf):
+        self._f: argf = f
+
+    def to(self, **kwargs):
+        return ArgfOut(self._f.to(kwargs))
+
+    def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
+        return self._f.process(in_size, kwargs)
+        
 
 def _func_type():
     pass
@@ -605,6 +643,11 @@ def _(out_: torch.Size):
 @to_out.register
 def _(out_: Out):
     return out_
+
+
+@to_out.register
+def _(out_: argf):
+    return ArgfOut(out_)
 
 
 class DivergeFactory(NetFactory):
@@ -783,8 +826,12 @@ class TensorInFactory(InFactory):
 
     def produce(self) -> In:
 
+        size = [*self._size]
+        if self._size[0] == -1:
+            size[0] = 1
+
         default = self._default(
-            *self._size, device=self._device
+            *size, device=self._device
         ) if self._call_default else self._default  
         
         return In.from_tensor(
