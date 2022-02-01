@@ -38,6 +38,36 @@ class IndexRef(ModRef):
         return result[self.index]
 
 
+# @dataclasses.dataclass
+# class NetworkPort(Port):
+#     """A port into or out of a node. Used for connecting nodes together.
+#     """
+    
+#     network: str
+
+#     @property
+#     def module(self):
+#         return self.network
+
+#     def select(self, by: typing.Dict):
+
+#         sub_by = by.get(self.network)
+#         if self.network is None:
+#             return None
+
+#         return self.ref.select(sub_by)
+
+
+@dataclasses.dataclass
+class Out:
+
+    size: torch.Size
+    dtype: torch.dtype=torch.float
+
+
+OutList = typing.List[Out]
+
+
 @dataclasses.dataclass
 class Port:
     """A port into or out of a node. Used for connecting nodes together."""
@@ -46,6 +76,7 @@ class Port:
     # name: str
     ref: ModRef
     size: torch.Size
+    dtype: torch.dtype=torch.float
 
     @property
     def module(self):
@@ -108,24 +139,6 @@ class Multitap:
         return cls(result)
 
 
-@dataclasses.dataclass
-class NetworkPort(Port):
-    """A port into or out of a node. Used for connecting nodes together.
-    """
-    
-    network: str
-
-    @property
-    def module(self):
-        return self.network
-
-    def select(self, by: typing.Dict):
-
-        sub_by = by.get(self.network)
-        if self.network is None:
-            return None
-
-        return self.ref.select(sub_by)
 
 
 @dataclasses.dataclass
@@ -164,9 +177,6 @@ class Node(nn.Module):
     def annotation(self, annotation: str) -> str:
         self._annotation = annotation
 
-    def ports(self) -> typing.Iterable[Port]:
-        raise NotImplementedError
-    
     def cache_names_used(self):
         raise NotImplementedError
 
@@ -178,6 +188,10 @@ class Node(nn.Module):
         """
         raise NotImplementedError
 
+    @property
+    def ports(self) -> typing.Iterable[Port]:
+        raise NotImplementedError
+    
     @property
     def inputs(self) -> Multitap:
         raise NotImplementedError
@@ -276,7 +290,7 @@ class OpNode(Node):
     def __init__(
         self, name: str, operation: nn.Module, 
         inputs: typing.Union[Multitap, Port, typing.List[Port]],
-        out_size: typing.Union[torch.Size, typing.List[torch.Size]],
+        outs: typing.Union[Out, typing.List[Out]],
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
         annotation: str=None
     ):
@@ -285,11 +299,23 @@ class OpNode(Node):
             inputs = Multitap([inputs])
         elif isinstance(inputs, type([])):
             inputs = Multitap(inputs)
-        self._out_size = out_size
+        
+        self._outs = outs
         self._inputs: Multitap = inputs
         self.op: nn.Module = operation
-        # self.input_nodes = [in_.module for in_ in self._inputs]
+        if isinstance(self._outs, list):
+            self._ports = [Port(IndexRef(self.name, i), out.size, out.dtype) for i, out in enumerate(self._outs)]
 
+        else: self._ports = Port(ModRef(self.name), self._outs.size, self._outs.dtype),
+    
+    @property
+    def input_nodes(self) -> typing.List[str]:
+        """
+        Returns:
+            typing.List[str]: Names of the nodes input into the node
+        """
+        return [in_.module for in_ in self.inputs]
+    
     @property
     def ports(self) -> typing.Iterable[Port]:
         """
@@ -302,18 +328,7 @@ class OpNode(Node):
         Returns:
             typing.Iterable[Port]: [The output ports for the node]
         """
-        if type(self._out_size) == list:
-            return [Port(IndexRef(self.name, i), sz) for i, sz in enumerate(self._out_size)]
-
-        return Port(ModRef(self.name), self._out_size),
-    
-    @property
-    def input_nodes(self) -> typing.List[str]:
-        """
-        Returns:
-            typing.List[str]: Names of the nodes input into the node
-        """
-        return [in_.module for in_ in self.inputs]
+        return self._ports
 
     # TODO: FIND OUT WHY NOT WORKING
     @property
@@ -326,7 +341,7 @@ class OpNode(Node):
 
     def clone(self):
         return OpNode(
-            self.name, self.op, self._inputs, self._out_size, self._labels,
+            self.name, self.op, self._inputs, self._outs, self._labels,
             self._annotation
         )
     
@@ -352,7 +367,7 @@ class In(Node):
     """[Input node in a network.]"""
 
     def __init__(
-        self, name, sz: torch.Size, value_type: typing.Type, default_value, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+        self, name, sz: torch.Size, dtype: typing.Union[type, torch.dtype], default_value, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
         """[initializer]
 
         Args:
@@ -360,19 +375,19 @@ class In(Node):
             out_size (torch.Size): [The size of the in node]
         """
         super().__init__(name, labels=labels, annotation=annotation)
-        self._value_type = value_type
+        self._dtype = dtype
         self._out_size = sz
         self._default_value = default_value
 
     def to(self, device):
-        if self._value_type == torch.Tensor:
+        if self._dtype == torch.Tensor:
             self._default_value = self._default_value.to(device)
 
         self._default_value = self._default_value.to(device)
 
     @property
     def ports(self) -> typing.Iterable[Port]:
-        return Port(ModRef(self.name), self._out_size),
+        return Port(ModRef(self.name), self._out_size, self._dtype),
     
     def forward(x):
 
@@ -392,7 +407,7 @@ class In(Node):
 
     def clone(self):
         return In(
-            self.name, self._out_size, self._value_type, self._default_value, self._labels,
+            self.name, self._out_size, self._dtype, self._default_value, self._labels,
             self._annotation
 
         )
@@ -407,7 +422,7 @@ class In(Node):
 
     @classmethod
     def from_tensor(
-        cls, name, sz: torch.Size, default_value: torch.Tensor=None, 
+        cls, name, sz: torch.Size, dtype: torch.dtype=torch.float, default_value: torch.Tensor=None, 
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, 
         annotation: str=None, device: str='cpu'):
         if default_value is None:
@@ -421,7 +436,7 @@ class In(Node):
                 default_value = torch.zeros(*sz2, device=device)
             else:
                 default_value = torch.tensor([], device=device)
-        return cls(name, sz, torch.Tensor, default_value, labels, annotation)
+        return cls(name, sz, dtype, default_value, labels, annotation)
     
     @classmethod
     def from_scalar(
@@ -439,7 +454,7 @@ class Parameter(Node):
 
     # value_type: typing.Type, default_value, 
     def __init__(
-        self, name: str, sz: torch.Size, reset_func: typing.Callable[[torch.Size], torch.Tensor], labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+        self, name: str, sz: torch.Size, dtype: torch.dtype, reset_func: typing.Callable[[torch.Size], torch.Tensor], labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
         """[initializer]
 
         Args:
@@ -449,6 +464,7 @@ class Parameter(Node):
         super().__init__(name, labels=labels, annotation=annotation)
         self._reset_func = reset_func
         self._out_size = sz
+        self._dtype = dtype
         self._value = self._reset_func(self._out_size)
 
     def reset(self):
@@ -478,7 +494,7 @@ class Parameter(Node):
 
     def clone(self):
         return Parameter(
-            self.name, self._out_size, self._reset_func, self._labels,
+            self.name, self._out_size, self._dtype, self._reset_func, self._labels,
             self._annotation
 
         )

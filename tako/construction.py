@@ -9,10 +9,9 @@ from numpy import isin
 import torch
 from torch import nn
 from torch import Size
-from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port
+from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port, Out
 from .modules import Multi, Multi, Diverge
 from functools import wraps
-from .learners import MachineComponent
 
 
 T = TypeVar('T')
@@ -365,24 +364,26 @@ class BaseMod(ABC):
         raise NotImplementedError
 
 
-class Out(ABC):
+def compute_out_sizes(mod, in_: typing.List[Port]) -> typing.Tuple[torch.Size]:
 
-    @abstractmethod
-    def to(self, **kwargs):
-        raise NotImplementedError
-
-    @abstractmethod
-    def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):
-        raise NotImplementedError
+    in_tensors = []
+    for in_i in in_:
+        x = torch.zeros(*[
+            s if s != -1 else 1 for s in in_.size
+        ], dtype=in_i.dtype)
+        in_tensors.append(x)
+    y = mod(*x)
+    if isinstance(y, torch.Tensor):
+        y = [y]
+    return list(Out(y_i.size(), y_i.dtype) for y_i in y)
 
 
 class OpFactory(NetFactory):
 
     def __init__(
-        self, module: BaseMod, out: Out=None, info: Info=None
+        self, module: BaseMod, info: Info=None
     ):
         super().__init__(info)
-        self._out = to_out(out)
         self._mod = module
     
     def __lshift__(self, other) -> SequenceFactory:
@@ -394,7 +395,7 @@ class OpFactory(NetFactory):
             in_ = [in_]
 
         module = self._mod.produce(in_, **kwargs)
-        return module, self._out.produce(module, in_, **kwargs)
+        return module, compute_out_sizes(module, in_)
     
     @to_multitap
     def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
@@ -402,8 +403,9 @@ class OpFactory(NetFactory):
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
         name = self._info.name if self._info.name != '' else type(module).__name__
 
+        outs = compute_out_sizes(module, in_)
         op_node = OpNode(
-            name, module, in_, self._out.produce(module, in_, **kwargs), self._info.labels,
+            name, module, in_, outs, self._info.labels,
             self._info.annotation
         )
 
@@ -412,12 +414,12 @@ class OpFactory(NetFactory):
     def to(self, **kwargs):
         mod = self._mod.to(**kwargs)
         return OpFactory(
-            mod, self._out.to(**kwargs), self._info
+            mod, self._info
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return OpFactory(self._mod, self._out, self._info.spawn(name, labels, annotation, fix))
+        return OpFactory(self._mod, self._info.spawn(name, labels, annotation, fix))
 
     
 ModType = typing.Union[typing.Type[nn.Module], arg]
@@ -442,10 +444,10 @@ class NNMod(object):
 
     def __call__(self, *args, **kwargs) -> OpFactory:
 
-        out_ = to_out(kwarg_pop('_out', kwargs))
+        # out_ = to_out(kwarg_pop('_out', kwargs))
         info = kwarg_pop('_info', kwargs)
         
-        return OpFactory(ModFactory(self._nnmodule, *args, **kwargs), out_, info)
+        return OpFactory(ModFactory(self._nnmodule, *args, **kwargs), info)
 
 
 class OpMod(object):
@@ -499,8 +501,8 @@ class ModFactory(BaseMod):
     def kwargs(self):
         return self._args.kwargs
 
-    def op(self, out_: Out=None, info: Info=None) -> OpFactory:
-        return OpFactory(self, to_out(out_), info)
+    def op(self, info: Info=None) -> OpFactory:
+        return OpFactory(self, info)
 
 
 class Instance(BaseMod):
@@ -521,8 +523,8 @@ class Instance(BaseMod):
     def module(self):
         return self._module
 
-    def op(self, out_: Out=None, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> OpFactory:
-        return OpFactory(self, to_out(out_), name, labels, annotation)
+    def op(self, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> OpFactory:
+        return OpFactory(self, Info(name, labels, annotation))
 
 
 @singledispatch
@@ -540,114 +542,6 @@ def instance(mod: ModInstance):
 @instance.register
 def _(mod: str):
     return Instance(arg(mod))
-
-
-class ListOut(Out):
-
-    def __init__(self, sizes: typing.List):
-
-        # TODO: Take care of the case that multiple lists can be output
-        if len(sizes) == 0 or not isinstance(sizes[0], list):
-            sizes = [sizes]
-        
-        self._sizes = [Args(*size) for size in sizes]
-
-    def to(self, **kwargs):
-        sizes = [list(size.remap(kwargs).items) for size in self._sizes]
-        return ListOut(sizes)
-
-    def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs): 
-        return [
-            torch.Size(size.lookup(in_size, kwargs).items) 
-            for size in self._sizes
-        ]
-
-
-class SizeOut(Out):
-
-    def __init__(self, size: torch.Size):
-        
-        self._size = size
-    
-    def to(self, **kwargs):
-        return SizeOut(self._size)
-
-    def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs): 
-        return self._size
-
-
-class NullOut(Out):
-
-    def __init__(self):
-        pass
-
-    def to(self, **kwargs):
-        return NullOut()
-
-    def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
-        return in_size
-
-
-class FuncOut(Out):
-
-    def __init__(self, f: typing.Callable[[nn.Module, torch.Size, typing.Dict], torch.Size]):
-        
-        self._f = f
-
-    def to(self, **kwargs):
-        return FuncOut(self._f)
-
-    def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
-        return self._f(mod, in_size, kwargs)
-
-
-class ArgfOut(Out):
-
-    def __init__(self, f: argf):
-        self._f: argf = f
-
-    def to(self, **kwargs):
-        return ArgfOut(self._f.to(kwargs))
-
-    def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
-        return self._f.process(in_size, kwargs)
-        
-
-def _func_type():
-    pass
-
-_func_type = type(_func_type)
-
-
-@singledispatch
-def to_out(out_=None):
-    if out_ is not None:
-        raise ValueError(f'Argument out_ is not a valid type {type(out_)}')
-    return NullOut()
-
-@to_out.register
-def _(out_: list):
-    return ListOut(out_)
-
-
-@to_out.register
-def _(out_: _func_type):
-    return FuncOut(out_)
-
-
-@to_out.register
-def _(out_: torch.Size):
-    return SizeOut(out_)
-
-
-@to_out.register
-def _(out_: Out):
-    return out_
-
-
-@to_out.register
-def _(out_: argf):
-    return ArgfOut(out_)
 
 
 class DivergeFactory(NetFactory):
@@ -670,7 +564,7 @@ class DivergeFactory(NetFactory):
         for in_i, op_factory in zip(in_, self._op_factories):
             mod, out = op_factory.produce(in_i, **kwargs)
             mods.append(mod)
-            outs.append(out)
+            outs.extend(out)
         mod = Diverge(mods)
         return mod, outs
     
@@ -717,7 +611,7 @@ class MultiFactory(NetFactory):
         for op_factory in self._op_factories:
             mod, out = op_factory.produce(in_, **kwargs)
             mods.append(mod)
-            outs.append(out)
+            outs.extend(out)
         mod = Multi(mods)
         return mod, outs
     
@@ -813,12 +707,16 @@ class InFactory(ABC):
 
 class TensorInFactory(InFactory):
 
-    def __init__(self, size: typing.Union[torch.Size, typing.Iterable], default, call_default: bool=False, device: str='cpu', info: Info=None):
+    def __init__(
+        self, size: typing.Union[torch.Size, typing.Iterable], dtype: torch.dtype, 
+        default, call_default: bool=False, device: str='cpu', info: Info=None
+    ):
         
         self._default = default
         if not isinstance(size, torch.Size):
             size = torch.Size(size)
 
+        self._dtype = dtype
         self._size = size
         self._call_default = call_default
         self._device = device
@@ -835,13 +733,13 @@ class TensorInFactory(InFactory):
         ) if self._call_default else self._default  
         
         return In.from_tensor(
-            self._info.name, self._size, default, 
+            self._info.name, self._size, self._dtype, default, 
             self._info.labels, self._info.annotation
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return TensorInFactory(self._size, self._default, self._call_default, self._device, self._info.spawn(name, labels, annotation, fix))
+        return TensorInFactory(self._size, self._dtype, self._default, self._call_default, self._device, self._info.spawn(name, labels, annotation, fix))
 
 tensor_in = TensorInFactory
 
@@ -870,20 +768,21 @@ scalar_in = ScalarInFactory
 
 class ParameterFactory(InFactory):
 
-    def __init__(self, size: torch.Size, reset_func, device: str='cpu', info: Info=None):
+    def __init__(self, size: torch.Size, dtype: torch.dtype, reset_func, device: str='cpu', info: Info=None):
         
         self._reset_func = reset_func
         self._sz = size
         self._device = device
         self._info = info or Info(name='Param')
+        self._dtype = dtype
 
     def produce(self, **kwargs) -> Node:
 
-        return Parameter(self._info.name, self._sz, self._reset_func, self._info.labels, self._info.annotation)
+        return Parameter(self._info.name, self._sz, self._dtype, self._reset_func, self._info.labels, self._info.annotation)
         
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return ParameterFactory(self._sz, self._reset_func, self._device, self._info.spawn(name, labels, annotation, fix))
+        return ParameterFactory(self._sz, self._dtype, self._reset_func, self._device, self._info.spawn(name, labels, annotation, fix))
 
 param_in = ParameterFactory
 
@@ -999,7 +898,125 @@ class NetBuilder(object):
     #         __qualname__ = name
 
     #     return _(self.net)
+
+
+# class Out(ABC):
+
+#     @abstractmethod
+#     def to(self, **kwargs):
+#         raise NotImplementedError
+
+#     @abstractmethod
+#     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):
+#         raise NotImplementedError
+
+
+# class ListOut(Out):
+
+#     def __init__(self, sizes: typing.List):
+
+#         # TODO: Take care of the case that multiple lists can be output
+#         if len(sizes) == 0 or not isinstance(sizes[0], list):
+#             sizes = [sizes]
         
+#         self._sizes = [Args(*size) for size in sizes]
+
+#     def to(self, **kwargs):
+#         sizes = [list(size.remap(kwargs).items) for size in self._sizes]
+#         return ListOut(sizes)
+
+#     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs): 
+#         return [
+#             torch.Size(size.lookup(in_size, kwargs).items) 
+#             for size in self._sizes
+#         ]
+
+
+# class SizeOut(Out):
+
+#     def __init__(self, size: torch.Size):
+        
+#         self._size = size
+    
+#     def to(self, **kwargs):
+#         return SizeOut(self._size)
+
+#     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs): 
+#         return self._size
+
+
+# class NullOut(Out):
+
+#     def __init__(self):
+#         pass
+
+#     def to(self, **kwargs):
+#         return NullOut()
+
+#     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
+#         return in_size
+
+
+# class FuncOut(Out):
+
+#     def __init__(self, f: typing.Callable[[nn.Module, torch.Size, typing.Dict], torch.Size]):
+        
+#         self._f = f
+
+#     def to(self, **kwargs):
+#         return FuncOut(self._f)
+
+#     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
+#         return self._f(mod, in_size, kwargs)
+
+
+# class ArgfOut(Out):
+
+#     def __init__(self, f: argf):
+#         self._f: argf = f
+
+#     def to(self, **kwargs):
+#         return ArgfOut(self._f.to(kwargs))
+
+#     def produce(self, mod: nn.Module, in_size: torch.Size, **kwargs):         
+#         return self._f.process(in_size, kwargs)
+        
+
+# def _func_type():
+#     pass
+
+# _func_type = type(_func_type)
+
+
+# @singledispatch
+# def to_out(out_=None):
+#     if out_ is not None:
+#         raise ValueError(f'Argument out_ is not a valid type {type(out_)}')
+#     return NullOut()
+
+# @to_out.register
+# def _(out_: list):
+#     return ListOut(out_)
+
+
+# @to_out.register
+# def _(out_: _func_type):
+#     return FuncOut(out_)
+
+
+# @to_out.register
+# def _(out_: torch.Size):
+#     return SizeOut(out_)
+
+
+# @to_out.register
+# def _(out_: Out):
+#     return out_
+
+
+# @to_out.register
+# def _(out_: argf):
+#     return ArgfOut(out_)
 
 # define interface that must be defined in learn, test, machine mixins
 # 
