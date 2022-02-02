@@ -1,13 +1,13 @@
  
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
-from functools import singledispatch, singledispatchmethod
+from functools import partial, singledispatch, singledispatchmethod
 from os import path
 from typing import Any, Counter, Iterator, TypeVar
 import typing
 from numpy import isin
 import torch
-from torch import nn, tensor
+from torch import clamp, nn, tensor
 from torch import Size
 from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port, Out
 from .modules import Multi, Multi, Diverge
@@ -366,40 +366,46 @@ class BaseMod(ABC):
         raise NotImplementedError
 
 
-def compute_out_sizes(mod, in_: typing.List[Port]) -> typing.Tuple[torch.Size]:
-
-    in_tensors = []
-
-    # get in_tensors
-    for in_i in in_:
-        size = [*in_i.size]
-        if size[0] == -1:
-            size[0] = 1
-        x = torch.zeros(*size, dtype=in_i.dtype)
-        in_tensors.append(x)
-    y = mod(*in_tensors)
-    if isinstance(y, torch.Tensor):
-        y = [y]
-    
-    outs = []
-    for y_i in y:
-        size = [*y_i.size()]
-        print(y_i.size())
-        size[0] = -1
-        outs.append(Out(torch.Size(size), y_i.dtype))
-    return outs
-
-
 class OpFactory(NetFactory):
 
     def __init__(
-        self, module: BaseMod, info: Info=None
+        self, module: BaseMod, info: Info=None, _out: typing.List[typing.List]=None
     ):
         super().__init__(info)
         self._mod = module
+        self._out = _out
     
     def __lshift__(self, other) -> SequenceFactory:
         return SequenceFactory([self, other])
+
+    def _in_tensor(self, in_):
+        
+        in_tensors = []
+        for in_i in in_:
+            size = [*in_i.size]
+            if size[0] == -1:
+                size[0] = 1
+            x = torch.zeros(*size, dtype=in_i.dtype)
+            in_tensors.append(x)
+        return in_tensors
+
+    def _out_sizes(self, mod, in_) -> typing.Tuple[torch.Size]:
+
+        y = mod(*self._in_tensor(in_))
+        if isinstance(y, torch.Tensor):
+            y = [y]
+        
+        out_guide = self._out or [[] * len(y)]
+        outs = []
+        for y_i, out_i in zip(y, out_guide):
+            size = [*y_i.size()]
+            for i, out_el in enumerate(out_i):
+                if out_el == -1: size[i] = -1
+            else:
+                if size: size[0] = -1
+            
+            outs.append(Out(torch.Size(size), y_i.dtype))
+        return outs
 
     def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -407,7 +413,7 @@ class OpFactory(NetFactory):
             in_ = [in_]
 
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        return module, compute_out_sizes(module, in_)
+        return module, self._out_sizes(module, in_)
     
     @to_multitap
     def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
@@ -415,7 +421,7 @@ class OpFactory(NetFactory):
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
         name = self._info.name if self._info.name != '' else type(module).__name__
 
-        outs = compute_out_sizes(module, in_)
+        outs = self._out_sizes(module, in_)
         op_node = OpNode(
             name, module, in_, outs, self._info.labels,
             self._info.annotation
@@ -438,16 +444,6 @@ ModType = typing.Union[typing.Type[nn.Module], arg]
 ModInstance = typing.Union[nn.Module, arg]
 
 
-def kwarg_pop(key, kwargs):
-
-    result = None
-    if '_out' in kwargs:
-        result = kwargs.get('_out')
-        del kwargs['_out']
-    
-    return result
-
-
 class TakoMod(ABC):
     """Convenience for creating an op factory like a normal module
 
@@ -466,12 +462,9 @@ class NNMod(TakoMod):
 
         self._nnmodule = nnmodule
 
-    def __call__(self, *args, **kwargs) -> OpFactory:
-
-        # out_ = to_out(kwarg_pop('_out', kwargs))
-        info = kwarg_pop('_info', kwargs)
+    def __call__(self, *args, _info: Info=None, **kwargs) -> OpFactory:
         
-        return OpFactory(ModFactory(self._nnmodule, *args, **kwargs), info)
+        return OpFactory(ModFactory(self._nnmodule, *args, **kwargs), _info)
 
 
 class TensorMod(TakoMod):
@@ -480,9 +473,8 @@ class TensorMod(TakoMod):
 
         self._tensor_factory = tensor_factory
 
-    def __call__(self, *args, **kwargs) -> OpFactory:
-        info = kwarg_pop('_info', kwargs)
-        return TensorInFactory(self._tensor_factory(*args, **kwargs), info)
+    def __call__(self, *args, _info: Info=None, **kwargs) -> OpFactory:
+        return TensorInFactory(self._tensor_factory(*args, **kwargs), _info)
 
 
 class ParamMod(TakoMod):
@@ -490,9 +482,8 @@ class ParamMod(TakoMod):
     def __init__(self, parameter_factory):
         self._parameter_factory = parameter_factory
 
-    def __call__(self, *args, **kwargs) -> OpFactory:
-        info = kwarg_pop('_info', kwargs)
-        return ParameterFactory(self._parameter_factory(*args, **kwargs), info)
+    def __call__(self, *args, _info: Info=None, **kwargs) -> OpFactory:
+        return ParameterFactory(self._parameter_factory(*args, **kwargs), _info)
 
 
 class OpMod(object):
@@ -692,7 +683,7 @@ class MultiFactory(NetFactory):
 multi = MultiFactory
 
 
-class Chain(NetFactory):
+class ChainFactory(NetFactory):
     def __init__(
         self, op_factory: NetFactory, attributes: typing.Union[arg, typing.List[Kwargs]],
         info: Info=None
@@ -740,16 +731,15 @@ class Chain(NetFactory):
         for attribute in attributes:
             to_attributes.append(attribute.remap_keys(kwargs))
             
-        return Chain(
+        return ChainFactory(
             self._op_factory.to(**kwargs), to_attributes,
             self._info
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        
-        return Chain(self._op_factory, self._attributes, self._info.spawn(name, labels, annotation, fix))
+        return ChainFactory(self._op_factory, self._attributes, self._info.spawn(name, labels, annotation, fix))
 
-chain = Chain
+chain = ChainFactory
 
 
 class InFactory(ABC):
@@ -780,24 +770,21 @@ class SizeVal(object):
         return self._val
 
 
-def unk(val: int):
-    return SizeVal(val, True)
+def to_size(a: list):
+    return map(lambda x: min(-1, x), a)
 
-
-def to_size_val(val: typing.Union[SizeVal, int]):
-
-    if isinstance(val, SizeVal):
-        return val
-    return SizeVal(val, False)
+def to_default_size(a: list):
+    return map(abs, a)
 
 
 class TensorFactory(object):
 
-    def __init__(self, f, size: typing.List[SizeVal], kwargs: Kwargs):
+    def __init__(self, f, size: typing.List[int], kwargs: Kwargs):
 
         self._f = f
-        self._size = [to_size_val(s) for s in size]   
+        self._size = torch.Size(to_size(size))
         self._kwargs = kwargs
+        self._default_size = to_default_size(size)
         d = self.produce_default()
         self._dtype = d.dtype
         self._device = d.device
@@ -811,17 +798,17 @@ class TensorFactory(object):
         return self._device
 
     def produce_default(self) -> torch.Tensor:
-        return self._f(*[s.default for s in self._size], **self._kwargs.items)
+        return self._f(*self._default_size, **self._kwargs.items)
 
     @property
     def size(self) -> torch.Size:
-        return torch.Size([s.actual for s in self._size])
+        return torch.Size(self._size)
 
 
 class TensorIn(InFactory):
 
     def __init__(self, *size, **kwargs):
-        self._size = size
+        self._size = to_size(size)
         self._dtype = kwargs.get('dtype', torch.float)
         self._device = kwargs.get('device', 'cpu')
         self._info = kwargs.get('info', Info())
@@ -887,7 +874,19 @@ class ScalarInFactory(InFactory):
         return ScalarInFactory(self._type_, self._default, self._call_default, self._info.spawn(name, labels, annotation, fix))
 
 
-scalar_in = ScalarInFactory
+def scalar_val(val, _info: Info=None):
+
+    return ScalarInFactory(type(val), val, False, _info)
+
+
+def scalarf(f, type_: type, _info: Info=None):
+    """[summary]
+
+    Args:
+        f ([type]): [description]
+    """
+    
+    return ScalarInFactory(type_, f, True, _info)
 
 
 class ParameterFactory(InFactory):
@@ -904,8 +903,6 @@ class ParameterFactory(InFactory):
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
         return ParameterFactory(self._t, self._info.spawn(name, labels, annotation, fix))
-
-param_in = ParameterFactory
 
 
 class BuildMultitap(object):
