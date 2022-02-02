@@ -7,7 +7,7 @@ from typing import Any, Counter, Iterator, TypeVar
 import typing
 from numpy import isin
 import torch
-from torch import nn
+from torch import nn, tensor
 from torch import Size
 from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port, Out
 from .modules import Multi, Multi, Diverge
@@ -448,7 +448,19 @@ def kwarg_pop(key, kwargs):
     return result
 
 
-class NNMod(object):
+class TakoMod(ABC):
+    """Convenience for creating an op factory like a normal module
+
+    opnn = OpMod(nn)
+    opnn.Linear(1, 4) <- This will output an OpFactory with a linear
+    """
+
+    @abstractproperty
+    def __call__(self, *args, **kwargs) -> NetFactory:
+        raise NotImplementedError
+
+
+class NNMod(TakoMod):
 
     def __init__(self, nnmodule: typing.Type[nn.Module]):
 
@@ -462,20 +474,49 @@ class NNMod(object):
         return OpFactory(ModFactory(self._nnmodule, *args, **kwargs), info)
 
 
+class TensorMod(TakoMod):
+    
+    def __init__(self, tensor_factory):
+
+        self._tensor_factory = tensor_factory
+
+    def __call__(self, *args, **kwargs) -> OpFactory:
+        info = kwarg_pop('_info', kwargs)
+        return TensorInFactory(self._tensor_factory(*args, **kwargs), info)
+
+
+class ParamMod(TakoMod):
+    
+    def __init__(self, parameter_factory):
+        self._parameter_factory = parameter_factory
+
+    def __call__(self, *args, **kwargs) -> OpFactory:
+        info = kwarg_pop('_info', kwargs)
+        return ParameterFactory(self._parameter_factory(*args, **kwargs), info)
+
+
 class OpMod(object):
+    """Convenience for creating an op factory like a normal module
 
-    def __init__(self, mod):
+    opnn = OpMod(nn)
+    opnn.Linear(1, 4) <- This will output an OpFactory with a linear
 
+    optorch = OpMod(torch, TensorMod)
+    optorch.zeros(1, 2, dtype=torch.float) <- Create a TensorInFactory
+    """
+
+    def __init__(self, mod, factory: TakoMod=None):
         self._mod = mod
+        self._factory = factory or NNMod
 
-    def __getattribute__(self, __name: str) -> NNMod:
+    def __getattribute__(self, __name: str) -> TakoMod:
         mod = super().__getattribute__('_mod')
         nnmodule = getattr(mod, __name)
 
         if not issubclass(nnmodule, nn.Module):
             raise AttributeError(f'Attribute {__name} is not a valid nn.Module')
 
-        return NNMod(nnmodule)
+        return self._factory(nnmodule)
 
 
 class ModFactory(BaseMod):
@@ -720,43 +761,111 @@ class InFactory(ABC):
         pass
 
 
+class SizeVal(object):
+
+    def __init__(self, val: int, unknown: bool):
+
+        self._val = val
+        self._unkown = unknown
+
+    @property
+    def default(self):
+        return self._val
+
+    @property
+    def actual(self):
+        if self._unkown:
+            return -1
+
+        return self._val
+
+
+def unk(val: int):
+    return SizeVal(val, True)
+
+
+def to_size_val(val: typing.Union[SizeVal, int]):
+
+    if isinstance(val, SizeVal):
+        return val
+    return SizeVal(val, False)
+
+
+class TensorFactory(object):
+
+    def __init__(self, f, size: typing.List[SizeVal], kwargs: Kwargs):
+
+        self._f = f
+        self._size = [to_size_val(s) for s in size]   
+        self._kwargs = kwargs
+        d = self.produce_default()
+        self._dtype = d.dtype
+        self._device = d.device
+    
+    @property
+    def dtype(self):
+        return self._dtype
+
+    @property
+    def device(self):
+        return self._device
+
+    def produce_default(self) -> torch.Tensor:
+        return self._f(*[s.default for s in self._size], **self._kwargs.items)
+
+    @property
+    def size(self) -> torch.Size:
+        return torch.Size([s.actual for s in self._size])
+
+
+class TensorIn(InFactory):
+
+    def __init__(self, *size, **kwargs):
+        self._size = size
+        self._dtype = kwargs.get('dtype', torch.float)
+        self._device = kwargs.get('device', 'cpu')
+        self._info = kwargs.get('info', Info())
+
+    def produce(self) -> In:
+
+        return In.from_tensor(
+            self._info.name, torch.Size(self._size), self._dtype, None, 
+            self._info.labels, self._info.annotation, device=self._device
+        )
+
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
+        return TensorIn(*self._size, dtype=self._dtype, device=self._device, info=self._info.spawn(name, labels, annotation, fix))
+
+
 class TensorInFactory(InFactory):
 
     def __init__(
-        self, size: typing.Union[torch.Size, typing.Iterable], dtype: torch.dtype, 
-        default, call_default: bool=False, device: str='cpu', info: Info=None
+        self, t: TensorFactory, info: Info=None
     ):
-        
-        self._default = default
-        if not isinstance(size, torch.Size):
-            size = torch.Size(size)
-
-        self._dtype = dtype
-        self._size = size
-        self._call_default = call_default
-        self._device = device
+        self._t = t
         self._info = info or Info(name='Tensor')
 
     def produce(self) -> In:
 
-        size = [*self._size]
-        if self._size[0] == -1:
-            size[0] = 1
+        default = self._t.produce_default()
+        size = self._t.size
 
-        default = self._default(
-            *size, device=self._device
-        ) if self._call_default else self._default  
-        
         return In.from_tensor(
-            self._info.name, self._size, self._dtype, default, 
-            self._info.labels, self._info.annotation
+            self._info.name, size, self._t.dtype, default, 
+            self._info.labels, self._info.annotation, device=self._t.device
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        
-        return TensorInFactory(self._size, self._dtype, self._default, self._call_default, self._device, self._info.spawn(name, labels, annotation, fix))
+        return TensorInFactory(self._t, self._info.spawn(name, labels, annotation, fix))
 
-tensor_in = TensorInFactory
+    @classmethod
+    def from_info(
+        cls, size: typing.Union[torch.Size, typing.Iterable], dtype: torch.dtype, 
+        device: str='cpu', batch=True, info: Info=None
+    ):
+        return cls(
+            torch.empty(*size, dtype=dtype, device=device), batch, info
+        )
 
 
 class ScalarInFactory(InFactory):
@@ -783,21 +892,18 @@ scalar_in = ScalarInFactory
 
 class ParameterFactory(InFactory):
 
-    def __init__(self, size: torch.Size, dtype: torch.dtype, reset_func, device: str='cpu', info: Info=None):
+    def __init__(self, t: TensorFactory, info: Info=None):
         
-        self._reset_func = reset_func
-        self._sz = size
-        self._device = device
+        self._t = t
         self._info = info or Info(name='Param')
-        self._dtype = dtype
 
     def produce(self, **kwargs) -> Node:
 
-        return Parameter(self._info.name, self._sz, self._dtype, self._reset_func, self._info.labels, self._info.annotation)
+        return Parameter(self._info.name, self._t.size, self._t.dtype, self._t, self._info.labels, self._info.annotation)
         
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return ParameterFactory(self._sz, self._dtype, self._reset_func, self._device, self._info.spawn(name, labels, annotation, fix))
+        return ParameterFactory(self._t, self._info.spawn(name, labels, annotation, fix))
 
 param_in = ParameterFactory
 
@@ -841,6 +947,14 @@ class BuildMultitap(object):
 
 
 def to_multitap(**mapping):
+    """Convert port or set of ports to a multitap
+
+    Raises:
+        ValueError: If type is not valid
+
+    Returns:
+        Multitap
+    """
     ports = []
 
     for k, v in mapping.items():

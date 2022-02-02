@@ -85,10 +85,6 @@ def is_machine(obj: LearningMachine, cls: typing.Type[MachineComponent]):
     return isinstance(getattr(obj, cls.op), cls)
 
 
-# TODO: Think a little more about the components
-# add in a compound component?
-
-
 # TODO: Update these components
 
 class Learner(MachineComponent):
@@ -132,16 +128,6 @@ class Regressor(MachineComponent):
         raise NotImplementedError
 
 
-# class SimpleRegressor(Regressor):
-
-#     def __init__(self, net):
-#         super().__init__(net)
-#         self.check_interface(self, 'x', 'y')
-    
-#     def regress(self, x: torch.Tensor):
-#         return self._net.probe('y', by={x: x})['y']
-
-
 class Classifier(MachineComponent):
 
     op = 'classify'
@@ -149,14 +135,3 @@ class Classifier(MachineComponent):
     @abstractmethod
     def classify(self, x: torch.Tensor):
         raise NotImplementedError
-
-
-# class BinaryClassifier(Classifier):
-
-#     def __init__(self, net):
-#         super().__init__(net)
-#         self.check_interface(self, 'x', 'y')
-
-#     def classify(self, x: torch.Tensor):
-#         y = self._net.probe('y', by={x: x})['y']
-#         return (y >= 0.5).float()
