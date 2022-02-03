@@ -152,6 +152,12 @@ class TestMod:
         assert isinstance(sigmoid, nn.Sigmoid)
 
 
+    def test_mod_raises_error_when_arg_not_defined(self):
+
+        m = factory(nn.Linear, sz[1], arg('x'))
+        with pytest.raises(RuntimeError):
+            m.produce(torch.Size([-1, 4]))
+
 class TestSequence:
 
     def test_sequence_from_two_ops(self):
@@ -290,6 +296,13 @@ class TestChain:
 
         assert out[0].size == torch.Size([-1, 5])
 
+    def test_chained_linear_size_raises_error_with_undefined_argument(self):
+
+        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        chain_ = chain(op, [Kwargs(y=4), Kwargs(x=5)])
+        with pytest.raises(RuntimeError):
+            _, out = chain_.produce([Out(torch.Size([-1, 2]))])
+
     def test_chained_produce_nodes(self):
 
         op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
@@ -311,6 +324,15 @@ class TestChain:
             nodes.append(node)
 
         assert nodes[-1].ports[0].size == torch.Size([-1, 5])
+
+    def test_chain_to_produce_nodes_raises_error(self):
+
+        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        chain_ = chain(op, [Kwargs(y=4), Kwargs(x=5)])
+        chain_ = chain_.to(x=arg('y'))
+        with pytest.raises(RuntimeError):
+            for _ in chain_.produce_nodes(Port(ModRef("x"), torch.Size([-1, 2]))):
+                pass
 
 
 class TestTensorInFactory:

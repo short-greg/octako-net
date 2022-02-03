@@ -1,5 +1,7 @@
 import torch
 import pytest
+
+from tako.construction import T
 from . import modules
 
 
@@ -55,3 +57,12 @@ class TestSelector:
             reorder = modules.Selector(3, [0, 2])
             x, y = torch.randn(2, 1), torch.randn(2, 2)
             reorder.forward(x, y)
+
+
+class TestPrintf:
+
+    def test_with_single_x(self):
+
+        p = modules.Printf(lambda x: f'{x.size()}')
+        t = torch.tensor([1, 2])
+        assert (p(t) == t).all()

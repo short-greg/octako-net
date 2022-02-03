@@ -198,3 +198,15 @@ class Stack(nn.Module):
     
     def forward(self, *x: torch.Tensor):
         return torch.stack(x)
+
+
+class Printf(nn.Module):
+
+    def __init__(self, f, print_f=print):
+        super().__init__()
+        self._f = f
+        self._print_f = print_f
+
+    def forward(self, x):
+        self._print_f(self._f(x))
+        return x

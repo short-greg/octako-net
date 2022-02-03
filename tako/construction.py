@@ -248,8 +248,6 @@ class SequenceFactory(NetFactory):
 def _lshift(self, net_factory) -> SequenceFactory:
     raise NotImplementedError
 
-# NetFactory.__lshift__ = _lshift
-
 
 class _ArgMap(ABC):
 
@@ -318,6 +316,21 @@ class Kwargs(_ArgMap):
     def items(self):
         return self._kwargs
 
+    @property
+    def is_defined(self):
+        for a in self._kwargs.values():
+            if isinstance(a, arg):
+                return False
+        return True
+
+    @property
+    def undefined(self):
+        undefined = []
+        for a in self._kwargs.values():
+            if isinstance(a, arg):
+                undefined.append(a)
+        return undefined
+
 
 class Args(_ArgMap):
 
@@ -337,6 +350,21 @@ class Args(_ArgMap):
     def items(self):
 
         return self._args
+    
+    @property
+    def is_defined(self):
+        for a in self._args:
+            if isinstance(a, arg):
+                return False
+        return True
+
+    @property
+    def undefined(self):
+        undefined = []
+        for a in self._args:
+            if isinstance(a, arg):
+                undefined.append(a)
+        return undefined
 
 
 class ArgSet(_ArgMap):
@@ -367,6 +395,14 @@ class ArgSet(_ArgMap):
             self._args.items,
             self._kwargs.items
         )
+    
+    @property
+    def is_defined(self):
+        return self._args.is_defined and self._kwargs.is_defined
+
+    @property
+    def undefined(self):
+        return self._args.undefined + self._kwargs.undefined
 
 
 class BaseMod(ABC):
@@ -486,6 +522,9 @@ class ModFactory(BaseMod):
         module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
 
         args = self._args.lookup(in_, kwargs)
+        undefined = args.undefined
+        if len(undefined) > 0:
+            raise RuntimeError(f"Args {undefined} are not defined in {kwargs}")
         try:
             return module(*args.args, **args.kwargs)
         except Exception as e:
@@ -673,10 +712,14 @@ class ChainFactory(NetFactory):
         attributes = self._attributes
         if isinstance(attributes, arg):
             attributes = self._attributes.to(**kwargs)
-        
+
         mods = []
         out = in_
         for attribute in self._attributes:
+            undefined = attribute.undefined
+            if len(undefined) > 0:
+                raise RuntimeError(f"Chain attributes {undefined} are not defined in {kwargs}")
+        
             mod, out = self._op_factory.produce(out, **attribute.items)
             mods.append(mod)
         return nn.Sequential(*mods), out
@@ -694,7 +737,9 @@ class ChainFactory(NetFactory):
             
             attribute = attribute.lookup(in_, kwargs)
 
-            # TODO: Print out attributes if error is thrown?? 
+            undefined = attribute.undefined
+            if len(undefined) > 0:
+                raise RuntimeError(f"Chain attributes {undefined} are not defined in {kwargs}")
 
             for node in self._op_factory.produce_nodes(in_, **attribute.items):
                 yield node
