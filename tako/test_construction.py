@@ -175,8 +175,6 @@ class TestSequence:
         assert isinstance(sequence, Sequential)
 
     def test_sequence_produce_nodes_from_three_ops(self):
-
-        # linear = mod(nn.Linear, Sz(1), Var('x')).op(linear_out)
         port = Port(ModRef('mod'), torch.Size([1, 2]))
         nodes = list((
             factory(nn.Linear, 2, 4).op() << 
@@ -186,12 +184,10 @@ class TestSequence:
         assert len(nodes) == 3
 
     def test_sequence_produce_nodes_from_three_ops_and_args(self):
-
-        # linear = mod(nn.Linear, Sz(1), Var('x')).op(linear_out)
         port = Port("mod", torch.Size([1, 2]))
         nodes = list((
-            factory(nn.Linear, 2, 4).op() << 
-            factory('activation').op() <<
+            factory(nn.Linear, 2, 4) << 
+            factory('activation') <<
             factory(nn.Linear, 4, 3).op()  <<
             factory('activation').op()
         ).to(activation=nn.ReLU).produce_nodes(port))
@@ -272,7 +268,7 @@ class TestChain:
     def test_chained_linear(self):
 
         op = OpFactory(ModFactory(nn.Linear, 2, 2))
-        chain_ = chain(op, [Kwargs(), Kwargs()])
+        chain_ = ChainFactory(op, [Kwargs(), Kwargs()])
         sequence, size = chain_.produce([Out(torch.Size([-1, 2]))])
 
         assert isinstance(sequence[0], nn.Linear)
@@ -281,7 +277,7 @@ class TestChain:
     def test_chained_linear_with_arg(self):
 
         op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
-        chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
+        chain_ = ChainFactory(op, [Kwargs(x=4), Kwargs(x=5)])
         sequence, size = chain_.produce([Out(torch.Size([-1, 2]))])
 
         assert isinstance(sequence[0], nn.Linear)
@@ -340,14 +336,12 @@ class TestTensorInFactory:
         in_ = op.produce()
         assert isinstance(in_, In)
 
-    # def test_produce_tensor_input_with_no_call(self):
+    def test_produce_tensor_input_with_default(self):
 
-    #     factory = TensorFactory(torch.zeros,torch.Size([1, 2]), Kwargs())
-    #     op = TensorInFactory(
-    #         factory, torch.tensor([[2, 3]]), False
-    #     )
-    #     in_ = op.produce()
-    #     assert isinstance(in_, In)
+        default = [[1, 2], [3, 4]]
+        op = TensorIn(2, 2, default=default)
+        in_ = op.produce()
+        assert isinstance(in_, In)
 
 
 class TestScalarInFactory:

@@ -770,23 +770,32 @@ class TensorFactory(object):
 
 class TensorIn(InFactory):
 
-    def __init__(self, *size, dtype=torch.float, device='cpu', info=None):
+    def __init__(self, *size, dtype=torch.float, device='cpu', default=None, info=None):
         self._size = to_size(size)
         self._dtype = dtype
         self._device = device
         self._info = info or Info()
+        self._default = default
+        if default is not None: 
+            default = torch.tensor(default, device=self._device, dtype=self._dtype)
+            self._check_size(default)
+
+    def _check_size(self, default) -> bool:
+        if len(default.size()) != len(self._size):
+            raise ValueError(f'Size of default {default.size()} does not match size {self._size}')
+        for s1, s2 in zip(default.size(), self._size):
+            if s2 > 1 and s1 != s2:
+                raise ValueError(f'Size of default {default.size()} does not match size {self._size}')
 
     def produce(self) -> In:
-
+        default = torch.tensor(self._default, dtype=self._dtype, device=self._device) if self._default is not None else None
         return In.from_tensor(
-            self._info.name, torch.Size(self._size), self._dtype, None, 
+            self._info.name, torch.Size(self._size), self._dtype, default, 
             self._info.labels, self._info.annotation, device=self._device
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         return TensorIn(*self._size, dtype=self._dtype, device=self._device, info=self._info.spawn(name, labels, annotation, fix))
-
-# TODO: check if scalar tensor can be used
 
 
 class TensorInFactory(InFactory):
