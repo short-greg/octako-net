@@ -150,6 +150,13 @@ class Info:
             fix if fix is not None else self.fix
         )
 
+    def coalesce_name(self, default: str):
+        return default if self.name == '' else self.name
+
+
+def module_name(obj):
+    return type(obj).__name__
+
 
 class NetFactory(ABC):
 
@@ -184,6 +191,7 @@ class NetFactory(ABC):
 
     def __lshift__(self, other):
         return SequenceFactory([*self.to_ops(), *other.to_ops()])
+    
 
 
 NetFactory.__call__ = NetFactory.to
@@ -380,6 +388,8 @@ class BaseMod(ABC):
         return SequenceFactory([*self.to_ops(), *other.to_ops()])
 
 
+
+
 class OpFactory(NetFactory):
 
     def __init__(
@@ -433,7 +443,8 @@ class OpFactory(NetFactory):
     def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        name = self._info.name if self._info.name != '' else type(module).__name__
+        
+        name = self._info.coalesce_name(module_name(module))
 
         outs = self._out_sizes(module, in_)
         op_node = OpNode(
@@ -789,8 +800,10 @@ class TensorIn(InFactory):
 
     def produce(self) -> In:
         default = torch.tensor(self._default, dtype=self._dtype, device=self._device) if self._default is not None else None
+        
+        name = self._info.coalesce_name("TensorIn")
         return In.from_tensor(
-            self._info.name, torch.Size(self._size), self._dtype, default, 
+            name, torch.Size(self._size), self._dtype, default, 
             self._info.labels, self._info.annotation, device=self._device
         )
 
@@ -811,8 +824,9 @@ class TensorInFactory(InFactory):
         default = self._t.produce_default()
         size = self._t.size
 
+        name = self._info.coalesce_name('TensorIn')
         return In.from_tensor(
-            self._info.name, size, self._t.dtype, default, 
+            name, size, self._t.dtype, default, 
             self._info.labels, self._info.annotation, device=self._t.device
         )
 
@@ -840,8 +854,9 @@ class ScalarInFactory(InFactory):
 
     def produce(self) -> Node:
 
-        default = self._default() if self._call_default else self._default    
-        return In.from_scalar(self._info.name, self._type_, default, self._info.labels, self._info.annotation)
+        default = self._default() if self._call_default else self._default
+        name = self._info.coalesce_name('ScalarIn')
+        return In.from_scalar(name, self._type_, default, self._info.labels, self._info.annotation)
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
@@ -874,8 +889,10 @@ class ParameterFactory(InFactory):
         self._info = info or Info(name='Param')
 
     def produce(self) -> Node:
+        
+        name = self._info.coalesce_name('Parameter')
         return Parameter(
-            self._info.name, self._t.size, self._t.dtype, 
+            name, self._t.size, self._t.dtype, 
             self._t, self._info.labels, self._info.annotation
         )
         
