@@ -2,11 +2,11 @@ import typing
 import torch
 from torch import nn
 from torch.nn.modules.container import Sequential
-from .networks import In, ModRef, Multitap, Node, OpNode, Out, Parameter, Port
+from .networks import In, Parameter, ModRef, Multitap, Node, OpNode, Out, Parameter, Port
 from .construction import (
-    Chain, Info, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, 
-    ParameterFactory, ScalarInFactory, TensorInFactory, tensor_in, scalar_in, diverge, 
-    SequenceFactory, sz, arg, factory, arg_
+    ChainFactory, Info, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
+    ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorIn, TensorMod, scalar_val, diverge, 
+    SequenceFactory, sz, arg, factory, arg_, chain
 )
 import pytest
 
@@ -80,6 +80,43 @@ class TestOpMod:
         result, _ = sigmoid.produce(Out(torch.Size([-1, 1])))
         assert isinstance(result, nn.Sigmoid)
 
+    def test_op_mod_with_torch_tensor_and_unknown_first_size(self):
+
+        optorch = OpMod(torch, factory=TensorMod)
+        zeros = optorch.zeros(2, 3)
+        # result, _ = sigmoid.produce(Out(torch.Size([-1, 1])))
+        assert isinstance(zeros, TensorInFactory)
+
+    def test_op_mod_with_torch_tensor_will_produce_in(self):
+
+        optorch = OpMod(torch, factory=TensorMod)
+        zeros = optorch.zeros(2, 3).produce()
+        assert isinstance(zeros, In)
+
+    def test_op_mod_with_torch_tensor_raises_exception_with_invalid_args(self):
+
+        optorch = OpMod(torch, factory=TensorMod)
+        with pytest.raises(RuntimeError):
+            optorch.select(2, 3)
+
+    def test_op_mod_with_torch_tensor_and_unknown_first_size(self):
+
+        optorch = OpMod(torch, factory=TensorMod)
+        with pytest.raises(RuntimeError):
+            optorch.select(2, 3)
+
+    def test_op_mod_with_param_mod(self):
+
+        optorch = OpMod(torch, factory=ParamMod)
+        rand_param = optorch.rand(2, 3)
+        assert isinstance(rand_param, ParameterFactory)
+
+    def test_op_mod_produce_with_param_mod(self):
+
+        optorch = OpMod(torch, factory=ParamMod)
+        node = optorch.rand(2, 3).produce()
+        assert isinstance(node, Parameter)
+
 
 class TestMod:
 
@@ -120,9 +157,9 @@ class TestSequence:
     def test_sequence_from_two_ops(self):
 
         sequence = (
-            factory(nn.Linear, 2, 4).op(torch.Size([-1, 4])) << 
-            factory(nn.Sigmoid).op() <<
-            factory(nn.Linear, 4, 3).op(torch.Size([-1, 3]))
+            factory(nn.Linear, 2, 4) << 
+            factory(nn.Sigmoid) <<
+            factory(nn.Linear, 4, 3)
         )
         assert isinstance(sequence, SequenceFactory)
 
@@ -130,9 +167,9 @@ class TestSequence:
 
         # linear = mod(nn.Linear, Sz(1), Var('x')).op(linear_out)
         sequence, _ = (
-            factory(nn.Linear, 2, 4).op() << 
+            factory(nn.Linear, 2, 4) << 
             factory(nn.Sigmoid).op() <<
-            factory(nn.Linear, 4, 3).op()
+            factory(nn.Linear, 4, 3)
         ).produce([Out(torch.Size([1, 2]))])
         
         assert isinstance(sequence, Sequential)
@@ -161,8 +198,6 @@ class TestSequence:
         
         assert isinstance(nodes[1].op, nn.ReLU) and isinstance(nodes[3].op, nn.ReLU)
 
-    
-#     # change factory to factory
     def test_sequence_produce_from_three_ops_and_args(self):
 
         size = torch.Size([1, 2])
@@ -237,8 +272,8 @@ class TestChain:
     def test_chained_linear(self):
 
         op = OpFactory(ModFactory(nn.Linear, 2, 2))
-        chain = Chain(op, [Kwargs(), Kwargs()])
-        sequence, size = chain.produce([Out(torch.Size([-1, 2]))])
+        chain_ = chain(op, [Kwargs(), Kwargs()])
+        sequence, size = chain_.produce([Out(torch.Size([-1, 2]))])
 
         assert isinstance(sequence[0], nn.Linear)
 
@@ -246,25 +281,25 @@ class TestChain:
     def test_chained_linear_with_arg(self):
 
         op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
-        chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
-        sequence, size = chain.produce([Out(torch.Size([-1, 2]))])
+        chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
+        sequence, size = chain_.produce([Out(torch.Size([-1, 2]))])
 
         assert isinstance(sequence[0], nn.Linear)
 
     def test_chained_linear_size_is_correct(self):
 
         op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
-        chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
-        sequence, out = chain.produce([Out(torch.Size([-1, 2]))])
+        chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
+        sequence, out = chain_.produce([Out(torch.Size([-1, 2]))])
 
         assert out[0].size == torch.Size([-1, 5])
 
     def test_chained_produce_nodes(self):
 
         op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
-        chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
+        chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
         nodes: typing.List[Node] = []
-        for node in chain.produce_nodes(Multitap([Port(ModRef('x'), torch.Size([-1, 2]))])):
+        for node in chain_.produce_nodes(Multitap([Port(ModRef('x'), torch.Size([-1, 2]))])):
             nodes.append(node)
 
         assert nodes[-1].ports[0].size == torch.Size([-1, 5])
@@ -273,10 +308,10 @@ class TestChain:
     def test_chain_to_produce_nodes(self):
 
         op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
-        chain = Chain(op, [Kwargs(x=4), Kwargs(x=5)])
-        chain = chain.to(x=arg('y'))
+        chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
+        chain_ = chain_.to(x=arg('y'))
         nodes: typing.List[Node] = []
-        for node in chain.produce_nodes(Port(ModRef("x"), torch.Size([-1, 2]))):
+        for node in chain_.produce_nodes(Port(ModRef("x"), torch.Size([-1, 2]))):
             nodes.append(node)
 
         assert nodes[-1].ports[0].size == torch.Size([-1, 5])
@@ -286,20 +321,33 @@ class TestTensorInFactory:
 
     def test_produce_tensor_input_with_call_default(self):
 
+        factory = TensorFactory(torch.zeros,torch.Size([1, 2]), Kwargs())
         op = TensorInFactory(
-            torch.Size([1, 2]), torch.ones, True
+            factory
         )
         in_ = op.produce()
         assert isinstance(in_, In)
 
+    def test_produce_tensor_in_with_no_default(self):
 
-    def test_produce_tensor_input_with_no_call(self):
-
-        op = TensorInFactory(
-            torch.Size([1, 2]), torch.tensor([[2, 3]]), False
-        )
+        op = TensorIn(-1, 5, dtype=torch.float)
         in_ = op.produce()
         assert isinstance(in_, In)
+
+    def test_produce_tensor_in_with_no_default_and_device(self):
+
+        op = TensorIn(-1, 5, dtype=torch.float, device='cpu')
+        in_ = op.produce()
+        assert isinstance(in_, In)
+
+    # def test_produce_tensor_input_with_no_call(self):
+
+    #     factory = TensorFactory(torch.zeros,torch.Size([1, 2]), Kwargs())
+    #     op = TensorInFactory(
+    #         factory, torch.tensor([[2, 3]]), False
+    #     )
+    #     in_ = op.produce()
+    #     assert isinstance(in_, In)
 
 
 class TestScalarInFactory:
@@ -327,16 +375,18 @@ class TestParameterFactory:
 
     def test_produce_tensor_input_with_call_default(self):
 
+        factory = TensorFactory(torch.zeros, [1, 4], Kwargs())
         op = ParameterFactory(
-            torch.Size([1, 2]), torch.float, torch.ones
+            factory, Info(name='hi')
         )
         in_ = op.produce()
         assert isinstance(in_, Parameter)
 
     def test_produce_tensor_input_with_reset(self):
 
+        factory = TensorFactory(torch.zeros, [1, 4], Kwargs())
         op = ParameterFactory(
-            torch.Size([1, 2]), torch.float, torch.ones
+            factory, Info(name='hi')
         )
         parameter = op.produce()
         parameter.reset()
@@ -347,7 +397,7 @@ class TestNetBuilder:
     def test_produce_network_with_in(self):
 
         op = TensorInFactory(
-            torch.Size([1, 2]), torch.float, torch.ones, True, info=Info(name='x')
+            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
         )
         op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3)
@@ -362,7 +412,7 @@ class TestNetBuilder:
     def test_produce_network_with_one_op(self):
 
         op = TensorInFactory(
-            torch.Size([1, 2]), torch.float, torch.ones, True, info=Info(name='x')
+            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
         )
         op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3)
@@ -374,7 +424,7 @@ class TestNetBuilder:
     def test_produce_network_with_two_ops_same_name(self):
 
         op = TensorInFactory(
-            torch.Size([1, 2]), torch.float, torch.ones, True, info=Info(name='x')
+            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
         )
         op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3)
@@ -395,7 +445,7 @@ class TestNetBuilder:
         )
 
         op = TensorInFactory(
-            torch.Size([1, 2]), torch.float, torch.ones, True, info=Info(name='x')
+            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
         )
         
         builder = NetBuilder()
@@ -408,10 +458,14 @@ class TestNetBuilder:
             ModFactory(nn.Linear, 2, 3)
         ) << OpFactory(
             ModFactory(nn.Linear, 3, 4)
+        )        
+        
+        op = TensorInFactory(
+            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
         )
         
         builder = NetBuilder()
-        multitap = builder << tensor_in([1, 2], torch.float, torch.ones, True, info=Info(name='x'))
+        multitap = builder << op
         multitap << sequence
     
         assert builder.net['Linear_2'] != builder.net['Linear']

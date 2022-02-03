@@ -178,6 +178,13 @@ class NetFactory(ABC):
     def info_(self, name: str='', labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         pass
 
+    @abstractmethod
+    def to_ops(self):
+        raise NotImplementedError
+
+    def __lshift__(self, other):
+        return SequenceFactory([*self.to_ops(), *other.to_ops()])
+
 
 NetFactory.__call__ = NetFactory.to
 
@@ -195,11 +202,9 @@ class SequenceFactory(NetFactory):
         else:
             self._op_factories.insert(op_factory, position)
 
-    def __lshift__(self, other: NetFactory):
-        if isinstance(other, SequenceFactory):
-            return SequenceFactory(self._op_factories + other._op_factories)
-        return SequenceFactory(self._op_factories + [other])
-    
+    def to_ops(self):
+        return self._op_factories
+
     def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
         if isinstance(in_, Out):
@@ -236,7 +241,7 @@ class SequenceFactory(NetFactory):
 def _lshift(self, net_factory) -> SequenceFactory:
     raise NotImplementedError
 
-NetFactory.__lshift__ = _lshift
+# NetFactory.__lshift__ = _lshift
 
 
 class _ArgMap(ABC):
@@ -349,6 +354,12 @@ class ArgSet(_ArgMap):
     @property
     def args(self):
         return self._args.items
+    
+    def clone(self):
+        return ArgSet(
+            self._args.items,
+            self._kwargs.items
+        )
 
 
 class BaseMod(ABC):
@@ -365,6 +376,9 @@ class BaseMod(ABC):
     def module(self):
         raise NotImplementedError
 
+    def __lshift__(self, other) -> SequenceFactory:
+        return SequenceFactory([*self.to_ops(), *other.to_ops()])
+
 
 class OpFactory(NetFactory):
 
@@ -374,9 +388,9 @@ class OpFactory(NetFactory):
         super().__init__(info)
         self._mod = module
         self._out = _out
-    
-    def __lshift__(self, other) -> SequenceFactory:
-        return SequenceFactory([self, other])
+
+    def to_ops(self):
+        return [self]
 
     def _in_tensor(self, in_):
         
@@ -444,71 +458,6 @@ ModType = typing.Union[typing.Type[nn.Module], arg]
 ModInstance = typing.Union[nn.Module, arg]
 
 
-class TakoMod(ABC):
-    """Convenience for creating an op factory like a normal module
-
-    opnn = OpMod(nn)
-    opnn.Linear(1, 4) <- This will output an OpFactory with a linear
-    """
-
-    @abstractproperty
-    def __call__(self, *args, **kwargs) -> NetFactory:
-        raise NotImplementedError
-
-
-class NNMod(TakoMod):
-
-    def __init__(self, nnmodule: typing.Type[nn.Module]):
-
-        self._nnmodule = nnmodule
-
-    def __call__(self, *args, _info: Info=None, **kwargs) -> OpFactory:
-        
-        return OpFactory(ModFactory(self._nnmodule, *args, **kwargs), _info)
-
-
-class TensorMod(TakoMod):
-    
-    def __init__(self, tensor_factory):
-
-        self._tensor_factory = tensor_factory
-
-    def __call__(self, *args, _info: Info=None, **kwargs) -> OpFactory:
-        return TensorInFactory(self._tensor_factory(*args, **kwargs), _info)
-
-
-class ParamMod(TakoMod):
-    
-    def __init__(self, parameter_factory):
-        self._parameter_factory = parameter_factory
-
-    def __call__(self, *args, _info: Info=None, **kwargs) -> OpFactory:
-        return ParameterFactory(self._parameter_factory(*args, **kwargs), _info)
-
-
-class OpMod(object):
-    """Convenience for creating an op factory like a normal module
-
-    opnn = OpMod(nn)
-    opnn.Linear(1, 4) <- This will output an OpFactory with a linear
-
-    optorch = OpMod(torch, TensorMod)
-    optorch.zeros(1, 2, dtype=torch.float) <- Create a TensorInFactory
-    """
-
-    def __init__(self, mod, factory: TakoMod=None):
-        self._mod = mod
-        self._factory = factory or NNMod
-
-    def __getattribute__(self, __name: str) -> TakoMod:
-        mod = super().__getattribute__('_mod')
-        nnmodule = getattr(mod, __name)
-
-        if not issubclass(nnmodule, nn.Module):
-            raise AttributeError(f'Attribute {__name} is not a valid nn.Module')
-
-        return self._factory(nnmodule)
-
 
 class ModFactory(BaseMod):
 
@@ -551,6 +500,9 @@ class ModFactory(BaseMod):
     def op(self, info: Info=None) -> OpFactory:
         return OpFactory(self, info)
 
+    def to_ops(self):
+        return [self.op()]
+
 
 class Instance(BaseMod):
 
@@ -570,8 +522,11 @@ class Instance(BaseMod):
     def module(self):
         return self._module
 
-    def op(self, name: str=None, labels: typing.List[str]=None, annotation: str=None) -> OpFactory:
-        return OpFactory(self, Info(name, labels, annotation))
+    def op(self, info: Info=None) -> OpFactory:
+        return OpFactory(self, info)
+
+    def to_ops(self):
+        return [self.op()]
 
 
 @singledispatch
@@ -599,8 +554,8 @@ class DivergeFactory(NetFactory):
         super().__init__(info)
         self._op_factories = op_factories
     
-    def __lshift__(self, other) -> SequenceFactory:
-        return SequenceFactory([self, other])
+    def to_ops(self):
+        return [self]
 
     def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -635,6 +590,9 @@ class DivergeFactory(NetFactory):
         
         return DivergeFactory(self._op_factories, self._info.spawn(name, labels, annotation, fix))
 
+    def to_ops(self):
+        return [self]
+
 diverge = DivergeFactory
 
 
@@ -646,8 +604,8 @@ class MultiFactory(NetFactory):
         super().__init__(info)
         self._op_factories = op_factories
     
-    def __lshift__(self, other) -> SequenceFactory:
-        return SequenceFactory([self, other])
+    def to_ops(self):
+        return [self]
 
     def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -692,8 +650,8 @@ class ChainFactory(NetFactory):
         self._op_factory = op_factory
         self._attributes = attributes
     
-    def __lshift__(self, other) -> SequenceFactory:
-        return SequenceFactory([self, other])
+    def to_ops(self):
+        return [self]
 
     def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -771,19 +729,20 @@ class SizeVal(object):
 
 
 def to_size(a: list):
-    return map(lambda x: min(-1, x), a)
+    return [*map(lambda x: max(-1, x), a)]
+
 
 def to_default_size(a: list):
-    return map(abs, a)
+    return [*map(abs, a)]
 
 
 class TensorFactory(object):
 
-    def __init__(self, f, size: typing.List[int], kwargs: Kwargs):
+    def __init__(self, f, size: typing.List[int], kwargs: Kwargs=None):
 
         self._f = f
         self._size = torch.Size(to_size(size))
-        self._kwargs = kwargs
+        self._kwargs = kwargs or Kwargs()
         self._default_size = to_default_size(size)
         d = self.produce_default()
         self._dtype = d.dtype
@@ -803,15 +762,19 @@ class TensorFactory(object):
     @property
     def size(self) -> torch.Size:
         return torch.Size(self._size)
+    
+    def __call__(self, size=None) -> Any:
+        size = size or self._default_size
+        return self._f(*size, **self._kwargs.items)
 
 
 class TensorIn(InFactory):
 
-    def __init__(self, *size, **kwargs):
+    def __init__(self, *size, dtype=torch.float, device='cpu', info=None):
         self._size = to_size(size)
-        self._dtype = kwargs.get('dtype', torch.float)
-        self._device = kwargs.get('device', 'cpu')
-        self._info = kwargs.get('info', Info())
+        self._dtype = dtype
+        self._device = device
+        self._info = info or Info()
 
     def produce(self) -> In:
 
@@ -822,6 +785,8 @@ class TensorIn(InFactory):
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         return TensorIn(*self._size, dtype=self._dtype, device=self._device, info=self._info.spawn(name, labels, annotation, fix))
+
+# TODO: check if scalar tensor can be used
 
 
 class TensorInFactory(InFactory):
@@ -864,14 +829,18 @@ class ScalarInFactory(InFactory):
         self._call_default = call_default
         self._info = info or Info(name='Scalar')
 
-    def produce(self, **kwargs) -> Node:
+    def produce(self) -> Node:
 
         default = self._default() if self._call_default else self._default    
         return In.from_scalar(self._info.name, self._type_, default, self._info.labels, self._info.annotation)
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return ScalarInFactory(self._type_, self._default, self._call_default, self._info.spawn(name, labels, annotation, fix))
+        return ScalarInFactory(
+            self._type_, self._default, 
+            self._call_default, 
+            self._info.spawn(name, labels, annotation, fix)
+        )
 
 
 def scalar_val(val, _info: Info=None):
@@ -885,7 +854,6 @@ def scalarf(f, type_: type, _info: Info=None):
     Args:
         f ([type]): [description]
     """
-    
     return ScalarInFactory(type_, f, True, _info)
 
 
@@ -896,13 +864,98 @@ class ParameterFactory(InFactory):
         self._t = t
         self._info = info or Info(name='Param')
 
-    def produce(self, **kwargs) -> Node:
-
-        return Parameter(self._info.name, self._t.size, self._t.dtype, self._t, self._info.labels, self._info.annotation)
+    def produce(self) -> Node:
+        return Parameter(
+            self._info.name, self._t.size, self._t.dtype, 
+            self._t, self._info.labels, self._info.annotation
+        )
         
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
+        return ParameterFactory(
+            self._t, 
+            self._info.spawn(name, labels, annotation, fix)
+        )
+
+
+class TakoMod(ABC):
+    """Convenience for creating an op factory like a normal module
+
+    opnn = OpMod(nn)
+    opnn.Linear(1, 4) <- This will output an OpFactory with a linear
+    """
+
+    @abstractproperty
+    def __call__(self, *args, **kwargs) -> NetFactory:
+        raise NotImplementedError
+
+
+class NNMod(TakoMod):
+
+    def __init__(self, nnmodule: typing.Type[nn.Module]):
+
+        self._nnmodule = nnmodule
+
+    def __call__(self, *args, _info: Info=None, **kwargs) -> OpFactory:
         
-        return ParameterFactory(self._t, self._info.spawn(name, labels, annotation, fix))
+        return OpFactory(ModFactory(self._nnmodule, *args, **kwargs), _info)
+
+
+class TensorMod(TakoMod):
+    
+    def __init__(self, tensor_mod):
+
+        self._tensor_mod = tensor_mod
+
+    def __call__(self, *size, _info: Info=None, **kwargs) -> OpFactory:
+        try:
+            factory = TensorFactory(
+                self._tensor_mod, size, Kwargs(**kwargs)
+            )
+        except Exception as e:
+            raise RuntimeError(f'Could not generate tensor with {self._tensor_mod}.') from e
+
+        return TensorInFactory(factory,  _info)
+
+
+class ParamMod(TakoMod):
+    
+    def __init__(self, parameter_mod):
+        self._parameter_mod = parameter_mod
+
+    def __call__(self, *size, _info: Info=None, **kwargs) -> OpFactory:
+        try: 
+            factory = TensorFactory(
+                self._parameter_mod, size, Kwargs(**kwargs)
+            )        
+        except Exception as e:
+            raise RuntimeError(f'Could not generate tensor with {self._tensor_mod}.') from e
+
+        return ParameterFactory(factory, _info)
+
+
+class OpMod(object):
+    """Convenience for creating an op factory like a normal module
+
+    opnn = OpMod(nn)
+    opnn.Linear(1, 4) <- This will output an OpFactory with a linear
+
+    optorch = OpMod(torch, TensorMod)
+    optorch.zeros(1, 2, dtype=torch.float) <- Create a TensorInFactory
+    """
+
+    def __init__(self, mod, factory: TakoMod=None):
+        self._mod = mod
+        self._factory = factory or NNMod
+
+    def __getattribute__(self, __name: str) -> TakoMod:
+        mod = super().__getattribute__('_mod')
+        factory = super().__getattribute__('_factory')
+        name = getattr(mod, __name)
+
+        try:
+            return factory(name)
+        except Exception as e:
+            raise RuntimeError(f'Could not get {factory} {name} for {mod}') from e
 
 
 class BuildMultitap(object):
