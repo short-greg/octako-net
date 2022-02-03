@@ -193,7 +193,6 @@ class NetFactory(ABC):
         return SequenceFactory([*self.to_ops(), *other.to_ops()])
     
 
-
 NetFactory.__call__ = NetFactory.to
 
 
@@ -345,7 +344,7 @@ class ArgSet(_ArgMap):
     def __init__(self, *args, **kwargs):
 
         self._args = Args(*args)
-        self._kwargs = Kwargs(*kwargs)
+        self._kwargs = Kwargs(**kwargs)
     
     def lookup(self, sizes: typing.List[torch.Size], kwargs):
 
@@ -386,8 +385,6 @@ class BaseMod(ABC):
 
     def __lshift__(self, other) -> SequenceFactory:
         return SequenceFactory([*self.to_ops(), *other.to_ops()])
-
-
 
 
 class OpFactory(NetFactory):
@@ -469,7 +466,6 @@ ModType = typing.Union[typing.Type[nn.Module], arg]
 ModInstance = typing.Union[nn.Module, arg]
 
 
-
 class ModFactory(BaseMod):
 
     def __init__(self, module: ModType, *args, **kwargs):
@@ -490,7 +486,12 @@ class ModFactory(BaseMod):
         module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
 
         args = self._args.lookup(in_, kwargs)
-        return module(*args.args, **args.kwargs)
+        try:
+            return module(*args.args, **args.kwargs)
+        except Exception as e:
+            raise RuntimeError(
+                f'Cannot instantiate module {module} with args '
+                f'{args.args}, and kwargs {args.kwargs}') from e
     
     @produce.register
     def _(self, in_: torch.Size, **kwargs):
@@ -654,10 +655,11 @@ multi = MultiFactory
 
 class ChainFactory(NetFactory):
     def __init__(
-        self, op_factory: NetFactory, attributes: typing.Union[arg, typing.List[Kwargs]],
+        self, op_factory: NetFactory, attributes: typing.Union[arg, typing.List[dict], typing.List[Kwargs]],
         info: Info=None
     ):
         super().__init__(info)
+
         self._op_factory = op_factory
         self._attributes = attributes
     
@@ -687,6 +689,13 @@ class ChainFactory(NetFactory):
             attributes = self._attributes.to(**kwargs)
         
         for attribute in self._attributes:
+            if isinstance(attribute, dict):
+                attribute = Kwargs(**attribute)
+            
+            attribute = attribute.lookup(in_, kwargs)
+
+            # TODO: Print out attributes if error is thrown?? 
+
             for node in self._op_factory.produce_nodes(in_, **attribute.items):
                 yield node
                 in_ = Multitap(node.ports)
@@ -1014,15 +1023,18 @@ class BuildMultitap(object):
         for port in self._multitap:
             yield port
 
-    def __lshift__(self, net_factory: NetFactory):
+    def __lshift__(self, net_factory: typing.Union[NetFactory, ModFactory]):
         
+        if isinstance(net_factory, ModFactory):
+            net_factory = net_factory.op()
+
         multitap = self._multitap
         for node in net_factory.produce_nodes(self._multitap.ports):
             multitap = Multitap(self._builder.add_node(node))
         return BuildMultitap(self._builder, multitap)
 
 
-def to_multitap(**mapping):
+def port_to_multitap(vals):
     """Convert port or set of ports to a multitap
 
     Raises:
@@ -1033,9 +1045,9 @@ def to_multitap(**mapping):
     """
     ports = []
 
-    for k, v in mapping.items():
+    for v in vals:
         if isinstance(v, str):
-            ports.append(Port(ModRef(k)))
+            ports.append(Port(ModRef(v)))
         elif isinstance(v, Port):
             ports.append(v)
         elif isinstance(v, Multitap):
@@ -1063,7 +1075,7 @@ class NetBuilder(object):
         self._names = Counter()
 
     def __getitem__(self, keys: list):
-        multitap: Multitap = to_multitap(keys)
+        multitap: Multitap = port_to_multitap(keys)
         return BuildMultitap(self, multitap.ports)
 
     def add_ins(self, in_: typing.List[InFactory]):
