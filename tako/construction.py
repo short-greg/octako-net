@@ -157,12 +157,20 @@ class Info:
 class Namer(ABC):
 
     @abstractmethod
-    def name(self, module, info: Info) -> str:
+    def name(self, info: Info, module=None, default: str='Op') -> str:
         raise NotImplementedError
     
     @abstractmethod
     def reset(self):
         raise NotImplementedError
+
+    def _base_name(self, info: Info, module=None, default: str='Op') -> str:
+        if info.name != '':
+            return info.name
+        elif module is not None:
+            return type(module).__name__
+        else:
+            return default
 
 
 def module_name(obj):
@@ -206,8 +214,8 @@ class NetFactory(ABC):
 
 class FixedNamer(Namer):
 
-    def name(self, module, info: Info) -> str:
-        return info.name if info.name != '' else type(module).__name__
+    def name(self, info: Info, module=None, default: str='Op') -> str:
+        return self._base_name(info, module, default)
 
     def reset(self):
         pass
@@ -218,8 +226,8 @@ class SequenceNamer(Namer):
     def __init__(self):
         self._names = Counter()
 
-    def name(self, module: nn.Module, info: Info) -> str:
-        base_name = info.name if info.name != '' else type(module).__name__
+    def name(self, info: Info, module=None, default: str='Op') -> str:
+        base_name = self._base_name(info, module, default)
         self._names.update([base_name])
         if self._names[base_name] > 1:
             return f'{base_name}_{self._names[base_name]}'
@@ -518,7 +526,7 @@ class OpFactory(NetFactory):
         
         namer = namer or FixedNamer()
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        name = namer.name(module, self._info)
+        name = namer.name(self._info, module=module)
 
         outs = self._out_sizes(module, in_)
         if len(outs) == 1:
@@ -897,10 +905,11 @@ class TensorIn(InFactory):
             if s2 > 1 and s1 != s2:
                 raise ValueError(f'Size of default {default.size()} does not match size {self._size}')
 
-    def produce(self) -> In:
+    def produce(self, namer: Namer=None) -> In:
+        namer = namer or FixedNamer()
         default = torch.tensor(self._default, dtype=self._dtype, device=self._device) if self._default is not None else None
         
-        name = self._info.coalesce_name("TensorIn")
+        name = namer.name(self._info, default='TensorIn')
         return In.from_tensor(
             name, torch.Size(self._size), self._dtype, default, 
             self._info.labels, self._info.annotation, device=self._device
@@ -918,12 +927,13 @@ class TensorInFactory(InFactory):
         self._t = t
         self._info = info or Info(name='Tensor')
 
-    def produce(self) -> In:
+    def produce(self, namer: Namer=None) -> In:
+        namer = namer or FixedNamer()
 
         default = self._t.produce_default()
         size = self._t.size
 
-        name = self._info.coalesce_name('TensorIn')
+        name = namer.name(info=self._info, default='TensorIn')
         return In.from_tensor(
             name, size, self._t.dtype, default, 
             self._info.labels, self._info.annotation, device=self._t.device
@@ -951,10 +961,11 @@ class ScalarInFactory(InFactory):
         self._call_default = call_default
         self._info = info or Info(name='Scalar')
 
-    def produce(self) -> Node:
+    def produce(self, namer: Namer=None) -> In:
+        namer = namer or FixedNamer()
 
         default = self._default() if self._call_default else self._default
-        name = self._info.coalesce_name('ScalarIn')
+        name = namer.name(info=self._info, default='ScalarIn')
         return In.from_scalar(name, self._type_, default, self._info.labels, self._info.annotation)
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
@@ -987,9 +998,11 @@ class ParameterFactory(InFactory):
         self._t = t
         self._info = info or Info(name='Param')
 
-    def produce(self) -> Node:
-        
-        name = self._info.coalesce_name('Parameter')
+    def produce(self, namer: Namer=None) -> Node:
+
+        namer = namer or FixedNamer()
+        name = namer.name(self._info, default='ParamIn')
+
         return Parameter(
             name, self._t.size, self._t.dtype, 
             self._t, self._info.labels, self._info.annotation
