@@ -512,7 +512,7 @@ class ModFactory(BaseMod):
     def to(self, **kwargs):
         args = self._args.remap(kwargs)
         module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
-        return ModFactory(module, *args.args, *args.kwargs)
+        return ModFactory(module, *args.args, **args.kwargs)
 
     @singledispatchmethod
     def produce(self, in_: typing.List[torch.Size], **kwargs):
