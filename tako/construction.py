@@ -273,11 +273,6 @@ class SequenceFactory(NetFactory):
         for factory in self._op_factories:
             for node in factory.produce_nodes(in_, namer, **kwargs):
                 in_ = Multitap(node.ports)
-
-                # TODO: solve the bug in here
-                # if a name repeats.. it will set the input
-                # node to the wrong node
-                print("Sequence In: ", in_)
                 yield node
     
     def to(self, **kwargs):

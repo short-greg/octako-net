@@ -502,10 +502,8 @@ class TestNetBuilder:
         net = builder.net
         y = port2.ports[0].module
         y0 = port1.ports[0].module
-        print(y, y0)
         x = x.ports[0].module
         z = net.probe([y, y0, x], by={x: torch.randn(1, 2)})
-        print(z[y].size(), z[y0].size(), z[x].size())
         assert z[y].size(1) == 4
 
     def test_output_with_chained_factories(self):
