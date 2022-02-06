@@ -623,20 +623,20 @@ class Instance(BaseMod):
 
 
 @singledispatch
-def factory(mod: ModType, *args, **kwargs):
-    return ModFactory(mod, *args, *kwargs)
+def factory(mod: ModType, *args, _info: Info=None, _out: typing.List[typing.List]=None, **kwargs):
+    return OpFactory(ModFactory(mod, *args, *kwargs), _info, _out)
 
 @factory.register
-def _(mod: str, *args, **kwargs):
-    return ModFactory(arg(mod), *args, *kwargs)
+def _(mod: str, *args, _info: Info=None, _out: typing.List[typing.List]=None, **kwargs):
+    return OpFactory(ModFactory(arg(mod), *args, *kwargs), _info, _out)
 
 @singledispatch
-def instance(mod: ModInstance):
-    return Instance(mod)
+def instance(mod: ModInstance, _info: Info=None, _out: typing.List[typing.List]=None):
+    return OpFactory(Instance(mod), info=_info, _out=_out)
 
 @instance.register
-def _(mod: str):
-    return Instance(arg(mod))
+def _(mod: str, _info: Info=None, _out: typing.List[typing.List]=None):
+    return OpFactory(Instance(arg(mod)), _info, _out)
 
 
 class DivergeFactory(NetFactory):

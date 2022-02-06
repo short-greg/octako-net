@@ -123,30 +123,30 @@ class TestMod:
     def test_mod_with_sigmoid(self):
 
         m = factory(nn.Sigmoid)
-        sigmoid= m.produce(torch.Size([-1, 4]))
+        sigmoid= m.produce(Out( torch.Size([-1, 4])))[0]
         assert isinstance(sigmoid, nn.Sigmoid)
 
     def test_mod_with_nn_linear(self):
 
         m = factory(nn.Linear, sz[1], 4)
-        linear = m.produce(torch.Size([-1, 4]))
+        linear = m.produce(Out(torch.Size([-1, 4])))[0]
         assert isinstance(linear, nn.Linear)
     
     def test_mod_with_nn_linear_and_arg(self):
 
         m = factory(nn.Linear, sz[1], arg('x'))
-        linear = m.produce(torch.Size([-1, 4]), x=3)
+        linear = m.produce(Out(torch.Size([-1, 4])), x=3)[0]
         assert isinstance(linear, nn.Linear)
 
     def test_mod_with_nn_linear_and_arg(self):
 
         m = factory(nn.Linear, sz[1], arg('x'))
-        linear = m.produce(torch.Size([-1, 4]), x=3)
+        linear = m.produce(Out(torch.Size([-1, 4])), x=3)[0]
         assert isinstance(linear, nn.Linear)
 
     def test_op_with_nn_linear_and_arg(self):
 
-        m = factory(nn.Sigmoid).op()
+        m = factory(nn.Sigmoid)
         sigmoid, out_size = m.produce(Out(torch.Size([-1, 4])), x=3)
         
         assert isinstance(sigmoid, nn.Sigmoid)
@@ -156,7 +156,7 @@ class TestMod:
 
         m = factory(nn.Linear, sz[1], arg('x'))
         with pytest.raises(RuntimeError):
-            m.produce(torch.Size([-1, 4]))
+            m.produce(Out(torch.Size([-1, 4])))
 
 class TestSequence:
 
@@ -174,7 +174,7 @@ class TestSequence:
         # linear = mod(nn.Linear, Sz(1), Var('x')).op(linear_out)
         sequence, _ = (
             factory(nn.Linear, 2, 4) << 
-            factory(nn.Sigmoid).op() <<
+            factory(nn.Sigmoid) <<
             factory(nn.Linear, 4, 3)
         ).produce([Out(torch.Size([1, 2]))])
         
@@ -183,9 +183,9 @@ class TestSequence:
     def test_sequence_produce_nodes_from_three_ops(self):
         port = Port(ModRef('mod'), torch.Size([1, 2]))
         nodes = list((
-            factory(nn.Linear, 2, 4).op() << 
-            factory(nn.Sigmoid).op() <<
-            factory(nn.Linear, 4, 3).op()
+            factory(nn.Linear, 2, 4) << 
+            factory(nn.Sigmoid) <<
+            factory(nn.Linear, 4, 3)
         ).produce_nodes(port))
         assert len(nodes) == 3
 
@@ -194,8 +194,8 @@ class TestSequence:
         nodes = list((
             factory(nn.Linear, 2, 4) << 
             factory('activation') <<
-            factory(nn.Linear, 4, 3).op()  <<
-            factory('activation').op()
+            factory(nn.Linear, 4, 3)  <<
+            factory('activation')
         ).to(activation=nn.ReLU).produce_nodes(port))
         
         assert isinstance(nodes[1].op, nn.ReLU) and isinstance(nodes[3].op, nn.ReLU)
@@ -205,10 +205,8 @@ class TestSequence:
         size = torch.Size([1, 2])
 
         linear = (
-            factory(nn.Linear, sz[1], arg('out'), bias=False).op(
-                [-1, arg('x')]
-            ) << 
-            factory('activation').op()
+            factory(nn.Linear, sz[1], arg('out'), bias=False) << 
+            factory('activation')
         )
 
         sequence, _ = (
@@ -223,10 +221,8 @@ class TestSequence:
         size = torch.Size([1, 2])
         layer = (
             
-            factory(nn.Linear, sz[1], arg('out'), bias=False).op(
-                [sz[0], arg('out')]
-            ) << 
-            factory('activation').op()
+            factory(nn.Linear, sz[1], arg('out'), bias=False) << 
+            factory('activation')
         )
 
         sequence, sizes = (
@@ -243,8 +239,8 @@ class TestDiverge:
     def test_produce_with_diverge(self):
         
         div = diverge ([
-            factory(nn.Linear, 2, 3).op(torch.Size([-1, 3])),
-            factory(nn.Linear, 3, 4).op(torch.Size([-1, 4]))
+            factory(nn.Linear, 2, 3),
+            factory(nn.Linear, 3, 4)
         ])
         layer, _ = div.produce([Out(torch.Size([-1, 2])), Out(torch.Size([-1, 3]))])
         results = layer(torch.rand(2, 2), torch.ones(2, 3))
@@ -255,8 +251,8 @@ class TestDiverge:
 
         ports = [Port(ModRef('x'), torch.Size([-1, 2])), Port(ModRef('y'), torch.Size([-1, 3]))]
         div = diverge ([
-            factory(nn.Linear, 2, 3).op(),
-            factory(nn.Linear, 3, 4).op()
+            factory(nn.Linear, 2, 3),
+            factory(nn.Linear, 3, 4)
         ])
         nodes: typing.List[OpNode] = []
         for node in div.produce_nodes(Multitap(ports)):
