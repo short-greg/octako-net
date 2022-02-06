@@ -1192,13 +1192,10 @@ class NetBuilder(object):
         return ports
 
     def add_in(self, in_: InFactory):
-        node = in_.produce()
+        node = in_.produce(self._namer)
         return self.add_node(node)
 
     def add_node(self, node: Node):
-        # self._names.update([node.name])
-        # if self._names[node.name] > 1:
-        #     node.name = f'{node.name}_{self._names[node.name]}'
         return self._net.add_node(node)
 
     def __lshift__(self, in_: InFactory):
