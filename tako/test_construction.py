@@ -485,3 +485,29 @@ class TestNetBuilder:
         multitap << sequence
     
         assert builder.net['Linear_2'] != builder.net['Linear']
+
+    def test_with_multiple_net_builders(self):
+
+        factory1 = OpFactory(
+            ModFactory(nn.Linear, 2, 3)
+        ) 
+        
+        factory2 =  OpFactory(
+            ModFactory(nn.Linear, 3, 4)
+        )
+        
+        op = TensorIn(1, 2)
+        
+        builder = NetBuilder()
+        x = builder << op
+        port1 = x << factory1
+        port2 = port1 << factory2
+    
+        net = builder.net
+        y = port2.ports[0].module
+        y0 = port1.ports[0].module
+        print(y, y0)
+        x = x.ports[0].module
+        z = net.probe([y, y0, x], by={x: torch.randn(1, 2)})
+        print(z[y].size(), z[y0].size(), z[x].size())
+        assert z[y].size(1) == 4

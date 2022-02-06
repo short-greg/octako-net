@@ -476,15 +476,15 @@ class OpFactory(NetFactory):
     def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
         
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        
         name = self._info.coalesce_name(module_name(module))
 
         outs = self._out_sizes(module, in_)
+        if len(outs) == 1:
+            outs = outs[0]
         op_node = OpNode(
             name, module, in_, outs, self._info.labels,
             self._info.annotation
         )
-
         yield op_node
 
     def to(self, **kwargs):
@@ -1074,8 +1074,10 @@ class BuildMultitap(object):
             net_factory = net_factory.op()
 
         multitap = self._multitap
-        for node in net_factory.produce_nodes(self._multitap.ports):
-            multitap = Multitap(self._builder.add_node(node))
+        for node in net_factory.produce_nodes(self.ports):
+            ports = self._builder.add_node(node)
+            multitap = Multitap(ports)
+
         return BuildMultitap(self._builder, multitap)
 
 

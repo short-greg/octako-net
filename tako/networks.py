@@ -139,8 +139,6 @@ class Multitap:
         return cls(result)
 
 
-
-
 @dataclasses.dataclass
 class Operation:
     """An operation performed and its output size. Used in creating the network.
@@ -303,10 +301,6 @@ class OpNode(Node):
         self._outs = outs
         self._inputs: Multitap = inputs
         self.op: nn.Module = operation
-        if isinstance(self._outs, list):
-            self._ports = [Port(IndexRef(self.name, i), out.size, out.dtype) for i, out in enumerate(self._outs)]
-
-        else: self._ports = Port(ModRef(self.name), self._outs.size, self._outs.dtype),
     
     @property
     def input_nodes(self) -> typing.List[str]:
@@ -328,7 +322,10 @@ class OpNode(Node):
         Returns:
             typing.Iterable[Port]: [The output ports for the node]
         """
-        return self._ports
+        if isinstance(self._outs, list):
+            return [Port(IndexRef(self.name, i), out.size, out.dtype) for i, out in enumerate(self._outs)]
+
+        return Port(ModRef(self.name), self._outs.size, self._outs.dtype),
 
     # TODO: FIND OUT WHY NOT WORKING
     @property
