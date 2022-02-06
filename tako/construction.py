@@ -42,7 +42,7 @@ arg_ = __arg()
 def to_multitap(f):
 
     @wraps(f)
-    def produce_nodes(self, in_, **kwargs):
+    def produce_nodes(self, in_, namer: Namer, **kwargs):
         if isinstance(in_, Port):
             in_ = Multitap([in_])
         
@@ -50,8 +50,15 @@ def to_multitap(f):
             # assume it is a list
             in_ = Multitap([*in_])
 
-        return f(self, in_, **kwargs)
+        return f(self, in_, namer, **kwargs)
     return produce_nodes
+
+
+class Namer(ABC):
+
+    @abstractmethod
+    def name(self, base_name: str) -> str:
+        raise NotImplementedError
 
 
 class SizeMeta(type):
@@ -168,7 +175,7 @@ class NetFactory(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
+    def produce_nodes(self, in_: Multitap, namer: Namer, **kwargs) -> typing.Iterator[Node]:
         raise NotImplementedError
 
     @abstractmethod
@@ -191,7 +198,20 @@ class NetFactory(ABC):
 
     def __lshift__(self, other):
         return SequenceFactory([*self.to_ops(), *other.to_ops()])
-    
+
+
+
+
+class SequenceNamer(Namer):
+
+    def __init__(self):
+        self._names = Counter()
+
+    def name(self, base_name: str) -> str:
+        self._names.update([base_name])
+        if self._names[base_name] > 1:
+            return f'{base_name}_{self._names[base_name]}'
+        return base_name
 
 NetFactory.__call__ = NetFactory.to
 
@@ -225,10 +245,15 @@ class SequenceFactory(NetFactory):
         return sequential, in_
 
     @to_multitap
-    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
+    def produce_nodes(self, in_: Multitap, namer: Namer, **kwargs) -> typing.Iterator[Node]:
         for factory in self._op_factories:
-            for node in factory.produce_nodes(in_, **kwargs):
-                in_ = Multitap(node.ports)  
+            for node in factory.produce_nodes(in_, namer, **kwargs):
+                in_ = Multitap(node.ports)
+
+                # TODO: solve the bug in here
+                # if a name repeats.. it will set the input
+                # node to the wrong node
+                print("Sequence In: ", in_)
                 yield node
     
     def to(self, **kwargs):
@@ -473,10 +498,10 @@ class OpFactory(NetFactory):
         return module, self._out_sizes(module, in_)
     
     @to_multitap
-    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
+    def produce_nodes(self, in_: Multitap, namer: Namer, **kwargs) -> typing.Iterator[Node]:
         
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        name = self._info.coalesce_name(module_name(module))
+        name = namer.name(self._info.coalesce_name(module_name(module)))
 
         outs = self._out_sizes(module, in_)
         if len(outs) == 1:
@@ -622,13 +647,13 @@ class DivergeFactory(NetFactory):
         return mod, outs
     
     @to_multitap
-    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
+    def produce_nodes(self, in_: Multitap, namer: Namer, **kwargs) -> typing.Iterator[Node]:
         
         if isinstance(in_, Port):
             in_ = [in_]
         
         for in_i, op_factory in zip(in_, self._op_factories):
-            for node in op_factory.produce_nodes(Multitap([in_i]), **kwargs):
+            for node in op_factory.produce_nodes(Multitap([in_i]), namer, **kwargs):
                 yield node
     
     def to(self, **kwargs):
@@ -672,10 +697,10 @@ class MultiFactory(NetFactory):
         return mod, outs
     
     @to_multitap
-    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
+    def produce_nodes(self, in_: Multitap, namer: Namer, **kwargs) -> typing.Iterator[Node]:
         
         for op_factory in self._op_factories:
-            for node in op_factory.produce_nodes(in_, **kwargs):
+            for node in op_factory.produce_nodes(in_, namer, **kwargs):
                 yield node
 
     def to(self, **kwargs):
@@ -725,7 +750,7 @@ class ChainFactory(NetFactory):
         return nn.Sequential(*mods), out
     
     @to_multitap
-    def produce_nodes(self, in_: Multitap, **kwargs) -> typing.Iterator[Node]:
+    def produce_nodes(self, in_: Multitap, namer: Namer, **kwargs) -> typing.Iterator[Node]:
         
         attributes = self._attributes
         if isinstance(attributes, arg):
@@ -741,7 +766,7 @@ class ChainFactory(NetFactory):
             if len(undefined) > 0:
                 raise RuntimeError(f"Chain attributes {undefined} are not defined in {kwargs}")
 
-            for node in self._op_factory.produce_nodes(in_, **attribute.items):
+            for node in self._op_factory.produce_nodes(in_, namer, **attribute.items):
                 yield node
                 in_ = Multitap(node.ports)
 
@@ -1040,12 +1065,13 @@ class OpMod(object):
 
 class BuildMultitap(object):
 
-    def __init__(self, builder, multitap: Multitap):
+    def __init__(self, builder, multitap: Multitap, namer: Namer):
         
         if isinstance(multitap, list) or isinstance(multitap, tuple):
             multitap = Multitap(multitap)
         self._builder: NetBuilder = builder
         self._multitap = multitap
+        self._namer = namer
     
     # TODO: consider whether to keep this
     @property
@@ -1074,11 +1100,11 @@ class BuildMultitap(object):
             net_factory = net_factory.op()
 
         multitap = self._multitap
-        for node in net_factory.produce_nodes(self.ports):
+        for node in net_factory.produce_nodes(self.ports, self._namer):
             ports = self._builder.add_node(node)
             multitap = Multitap(ports)
 
-        return BuildMultitap(self._builder, multitap)
+        return BuildMultitap(self._builder, multitap, self._namer)
 
 
 def port_to_multitap(vals):
@@ -1120,10 +1146,11 @@ class NetBuilder(object):
     def __init__(self):
         self._net = Network()
         self._names = Counter()
+        self._namer = SequenceNamer()
 
     def __getitem__(self, keys: list):
         multitap: Multitap = port_to_multitap(keys)
-        return BuildMultitap(self, multitap.ports)
+        return BuildMultitap(self, multitap.ports, self._namer)
 
     def add_ins(self, in_: typing.List[InFactory]):
         ports = []
@@ -1136,18 +1163,22 @@ class NetBuilder(object):
         return self.add_node(node)
 
     def add_node(self, node: Node):
-        self._names.update([node.name])
-        if self._names[node.name] > 1:
-            node.name = f'{node.name}_{self._names[node.name]}'
+        # self._names.update([node.name])
+        # if self._names[node.name] > 1:
+        #     node.name = f'{node.name}_{self._names[node.name]}'
         return self._net.add_node(node)
 
     def __lshift__(self, in_: InFactory):
         ports = self.add_in(in_)
-        return BuildMultitap(self, ports)
+        return BuildMultitap(self, ports, self._namer)
 
     @property
     def net(self):
         return self._net
+
+    @property
+    def namer(self):
+        return self._namer
 
     def set_default_interface(self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]):
         self._net.set_default_interface(
