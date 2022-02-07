@@ -107,7 +107,6 @@ class View(nn.Module):
         self._sz = size
 
     def forward(self, x: torch.Tensor):
-        print('Size: ', x.size(), self._sz)
         return x.view(*self._sz)
 
 
