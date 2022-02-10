@@ -1,3 +1,4 @@
+from re import X
 import typing
 import torch
 from torch import nn
@@ -261,8 +262,8 @@ class TestDiverge:
         p1, = nodes[0].inputs
         p2, = nodes[1].inputs
         
-        assert p1.ref.module == 'x'
-        assert p2.ref.module == 'y'
+        assert p1.ref.node == 'x'
+        assert p2.ref.node == 'y'
 
 
 class TestChain:
@@ -408,7 +409,7 @@ class TestNetBuilder:
 
     def test_produce_network_with_in(self):
 
-        op = TensorInFactory(
+        x = TensorInFactory(
             TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
         )
         op2 = OpFactory(
@@ -418,24 +419,30 @@ class TestNetBuilder:
             ModFactory(nn.Linear, 3, 4)
         )
         builder = NetBuilder()
-        builder << op << op2 << op3
-        assert builder.net['x'].ports[0].size == torch.Size([1, 2])
+        x_, = builder.add_in(x) 
+        builder.append(
+            x_, op2 << op3
+        )
+        assert builder['x'][0].size == torch.Size([1, 2])
 
     def test_produce_network_with_one_op(self):
 
-        op = TensorInFactory(
-            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
+        x = TensorInFactory(
+            TensorFactory(torch.randn, [1, 2])
         )
         op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3)
         )
         builder = NetBuilder()
-        builder << op << op2
-        assert builder.net['Linear'].ports[0].size == torch.Size([-1, 3])
+        x, = builder.add_in(x=x)
+        builder.append(
+            x, op2
+        )
+        assert builder['Linear'][0].size == torch.Size([-1, 3])
 
     def test_produce_network_with_two_ops_same_name(self):
 
-        op = TensorInFactory(
+        x = TensorInFactory(
             TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
         )
         op2 = OpFactory(
@@ -445,7 +452,8 @@ class TestNetBuilder:
             ModFactory(nn.Linear, 3, 4)
         )
         builder = NetBuilder()
-        builder << op << op2 << op3
+        x_, = builder.add_in(x)
+        builder.append(x_, op2 << op3)
         assert builder.net['Linear_2'] != builder.net['Linear']
 
     def test_produce_network_with_sequence(self):
@@ -456,12 +464,13 @@ class TestNetBuilder:
             ModFactory(nn.Linear, 3, 4)
         )
 
-        op = TensorInFactory(
+        x = TensorInFactory(
             TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
         )
         
         builder = NetBuilder()
-        builder << op << sequence
+        x_ = builder.add_in(x)
+        builder.append(x_, sequence)
         assert builder.net['Linear_2'] != builder.net['Linear']
 
     def test_produce_network_with_tensor_in(self):
@@ -472,13 +481,13 @@ class TestNetBuilder:
             ModFactory(nn.Linear, 3, 4)
         )        
         
-        op = TensorInFactory(
+        x = TensorInFactory(
             TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
         )
         
         builder = NetBuilder()
-        multitap = builder << op
-        multitap << sequence
+        multitap = builder.add_in(x)
+        builder.append(multitap, sequence)
     
         assert builder.net['Linear_2'] != builder.net['Linear']
 
@@ -492,19 +501,19 @@ class TestNetBuilder:
             ModFactory(nn.Linear, 3, 4)
         )
         
-        op = TensorIn(1, 2)
+        x = TensorIn(1, 2)
         
         builder = NetBuilder()
-        x = builder << op
-        port1 = x << factory1
-        port2 = port1 << factory2
+        x_, = builder.add_in(x)
+        port1, = builder.append(x_, factory1)
+        port2, = builder.append(port1, factory2)
     
         net = builder.net
-        y = port2.ports[0].module
-        y0 = port1.ports[0].module
-        x = x.ports[0].module
+        y = port2.node
+        y0 = port1.node
+        x = x_.node
         z = net.probe([y, y0, x], by={x: torch.randn(1, 2)})
-        assert z[y].size(1) == 4
+        assert z[0].size(1) == 4
 
     def test_output_with_chained_factories(self):
 
@@ -512,31 +521,34 @@ class TestNetBuilder:
         factory2 =  OpFactory(ModFactory(nn.Linear, 3, 4))
         factory3 =  OpFactory(ModFactory(nn.Linear, 4, 2))
         
-        op = TensorIn(1, 2)
+        x = TensorIn(1, 2)
         
         builder = NetBuilder()
-        x = builder << op
-        port1 = x << factory1
-        port2 = port1 << factory2
-        port3 = port2 << factory3
+        x_, = builder.add_in(x)
+        port1, = builder.append(x_, factory1)
+        port2, = builder.append(port1, factory2)
+        port3, = builder.append(port2, factory3)
     
         net = builder.net
-        y0 = port3.ports[0].module
-        x = x.ports[0].module
+        y0 = port3.node
+        x = x_.node
         z = net.probe([y0, x], by={x: torch.randn(1, 2)})
-        assert z[y0].size(1) == 2
+        assert z[0].size(1) == 2
 
     def test_output_with_chained_factories(self):
 
         factory1 = OpFactory(ModFactory(nn.Linear, sz[1], arg_.out_features)) 
-        op = TensorIn(1, 2)
+        x = TensorIn(1, 2)
         
         builder = NetBuilder()
-        x = builder << op
-        port1 = x << chain(factory1, [{'out_features': 3}, {'out_features': 4}, {'out_features': 2}])
+        x_, = builder.add_in(x)
+        port1, = builder.append(
+            x_,
+            chain(factory1, [{'out_features': 3}, {'out_features': 4}, {'out_features': 2}])
+        )
     
         net = builder.net
-        y0 = port1.ports[0].module
-        x = x.ports[0].module
+        y0 = port1.node
+        x = x_.node
         z = net.probe([y0, x], by={x: torch.randn(1, 2)})
-        assert z[y0].size(1) == 2
+        assert z[0].size(1) == 2

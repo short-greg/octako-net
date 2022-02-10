@@ -15,16 +15,14 @@ import copy
 import dataclasses
 import itertools
 from functools import singledispatch, singledispatchmethod
-from .utils import coalesce
 
 
 @dataclasses.dataclass
 class ModRef(object):
-    module: str
+    node: str
 
     def select(self, by: typing.Dict):
-        
-        return by.get(self.module)
+        return by.get(self.node)
 
 
 @dataclasses.dataclass
@@ -36,26 +34,6 @@ class IndexRef(ModRef):
             return None
 
         return result[self.index]
-
-
-# @dataclasses.dataclass
-# class NetworkPort(Port):
-#     """A port into or out of a node. Used for connecting nodes together.
-#     """
-    
-#     network: str
-
-#     @property
-#     def module(self):
-#         return self.network
-
-#     def select(self, by: typing.Dict):
-
-#         sub_by = by.get(self.network)
-#         if self.network is None:
-#             return None
-
-#         return self.ref.select(sub_by)
 
 
 @dataclasses.dataclass
@@ -79,8 +57,8 @@ class Port:
     dtype: torch.dtype=torch.float
 
     @property
-    def module(self):
-        return self.ref.module
+    def node(self) -> str:
+        return self.ref.node
 
     def select(self, by: typing.Dict):
 
@@ -224,7 +202,6 @@ class NodeSet(object):
 
     @property
     def ports(self):
-
         return Multitap.from_nodes(self.nodes)
 
     @singledispatchmethod
@@ -282,7 +259,7 @@ class NodeVisitor(object):
 class OpNode(Node):
     """
     A node in a network. It performs an operation and specifies which 
-    modules connect into it.
+    nodes connect into it.
     """
 
     def __init__(
@@ -308,7 +285,7 @@ class OpNode(Node):
         Returns:
             typing.List[str]: Names of the nodes input into the node
         """
-        return [in_.module for in_ in self.inputs]
+        return [in_.node for in_ in self.inputs]
     
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -316,8 +293,8 @@ class OpNode(Node):
         example: 
         # For a node with two ports
         x, y = node.ports
-        # You may use one port as the input to one module and the
-        # other port for another module
+        # You may use one port as the input to one node and the
+        # other port for another node
 
         Returns:
             typing.Iterable[Port]: [The output ports for the node]
@@ -539,13 +516,13 @@ class Network(nn.Module):
             if isinstance(in_, str):
                 self._default_ins.append(in_)
             else:
-                self._default_ins.append(in_.module)
+                self._default_ins.append(in_.node)
         
         for out in outs:
             if isinstance(out, str):
                 self._default_outs.append(out)
             else:
-                self._default_outs.append(out.module)
+                self._default_outs.append(out.node)
     
     def is_name_taken(self, name):
         return name in self._nodes
@@ -597,7 +574,7 @@ class Network(nn.Module):
     def _get_input_names_helper(self, node: Node, use_input: typing.List[bool]):
 
         for node_input_port in node.inputs:
-            name = node_input_port.module
+            name = node_input_port.node
             try:
                 use_input[self._in_names.index(name)] = True
             except ValueError:
@@ -641,7 +618,7 @@ class Network(nn.Module):
             return True
 
         for node_input_port in node.inputs:
-            name = node_input_port.module
+            name = node_input_port.node
 
             try:
                 is_inputs[input_names.index(name)] = True
@@ -728,27 +705,29 @@ class Network(nn.Module):
             return by[node.name]
 
         inputs = []
+
         for port in node.inputs:
-            module_name = port.module
+            node_name = port.node
             excitation = port.select(by)
 
             if excitation is not None:
                 inputs.append(excitation)
                 continue
             try:
-                self._probe_helper(self._nodes[module_name], by)
+                self._probe_helper(self._nodes[node_name], by)
                 inputs.append(
                     port.select(by)
                 )
             # TODO: Create a better report for this
             except KeyError:
-                raise KeyError(f'Input or Node {module_name} does not exist')
+                raise KeyError(f'Input or Node {node_name} does not exist')
 
         cur_result = node.probe(by, to_cache)
         return cur_result
 
     def probe(
-        self, outputs: typing.List[str], by: typing.Dict[str, torch.Tensor], to_cache=True
+        self, outputs: typing.List[str], 
+        by: typing.Dict[str, torch.Tensor], to_cache=True
     ) -> typing.List[torch.Tensor]:
         """Probe the network for its inputs
 
@@ -759,18 +738,30 @@ class Network(nn.Module):
         Returns:
             typing.List[torch.Tensor]: The outptus for the probe
         """
-
         if isinstance(outputs, str):
+            singular = True
             outputs = [outputs]
+        else: singular = False
 
         excitations = {**by}
-        result = {}
+        result = []
 
         for output in outputs:
-            node = self._nodes[output]
-            cur_result = self._probe_helper(node, excitations, to_cache)
-            result[output] = cur_result
+            if isinstance(output, Multitap):
+                cur_results = []
+                for name in [port.node for port in output.ports]:
+                    cur_results.append(
+                        self._probe_helper(self._nodes[name], excitations, to_cache)
+                    )
+            elif isinstance(output, Port):
+                cur_result = self._probe_helper(self._nodes[output.node], excitations, to_cache)
+            else:
+                cur_result = self._probe_helper(self._nodes[output], excitations, to_cache)
+
+            result.append(cur_result)
         
+        if singular:
+            return result[0]
         return result
 
     @singledispatchmethod
@@ -779,6 +770,11 @@ class Network(nn.Module):
     
     @__getitem__.register
     def _(self, name: list):
+        return NodeSet([self._nodes[val] for val in name])
+
+    # TODO: Look how to simplify
+    @__getitem__.register
+    def _(self, name: tuple):
         return NodeSet([self._nodes[val] for val in name])
 
     @__getitem__.register
@@ -809,9 +805,7 @@ class Network(nn.Module):
             raise ValueError(f"Number of args {len(args)} does not match the number of inputs {len(self._default_ins)}'")
         inputs = {self._default_ins[i]: x for i, x in enumerate(args)}
         inputs.update(kwargs)
-        result_dict = self.probe(self._default_outs, inputs)
-        result = [result_dict[out] for out in self._default_outs]
-        return result
+        return self.probe(self._default_outs, inputs)
 
 
 @dataclasses.dataclass
@@ -822,7 +816,7 @@ class Link:
 
     def map(self, from_dict: typing.Dict, to_dict: typing.Dict):
         map_val = self.from_.select(from_dict)
-        to_dict[self.to_.module] = map_val
+        to_dict[self.to_.node] = map_val
 
 
 class SubNetwork(object):
@@ -872,7 +866,8 @@ class SubNetwork(object):
         self._name = name
 
     def probe(
-        self, outputs: typing.List[str], inputs: typing.List[Link], 
+        self, outputs: typing.List[str], 
+        inputs: typing.List[Link], 
         by: typing.Dict, to_cache=True
     ):
         if self._name not in by:
@@ -883,8 +878,8 @@ class SubNetwork(object):
             link.map(by, sub_by)
         
         probe_results = self._network.probe(outputs, sub_by, to_cache)
-        for output in outputs:
-            sub_by[output] = probe_results[output]
+        for output, result in zip(outputs, probe_results):
+            sub_by[output] = result
 
         if to_cache:
             by[self._name] = probe_results
@@ -912,8 +907,8 @@ class InterfaceNode(Node):
         example: 
         # For a node with two ports
         x, y = node.ports
-        # You may use one port as the input to one module and the
-        # other port for another module
+        # You may use one port as the input to one node and the
+        # other port for another node
 
         Returns:
             typing.Iterable[Port]: [The output ports for the node]
@@ -926,7 +921,6 @@ class InterfaceNode(Node):
 
     @property
     def inputs(self) -> Multitap:
-        # use self._inputs
         return Multitap([in_.from_ for in_ in self._inputs])
     
     @property
@@ -935,7 +929,7 @@ class InterfaceNode(Node):
         Returns:
             typing.List[str]: Names of the nodes input into the node
         """
-        return [in_.from_.module for in_ in self._inputs]
+        return [in_.from_.node for in_ in self._inputs]
     
     @property
     def sub_network(self) -> SubNetwork:
@@ -955,14 +949,16 @@ class InterfaceNode(Node):
     def accept(self, visitor: NodeVisitor):
         visitor.visit(self)
 
-    # TODO: should have a cache decorator
     def probe(self, by: typing.Dict, to_cache=True):
+
         if self.name in by:
             return by[self.name]
         
-        output_names = [output.module for output in self._outputs]
+        output_names = [output.node for output in self._outputs]
+        subnet_result = dict(zip(output_names, self._sub_network.probe(
+            output_names, self._inputs, by, to_cache
+        )))
 
-        subnet_result = self._sub_network.probe(output_names, self._inputs, by, to_cache)
         result = []
         for output in self._outputs:
             result.append(output.select(subnet_result))
@@ -974,17 +970,43 @@ class InterfaceNode(Node):
 
     
 class NetworkInterface(nn.Module):
-    """A module for probing a network with a standard interface"""
+    """A node for probing a network with a standard interface"""
 
     def __init__(
-        self, network: Network, inputs: typing.List[str], outputs: typing.List[str]
+        self, network: Network, out: list, by: typing.List[str]
     ):
         super().__init__()
         self._network = network
-        self._inputs = inputs
-        self._outputs = outputs
+        if isinstance(by, str):
+            self._by = [by]
+        self._by = by
+        self._out = out
 
     def forward(self, *x):
-        
-        by = dict(zip(self._inputs, x))
-        return self._network.probe(self._outputs, by)
+        by = dict(zip(self._by, x))
+        return self._network.probe(self._out, by=by)
+
+    def __add__(self, other):
+
+        return NetworkInterface(
+            self._network, self._out + other._out, self._by + other._by
+        )
+
+# @dataclasses.dataclass
+# class NetworkPort(Port):
+#     """A port into or out of a node. Used for connecting nodes together.
+#     """
+    
+#     network: str
+
+#     @property
+#     def node(self):
+#         return self.network
+
+#     def select(self, by: typing.Dict):
+
+#         sub_by = by.get(self.network)
+#         if self.network is None:
+#             return None
+
+#         return self.ref.select(sub_by)

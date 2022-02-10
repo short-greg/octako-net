@@ -9,7 +9,7 @@ from numpy import isin
 import torch
 from torch import clamp, nn, tensor
 from torch import Size
-from .networks import In, ModRef, Multitap, Network, Node, NodeSet, OpNode, Parameter, Port, Out
+from .networks import In, ModRef, Multitap, Network, NetworkInterface, Node, NodeSet, OpNode, Parameter, Port, Out
 from .modules import Multi, Multi, Diverge
 from functools import wraps
 
@@ -821,6 +821,9 @@ class InFactory(ABC):
     def produce(self, **kwargs) -> Node:
         pass
 
+    @abstractmethod
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
+        pass
 
 class SizeVal(object):
 
@@ -1090,51 +1093,6 @@ class OpMod(object):
         except Exception as e:
             raise RuntimeError(f'Could not get {factory} {name} for {mod}') from e
 
-
-class BuildMultitap(object):
-
-    def __init__(self, builder, multitap: Multitap, namer: Namer):
-        
-        if isinstance(multitap, list) or isinstance(multitap, tuple):
-            multitap = Multitap(multitap)
-        self._builder: NetBuilder = builder
-        self._multitap = multitap
-        self._namer = namer
-    
-    # TODO: consider whether to keep this
-    @property
-    def multitap(self):
-        return self._multitap
-    
-    @property
-    def ports(self):
-        return [*self._multitap.ports]
-    
-    @singledispatchmethod
-    def __getitem__(self, idx: typing.Iterable) -> Multitap:
-        return self._multitap[idx]
-
-    @__getitem__.register
-    def _(self, idx: int) -> Port:
-        return self._multitap[idx]
-    
-    def __iter__(self) -> typing.Iterator:
-        for port in self._multitap:
-            yield port
-
-    def __lshift__(self, net_factory: typing.Union[NetFactory, ModFactory]):
-        
-        if isinstance(net_factory, ModFactory):
-            net_factory = net_factory.op()
-
-        multitap = self._multitap
-        for node in net_factory.produce_nodes(self.ports, self._namer):
-            ports = self._builder.add_node(node)
-            multitap = Multitap(ports)
-
-        return BuildMultitap(self._builder, multitap, self._namer)
-
-
 def port_to_multitap(vals):
     """Convert port or set of ports to a multitap
 
@@ -1146,14 +1104,15 @@ def port_to_multitap(vals):
     """
     ports = []
 
+    if isinstance(vals, Port):
+        return Multitap([vals])
+
     for v in vals:
         if isinstance(v, str):
             ports.append(Port(ModRef(v)))
         elif isinstance(v, Port):
             ports.append(v)
         elif isinstance(v, Multitap):
-            ports.extend(v.ports)
-        elif isinstance(v, BuildMultitap):
             ports.extend(v.ports)
         else:
             # TODO: make this more ammenable to extension
@@ -1170,32 +1129,35 @@ class NetBuilder(object):
     - Can set base labels that will apply to all nodes added to the network
     -  that use the convenience methods (not add_node)
     """
-
     def __init__(self, namer_cls: typing.Type[Namer]=None):
         self._net = Network()
         self._names = Counter()
         self._namer = namer_cls() if namer_cls is not None else SequenceNamer()
 
-    def __getitem__(self, keys: list):
-        multitap: Multitap = port_to_multitap(keys)
-        return BuildMultitap(self, multitap.ports, self._namer)
+    def __getitem__(self, keys):
+        return self._net[keys].ports
 
-    def add_ins(self, in_: typing.List[InFactory]):
+    def add_in(self, *in_args: InFactory, **in_kwargs: InFactory):
         ports = []
-        for in_i in in_:
-            ports.extend(self.add_in(in_i))
+        for in_i in in_args:
+            node = in_i.produce(self._namer)
+            self._net.add_node(node)
+            ports.extend(node.ports)
+        for k, in_k in in_kwargs.items():
+            node = in_k.info_(k).produce(self._namer)
+            self._net.add_node(node)
+            ports.extend(node.ports)
         return ports
 
-    def add_in(self, in_: InFactory):
-        node = in_.produce(self._namer)
-        return self.add_node(node)
-
-    def add_node(self, node: Node):
-        return self._net.add_node(node)
-
-    def __lshift__(self, in_: InFactory):
-        ports = self.add_in(in_)
-        return BuildMultitap(self, ports, self._namer)
+    def append(self, to, factory: NetFactory, **kwargs):
+        multitap = port_to_multitap(to)
+        ports = []
+        for node in factory.produce_nodes(multitap, self._namer, **kwargs):
+            ports = self._net.add_node(node)
+        return ports
+    
+    def interface(self, out, by: typing.List[str]):
+        return NetworkInterface(self._net, out, by)
 
     @property
     def net(self):
@@ -1205,11 +1167,13 @@ class NetBuilder(object):
     def namer(self):
         return self._namer
 
-    def set_default_interface(self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]):
+    def set_default_interface(
+        self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]
+    ):
         self._net.set_default_interface(
             ins, outs
         )
-    
+
     # TODO: Figure out how to implement
     # add in port mapping
     # def build_machine(self, name: str, *learner_mixins: typing.Type[MachineComponent], **name_map):
@@ -1218,6 +1182,128 @@ class NetBuilder(object):
     #         __qualname__ = name
 
     #     return _(self.net)
+
+
+# import torch.nn as nn
+# sz = []
+# arg_ = object()
+# builder = object()
+#  
+# call Prober
+# allow probers to be "unioned" with +
+
+# class T:
+#     def __init__(self):
+
+#         self._p = (
+#             nn.Linear(sz[1], arg_.out_features) << 
+#             nn.Sigmoid()
+#         ).args(['out_features']) # returns a "prober"
+
+#         self._loss = builder[self._p, self._t](
+#             nn.BCELoss()    
+#         )
+#         loss, validation = (
+#             self._loss + self._validation
+#         ).probe(by={self._x: x, self._t: t})
+
+
+
+
+# class BuildMultitap(object):
+
+#     def __init__(self, builder, multitap: Multitap, namer: Namer):
+        
+#         if isinstance(multitap, list) or isinstance(multitap, tuple):
+#             multitap = Multitap(multitap)
+#         self._builder: NetBuilder = builder
+#         self._multitap = multitap
+#         self._namer = namer
+    
+#     # TODO: consider whether to keep this
+#     @property
+#     def multitap(self):
+#         return self._multitap
+    
+#     @property
+#     def ports(self):
+#         return [*self._multitap.ports]
+    
+#     @singledispatchmethod
+#     def __getitem__(self, idx: typing.Iterable) -> Multitap:
+#         return self._multitap[idx]
+
+#     @__getitem__.register
+#     def _(self, idx: int) -> Port:
+#         return self._multitap[idx]
+    
+#     def __iter__(self) -> typing.Iterator:
+#         for port in self._multitap:
+#             yield port
+
+#     def __add__(self):
+#         pass
+
+#     def __lshift__(self, net_factory: typing.Union[NetFactory, ModFactory]):
+        
+#         if isinstance(net_factory, ModFactory):
+#             net_factory = net_factory.op()
+
+#         multitap = self._multitap
+#         for node in net_factory.produce_nodes(self.ports, self._namer):
+#             ports = self._builder.add_node(node)
+#             multitap = Multitap(ports)
+
+#         return BuildMultitap(self._builder, multitap, self._namer)
+
+
+# class Prober(object):
+
+#     def __init__(self, net: Network, multitap: Multitap, namer: Namer):
+        
+#         if isinstance(multitap, list) or isinstance(multitap, tuple):
+#             multitap = Multitap(multitap)
+#         self._multitap = multitap
+#         self._namer = namer
+#         self._net = net
+    
+#     # TODO: consider whether to keep this
+#     @property
+#     def multitap(self):
+#         return self._multitap
+    
+#     @property
+#     def ports(self):
+#         return [*self._multitap.ports]
+    
+#     @singledispatchmethod
+#     def __getitem__(self, idx: typing.Iterable) -> Multitap:
+#         return self._multitap[idx]
+
+#     @__getitem__.register
+#     def _(self, idx: int) -> Port:
+#         return self._multitap[idx]
+    
+#     def __iter__(self) -> typing.Iterator:
+#         for port in self._multitap:
+#             yield port
+    
+#     def probe(self, by: list):
+#         return self._net.probe(
+#             self._multitap, to_multitap(by)
+#         )
+
+#     # def __lshift__(self, net_factory: typing.Union[NetFactory, ModFactory]):
+        
+#     #     if isinstance(net_factory, ModFactory):
+#     #         net_factory = net_factory.op()
+
+#     #     multitap = self._multitap
+#     #     for node in net_factory.produce_nodes(self.ports, self._namer):
+#     #         ports = self._builder.add_node(node)
+#     #         multitap = Multitap(ports)
+
+#     #     return BuildMultitap(self._builder, multitap, self._namer)
 
 
 # class Out(ABC):

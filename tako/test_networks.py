@@ -273,22 +273,22 @@ class TestSubnetwork:
         x2 = Port(ModRef('x2'), torch.Size([2, 2]))
 
         result = sub_network.probe(['linear1'], [Link(x2, x)], {'x2': torch.zeros(2, 2)}, True )
-        assert result['linear1'].size() == torch.Size([2, 3])
+        assert result[0].size() == torch.Size([2, 3])
 
     def test_get_input_ports_returns_correct_ports(self):
         network = self._setup_network()
         x, y = network[['x', 'y']].ports
         sub_network = SubNetwork('sub', network)
         x2, y2 = sub_network[['x', 'y']].ports
-        assert x.module == x2.module
-        assert y.module == y2.module
+        assert x.node == x2.node
+        assert y.node == y2.node
 
     def test_get_port_returns_correct_ports(self):
         network = self._setup_network()
         linear1,  = network['linear1'].ports
         sub_network = SubNetwork('sub', network)
         linear1b, = sub_network['linear1'].ports
-        assert linear1.module == linear1b.module
+        assert linear1.node == linear1b.node
 
 
 class TestNetworkInterface:
