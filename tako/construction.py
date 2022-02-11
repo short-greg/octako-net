@@ -9,7 +9,7 @@ from numpy import isin
 import torch
 from torch import clamp, nn, tensor
 from torch import Size
-from .networks import In, InScalar, InTensor, Multitap, Network, NetworkInterface, Node, NodeSet, OpNode, Port, Out
+from .networks import In, InScalar, InTensor, Multitap, Network, NetworkInterface, Node, NodePort, NodeSet, OpNode, Port, Out
 from .modules import Multi, Multi, Diverge
 from functools import wraps
 
@@ -891,10 +891,11 @@ class TensorIn(InFactory):
         self._dtype = dtype
         self._device = device
         self._info = info or Info()
-        self._default = default or torch.zeros([1 if s < 0 else s for s in size])
+        self._default = default or [1 if s < 0 else s for s in size]
 
-        check_default = torch.tensor(default, device=self._device, dtype=self._dtype)
-        self._check_size(check_default)
+        if default is not None:
+            check_default = torch.zeros(self._size, device=self._device, dtype=self._dtype)
+            self._check_size(check_default)
 
     def _check_size(self, default) -> bool:
         if len(default.size()) != len(self._size):
@@ -905,7 +906,9 @@ class TensorIn(InFactory):
 
     def produce(self, namer: Namer=None) -> In:
         namer = namer or FixedNamer()
-        default = torch.tensor(self._default, dtype=self._dtype, device=self._device) if self._default is not None else None
+        if self._default:
+            default = torch.tensor(self._default).to(self._device)
+        else: default = None
         
         name = namer.name(self._info, default='TensorIn')
         return InTensor(
@@ -1003,7 +1006,7 @@ class ParameterFactory(InFactory):
 
         return InTensor(
             name, self._t.size, self._t.dtype, 
-            self._t, self._info.labels, self._info.annotation
+            self._t.produce_default(), self._info.labels, self._info.annotation
         )
         
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
@@ -1060,11 +1063,11 @@ class ParamMod(TakoMod):
 
     def __call__(self, *size, _info: Info=None, **kwargs) -> OpFactory:
         try: 
-            factory = TensorFactory(
-                self._parameter_mod, size, Kwargs(**kwargs)
-            )        
+            factory = TensorFactory(self._parameter_mod, size, Kwargs(**kwargs))
         except Exception as e:
-            raise RuntimeError(f'Could not generate tensor with {self._tensor_mod}.') from e
+            raise RuntimeError(
+                f'Could not generate tensor with {self._parameter_mod}.'
+            ) from e
 
         return ParameterFactory(factory, _info)
 
@@ -1109,7 +1112,7 @@ def port_to_multitap(vals):
 
     for v in vals:
         if isinstance(v, str):
-            ports.append(Port(ModRef(v)))
+            ports.append(NodePort(v))
         elif isinstance(v, Port):
             ports.append(v)
         elif isinstance(v, Multitap):

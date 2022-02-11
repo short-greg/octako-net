@@ -465,9 +465,13 @@ class InTensor(In):
 
     def clone(self):
         return InTensor(
-            self.name, self._out_size, self._dtype, self.default, self._labels,
+            self.name, self._out_size, self._dtype, self._default, self._labels,
             self._annotation
         )
+
+    @property
+    def default(self) -> torch.Tensor:
+        return self._default
     
     # @classmethod
     # def from_tensor(

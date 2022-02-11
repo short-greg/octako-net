@@ -3,7 +3,7 @@ import typing
 import torch
 from torch import nn
 from torch.nn.modules.container import Sequential
-from .networks import In, Multitap, Node, OpNode, Out, Port
+from .networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
 from .construction import (
     ChainFactory, Info, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
     ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorIn, TensorMod, scalar_val, diverge, 
@@ -116,7 +116,7 @@ class TestOpMod:
 
         optorch = OpMod(torch, factory=ParamMod)
         node = optorch.rand(2, 3).produce()
-        assert isinstance(node, Parameter)
+        assert isinstance(node, InTensor)
 
 
 class TestMod:
@@ -152,12 +152,12 @@ class TestMod:
         
         assert isinstance(sigmoid, nn.Sigmoid)
 
-
     def test_mod_raises_error_when_arg_not_defined(self):
 
         m = factory(nn.Linear, sz[1], arg('x'))
         with pytest.raises(RuntimeError):
             m.produce(Out(torch.Size([-1, 4])))
+
 
 class TestSequence:
 
@@ -182,7 +182,7 @@ class TestSequence:
         assert isinstance(sequence, Sequential)
 
     def test_sequence_produce_nodes_from_three_ops(self):
-        port = Port(ModRef('mod'), torch.Size([1, 2]))
+        port = NodePort('mod', torch.Size([1, 2]))
         nodes = list((
             factory(nn.Linear, 2, 4) << 
             factory(nn.Sigmoid) <<
@@ -191,7 +191,7 @@ class TestSequence:
         assert len(nodes) == 3
 
     def test_sequence_produce_nodes_from_three_ops_and_args(self):
-        port = Port("mod", torch.Size([1, 2]))
+        port = NodePort("mod", torch.Size([1, 2]))
         nodes = list((
             factory(nn.Linear, 2, 4) << 
             factory('activation') <<
@@ -250,7 +250,7 @@ class TestDiverge:
 
     def test_produce_nodes_with_diverge(self):
 
-        ports = [Port(ModRef('x'), torch.Size([-1, 2])), Port(ModRef('y'), torch.Size([-1, 3]))]
+        ports = [NodePort('x', torch.Size([-1, 2])), NodePort('y', torch.Size([-1, 3]))]
         div = diverge ([
             factory(nn.Linear, 2, 3),
             factory(nn.Linear, 3, 4)
@@ -262,8 +262,8 @@ class TestDiverge:
         p1, = nodes[0].inputs
         p2, = nodes[1].inputs
         
-        assert p1.ref.node == 'x'
-        assert p2.ref.node == 'y'
+        assert p1.node == 'x'
+        assert p2.node == 'y'
 
 
 class TestChain:
@@ -275,7 +275,6 @@ class TestChain:
         sequence, size = chain_.produce([Out(torch.Size([-1, 2]))])
 
         assert isinstance(sequence[0], nn.Linear)
-
 
     def test_chained_linear_with_arg(self):
 
@@ -305,7 +304,7 @@ class TestChain:
         op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
         chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
         nodes: typing.List[Node] = []
-        for node in chain_.produce_nodes(Multitap([Port(ModRef('x'), torch.Size([-1, 2]))])):
+        for node in chain_.produce_nodes(Multitap([NodePort('x', torch.Size([-1, 2]))])):
             nodes.append(node)
 
         assert nodes[-1].ports[0].size == torch.Size([-1, 5])
@@ -317,7 +316,7 @@ class TestChain:
         chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
         chain_ = chain_.to(x=arg('y'))
         nodes: typing.List[Node] = []
-        for node in chain_.produce_nodes(Port(ModRef("x"), torch.Size([-1, 2]))):
+        for node in chain_.produce_nodes(NodePort("x", torch.Size([-1, 2]))):
             nodes.append(node)
 
         assert nodes[-1].ports[0].size == torch.Size([-1, 5])
@@ -328,7 +327,7 @@ class TestChain:
         chain_ = chain(op, [Kwargs(y=4), Kwargs(x=5)])
         chain_ = chain_.to(x=arg('y'))
         with pytest.raises(RuntimeError):
-            for _ in chain_.produce_nodes(Port(ModRef("x"), torch.Size([-1, 2]))):
+            for _ in chain_.produce_nodes(NodePort("x", torch.Size([-1, 2]))):
                 pass
 
 
@@ -393,7 +392,7 @@ class TestParameterFactory:
             factory, Info(name='hi')
         )
         in_ = op.produce()
-        assert isinstance(in_, Parameter)
+        assert isinstance(in_, InTensor)
 
     def test_produce_tensor_input_with_reset(self):
 
@@ -402,7 +401,8 @@ class TestParameterFactory:
             factory, Info(name='hi')
         )
         parameter = op.produce()
-        parameter.reset()
+        print(parameter)
+        assert parameter.default.size() == torch.Size([1, 4])
 
 
 class TestNetBuilder:
