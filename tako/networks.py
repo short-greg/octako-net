@@ -473,24 +473,6 @@ class InTensor(In):
     def default(self) -> torch.Tensor:
         return self._default
     
-    # @classmethod
-    # def from_tensor(
-    #     cls, name, sz: torch.Size, dtype: torch.dtype=torch.float, default_value: torch.Tensor=None, 
-    #     labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, 
-    #     annotation: str=None, device: str='cpu'):
-    #     if default_value is None:
-    #         sz2 = []
-    #         for el in list(sz):
-    #             if el == -1:
-    #                 sz2.append(1)
-    #             else:
-    #                 sz2.append(el)
-    #         if len(sz2) != 0:
-    #             default_value = torch.zeros(*sz2, device=device)
-    #         else:
-    #             default_value = torch.tensor([], device=device)
-    #     return cls(name, sz, dtype, default_value, labels, annotation)
-    
 
 class InScalar(In):
 
@@ -984,7 +966,7 @@ class InterfaceNode(Node):
     
     @property
     def outputs(self) -> Multitap:
-        return self._outputs.clone() #  Multitap([output for output in self._outputs])
+        return self._outputs.clone()
     
     @property
     def clone(self):
@@ -1041,71 +1023,7 @@ class NetworkInterface(nn.Module):
 
 
 
-# class Parameter(Node):
-#     """[Input node in a network.]"""
 
-#     # value_type: typing.Type, default_value, 
-#     def __init__(
-#         self, name: str, sz: torch.Size, dtype: torch.dtype, reset_func: typing.Callable[[torch.Size], torch.Tensor], labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
-#         """[initializer]
-
-#         Args:
-#             name ([type]): [Name of the in node]
-#             out_size (torch.Size): [The size of the in node]
-#         """
-#         super().__init__(name, labels=labels, annotation=annotation)
-#         self._reset_func = reset_func
-#         self._out_size = sz
-#         self._dtype = dtype
-#         self._value = self._reset_func(self._out_size)
-
-#     def reset(self):
-#         self._value = self._reset_func(self._out_size)
-
-#     def to(self, device):
-#         self._value = self._value.to(device)
-
-#     @property
-#     def ports(self) -> typing.Iterable[Port]:
-#         return NodePort(self.name, self._out_size),
-    
-#     def forward(x):
-#         return x
-
-#     @property
-#     def inputs(self) -> Multitap:
-#         return Multitap([])
-
-#     @property
-#     def input_nodes(self) -> typing.List[str]:
-#         """
-#         Returns:
-#             typing.List[str]: Names of the nodes input into the node
-#         """
-#         return []
-
-#     def clone(self):
-#         return Parameter(
-#             self.name, self._out_size, self._dtype, self._reset_func, self._labels,
-#             self._annotation
-
-#         )
-    
-#     @property
-#     def cache_names_used(self) -> typing.Set[str]:
-#         return set([self.name])
-    
-#     def probe(self, by: By, to_cache: bool=True):
-#         return by.get(self.name, self._value)
-
-
-# @dataclasses.dataclass
-# class Operation:
-#     """An operation performed and its output size. Used in creating the network.
-#     """
-
-#     op: nn.Module
-#     out_size: torch.Size
 
 
 # query - port 1, node
@@ -1115,45 +1033,6 @@ class NetworkInterface(nn.Module):
 
 # StepBy <- inherit from by
 
-
-# @dataclasses.dataclass
-# class NetworkPort(Port):
-#     """A port into or out of a node. Used for connecting nodes together.
-#     """
-    
-#     network: str
-
-#     @property
-#     def node(self):
-#         return self.network
-
-#     def select(self, by: typing.Dict):
-
-#         sub_by = by.get(self.network)
-#         if self.network is None:
-#             return None
-
-#         return self.ref.select(sub_by)
-
-
-
-# @dataclasses.dataclass
-# class ModRef(object):
-#     node: str
-
-#     def select(self, by: By):
-#         return by.get(self.node)
-
-
-# @dataclasses.dataclass
-# class IndexRef(ModRef):
-#     index: int
-#     def select(self, by: By):
-#         result = super().select(by)
-#         if result is None:
-#             return None
-
-#         return result[self.index]
 
 # class Query(ABC):
     
