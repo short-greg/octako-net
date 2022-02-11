@@ -23,7 +23,7 @@ class By(object):
         self._data = kwargs
         self._subs = {}
 
-    def get(self, node: str, default):
+    def get(self, node: str, default=None):
         return self._data.get(node, default)
 
     def update(self, node: str, datum):
@@ -159,7 +159,7 @@ class Multitap:
     
     def __iter__(self) -> typing.Iterator[Port]:
         for port in self.ports:
-            return port
+            yield port
 
     @property
     def sizes(self):
@@ -332,7 +332,7 @@ class OpNode(Node):
         super().__init__(name, labels, annotation)
         if isinstance(inputs, Port):
             inputs = Multitap([inputs])
-        elif isinstance(inputs, type([])):
+        elif isinstance(inputs, list):
             inputs = Multitap(inputs)
         
         self._outs = outs
@@ -430,9 +430,11 @@ class InTensor(In):
     def __init__(
         self, name, sz: torch.Size, 
         dtype: typing.Union[type, torch.dtype], 
-        default=None, 
+        default: torch.Tensor=None, 
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, 
-        annotation: str=None):
+        annotation: str=None,
+        device: str='cpu'
+    ):
         """[initializer]
 
         Args:
@@ -442,12 +444,18 @@ class InTensor(In):
         super().__init__(name, labels=labels, annotation=annotation)
         self._dtype = dtype
         self._out_size = sz
+        self._device = device
         self._default = default
+        
+        if self._default is not None: 
+            self._default = self._default.to(device)
+        self._device = device
 
     def forward(x: torch.Tensor):
         return x
 
     def to(self, device):
+        self._device = device
         if self._default is not None:
             self._default = self._default.to(device)
 
@@ -482,8 +490,10 @@ class InTensor(In):
 
 class InScalar(In):
 
-    def __init__(self, dtype: typing.Type, default, annotation: str=None):
-
+    def __init__(
+        self, name, dtype: typing.Type, default, labels, annotation: str=None
+    ):
+        super().__init__(name, labels, annotation)
         self._dtype = dtype
         self._default = default
 
@@ -901,6 +911,8 @@ class SubNetwork(object):
         inputs: typing.List[Link], 
         by: By, to_cache=True
     ):
+        if isinstance(by, dict):
+            by = By(**by)
         sub_by = by.get_or_add_sub(self._name)
         
         for link in inputs:

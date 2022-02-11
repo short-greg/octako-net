@@ -3,7 +3,7 @@ import typing
 import torch
 from torch import nn
 from torch.nn.modules.container import Sequential
-from .networks import In, Parameter, ModRef, Multitap, Node, OpNode, Out, Parameter, Port
+from .networks import In, Multitap, Node, OpNode, Out, Port
 from .construction import (
     ChainFactory, Info, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
     ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorIn, TensorMod, scalar_val, diverge, 

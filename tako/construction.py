@@ -9,7 +9,7 @@ from numpy import isin
 import torch
 from torch import clamp, nn, tensor
 from torch import Size
-from .networks import In, ModRef, Multitap, Network, NetworkInterface, Node, NodeSet, OpNode, Parameter, Port, Out
+from .networks import In, InScalar, InTensor, Multitap, Network, NetworkInterface, Node, NodeSet, OpNode, Port, Out
 from .modules import Multi, Multi, Diverge
 from functools import wraps
 
@@ -891,10 +891,10 @@ class TensorIn(InFactory):
         self._dtype = dtype
         self._device = device
         self._info = info or Info()
-        self._default = default
-        if default is not None: 
-            default = torch.tensor(default, device=self._device, dtype=self._dtype)
-            self._check_size(default)
+        self._default = default or torch.zeros([1 if s < 0 else s for s in size])
+
+        check_default = torch.tensor(default, device=self._device, dtype=self._dtype)
+        self._check_size(check_default)
 
     def _check_size(self, default) -> bool:
         if len(default.size()) != len(self._size):
@@ -908,7 +908,7 @@ class TensorIn(InFactory):
         default = torch.tensor(self._default, dtype=self._dtype, device=self._device) if self._default is not None else None
         
         name = namer.name(self._info, default='TensorIn')
-        return In.from_tensor(
+        return InTensor(
             name, torch.Size(self._size), self._dtype, default, 
             self._info.labels, self._info.annotation, device=self._device
         )
@@ -932,7 +932,7 @@ class TensorInFactory(InFactory):
         size = self._t.size
 
         name = namer.name(info=self._info, default='TensorIn')
-        return In.from_tensor(
+        return InTensor(
             name, size, self._t.dtype, default, 
             self._info.labels, self._info.annotation, device=self._t.device
         )
@@ -940,14 +940,14 @@ class TensorInFactory(InFactory):
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         return TensorInFactory(self._t, self._info.spawn(name, labels, annotation, fix))
 
-    @classmethod
-    def from_info(
-        cls, size: typing.Union[torch.Size, typing.Iterable], dtype: torch.dtype, 
-        device: str='cpu', batch=True, info: Info=None
-    ):
-        return cls(
-            torch.empty(*size, dtype=dtype, device=device), batch, info
-        )
+    # @classmethod
+    # def from_info(
+    #     cls, size: typing.Union[torch.Size, typing.Iterable], dtype: torch.dtype, 
+    #     device: str='cpu', batch=True, info: Info=None
+    # ):
+    #     return cls(
+    #         torch.empty(*size, dtype=dtype, device=device), batch, info
+    #     )
 
 
 class ScalarInFactory(InFactory):
@@ -964,7 +964,7 @@ class ScalarInFactory(InFactory):
 
         default = self._default() if self._call_default else self._default
         name = namer.name(info=self._info, default='ScalarIn')
-        return In.from_scalar(name, self._type_, default, self._info.labels, self._info.annotation)
+        return InScalar(name, self._type_, default, self._info.labels, self._info.annotation)
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
@@ -1001,7 +1001,7 @@ class ParameterFactory(InFactory):
         namer = namer or FixedNamer()
         name = namer.name(self._info, default='ParamIn')
 
-        return Parameter(
+        return InTensor(
             name, self._t.size, self._t.dtype, 
             self._t, self._info.labels, self._info.annotation
         )

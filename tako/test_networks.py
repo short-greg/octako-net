@@ -1,60 +1,61 @@
 import pytest
 import torch.nn as nn
 import torch
-from .networks import In, Link, ModRef, Multitap, Network, InterfaceNode, OpNode, Out, Port, SubNetwork
+from .networks import In, InTensor, Link, Multitap, Network, InterfaceNode, NodePort, OpNode, Out, Port, SubNetwork
 
 
 class TestNode:
 
     def test_node_inputs_after_creation(self):
 
-        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        x = NodePort('x', torch.Size([-1, 2]))
 
         node = OpNode('linear', nn.Linear(2, 4),  [x], Out(torch.Size([-1, 4])))
         assert node.inputs[0] == x
 
     def test_node_name_after_creation(self):
 
-        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        x = NodePort('x', torch.Size([-1, 2]))
         node = OpNode("linear", nn.Linear(2, 2), [x], Out(torch.Size([-1, 2])))
         assert node.name == 'linear'
 
     def test_node_forward(self):
 
-        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        x = NodePort('x', torch.Size([-1, 2]))
         node = OpNode("linear", nn.Linear(2, 2), [x], Out(torch.Size([-1, 2])))
         assert node.forward(torch.randn(3, 2)).size() == torch.Size([3, 2])
 
     def test_node_input_nodes_equals_x(self):
 
-        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        x = NodePort('x', torch.Size([-1, 2]))
         node = OpNode("linear", nn.Linear(2, 2), [x], Out(torch.Size([-1, 2])))
         assert node.input_nodes[0] == 'x'
 
     def test_node_ports_equals_x(self):
 
-        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        x = NodePort('x', torch.Size([-1, 2]))
         node = OpNode("linear", nn.Linear(2, 2), [x], Out(torch.Size([-1, 2])))
         assert node.inputs[0] == x
 
     def test_node_labels_are_correct(self):
 
-        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        x = NodePort('x', torch.Size([-1, 2]))
         node = OpNode("linear", nn.Linear(2, 2), [x], Out(torch.Size([-1, 2])), labels=['linear'])
         assert node.labels == ['linear']
 
     def test_node_ports_is_correct_size(self):
 
-        x = Port(ModRef('x'), torch.Size([-1, 2]))
+        x = NodePort('x', torch.Size([-1, 2]))
         node = OpNode("linear", nn.Linear(2, 2), [x], Out(torch.Size([-1, 2])))
         assert node.ports[0].size == torch.Size([-1, 2])
+
 
 class TestNetwork:
 
     def test_get_one_input_ports(self):
 
         network = Network([
-            In.from_tensor('x', torch.Size([-1, 16]))
+            InTensor('x', torch.Size([-1, 16]), dtype=torch.float)
         ])
         
         x, = network['x'].ports
@@ -64,8 +65,8 @@ class TestNetwork:
     def test_get_two_input_ports(self):
 
         network = Network([
-            In.from_tensor('x', torch.Size([-1, 16])),
-            In.from_tensor('y', torch.Size([-1, 24]))
+            InTensor('x', torch.Size([-1, 16]), dtype=torch.float),
+            InTensor('y', torch.Size([-1, 24]), dtype=torch.float)
         ])
         x, y = network[['x', 'y']].ports
         
@@ -75,7 +76,7 @@ class TestNetwork:
     def test_add_node_ports_are_equal(self):
 
         network = Network([
-            In.from_tensor('x', torch.Size([-1, 2])),
+            InTensor('x', torch.Size([-1, 2]), dtype=torch.float),
         ])
         x, = network.add_node(
             OpNode(
@@ -87,7 +88,7 @@ class TestNetwork:
     def test_output_with_one_node(self):
 
         network = Network([
-            In.from_tensor('x', torch.Size([-1, 2])),
+            InTensor('x', torch.Size([-1, 2]), dtype=torch.float),
         ])
         x, = network.add_node(
             OpNode(
@@ -105,7 +106,7 @@ class TestNetwork:
     def test_output_with_two_nodes(self):
 
         network = Network([
-            In.from_tensor('x', torch.Size([-1, 2])),
+            InTensor('x', torch.Size([-1, 2]), dtype=torch.float),
         ])
         x, = network.add_node(
             OpNode(
@@ -128,7 +129,7 @@ class TestNetwork:
     def test_are_inputs_with_real_input(self):
 
         network = Network([
-            In.from_tensor('x', torch.Size([-1, 16]))
+            InTensor('x', torch.Size([-1, 16]), dtype=torch.float)
         ])
         x, = network.add_node(
             OpNode(
@@ -139,8 +140,8 @@ class TestNetwork:
     def test_are_inputs_with_multiple_inputs(self):
 
         network = Network([
-            In.from_tensor('x1', torch.Size([-1, 16])),
-            In.from_tensor('x2', torch.Size([-1, 16])),
+            InTensor('x1', torch.Size([-1, 16]), dtype=torch.float),
+            InTensor('x2', torch.Size([-1, 16]), dtype=torch.float),
         ])
         x1, x2 = network[['x1', 'x2']].ports
 
@@ -157,8 +158,8 @@ class TestNetwork:
     def test_are_inputs_with_multiple_layers(self):
 
         network = Network([
-            In.from_tensor('x1', torch.Size([-1, 16])),
-            In.from_tensor('x2', torch.Size([-1, 16])),
+            InTensor('x1', torch.Size([-1, 16]), dtype=torch.float),
+            InTensor('x2', torch.Size([-1, 16]), dtype=torch.float),
         ])
         x1, x2 = network[['x1', 'x2']].ports
         y1, = network.add_node(
@@ -177,8 +178,8 @@ class TestNetwork:
     def test_are_inputs_fails_with_single_layers(self):
 
         network = Network([
-            In.from_tensor('x1', torch.Size([-1, 16])),
-            In.from_tensor('x2', torch.Size([-1, 16])),
+            InTensor('x1', torch.Size([-1, 16]), dtype=torch.float),
+            InTensor('x2', torch.Size([-1, 16]), dtype=torch.float),
         ])
         x1, x2 = network[['x1', 'x2']].ports
         y1, = network.add_node(
@@ -194,7 +195,7 @@ class TestNetwork:
     def test_are_inputs_fails_with_invalid_output(self):
 
         network = Network([
-            In.from_tensor('x1', torch.Size([-1, 16]))
+            InTensor('x1', torch.Size([-1, 16]), dtype=torch.float)
         ])
         x1,  = network['x1'].ports
         y1, = network.add_node(
@@ -207,7 +208,7 @@ class TestNetwork:
     def test_are_inputs_fails_with_invalid_input(self):
 
         network = Network([
-            In.from_tensor('x1', torch.Size([-1, 16]))
+            InTensor('x1', torch.Size([-1, 16]), torch.float)
         ])
         x1,  = network['x1'].ports
         y1, = network.add_node(
@@ -228,16 +229,16 @@ class TestLink:
 
     def test_link_to_port_from_and_to_are_correct(self):
 
-        from_port = Port(ModRef("t"), torch.Size([2, 2]))
-        to_port = Port(ModRef('h'), torch.Size([2, 2]))
+        from_port = NodePort("t", torch.Size([2, 2]))
+        to_port = NodePort('h', torch.Size([2, 2]))
         link = Link(from_port, to_port)
         assert from_port is link.from_
         assert to_port is link.to_
 
     def test_link_map_puts_correct_value_in_dict(self):
 
-        from_port = Port(ModRef("t"), torch.Size([2, 2]))
-        to_port = Port(ModRef('h'), torch.Size([2, 2]))
+        from_port = NodePort("t", torch.Size([2, 2]))
+        to_port = NodePort('h', torch.Size([2, 2]))
         link = Link(from_port, to_port)
         from_ = {'t': torch.randn(2, 2)}
         to_ = {}
@@ -250,8 +251,8 @@ class TestSubnetwork:
     @staticmethod
     def _setup_network():
         network = Network(
-            [In('x', torch.Size([2, 2]), torch.DoubleTensor, torch.zeros(2,2)),
-            In('y', torch.Size([2, 3]), torch.DoubleTensor, torch.zeros(2,2))]
+            [InTensor('x', torch.Size([2, 2]), torch.float, torch.zeros(2,2)),
+            InTensor('y', torch.Size([2, 3]), torch.float, torch.zeros(2,2))]
         )
 
         x, y = network[['x', 'y']].ports
@@ -270,9 +271,11 @@ class TestSubnetwork:
         network = self._setup_network()
         x, = network['x'].ports
         sub_network = SubNetwork('sub', network)
-        x2 = Port(ModRef('x2'), torch.Size([2, 2]))
+        x2 = NodePort('x2', torch.Size([2, 2]))
 
-        result = sub_network.probe(['linear1'], [Link(x2, x)], {'x2': torch.zeros(2, 2)}, True )
+        result = sub_network.probe(
+            ['linear1'], [Link(x2, x)], {'x2': torch.zeros(2, 2)}, True 
+        )
         assert result[0].size() == torch.Size([2, 3])
 
     def test_get_input_ports_returns_correct_ports(self):
@@ -296,8 +299,8 @@ class TestNetworkInterface:
     @staticmethod
     def _setup_network():
         network = Network(
-            [In('x', torch.Size([2, 2]), torch.DoubleTensor, torch.zeros(2,2)),
-            In('y', torch.Size([2, 3]), torch.DoubleTensor, torch.zeros(2,2))]
+            [InTensor('x', torch.Size([2, 2]), torch.float, torch.zeros(2,2)),
+            InTensor('y', torch.Size([2, 3]), torch.float, torch.zeros(2,2))]
         )
 
         x, y = network[['x', 'y']].ports
@@ -316,7 +319,7 @@ class TestNetworkInterface:
         network = self._setup_network()
         sub_network = SubNetwork('sub', network)
         x, y = sub_network[['x', 'linear1']].ports
-        link = Link(Port(ModRef('z'), torch.Size([2, 2])), x)
+        link = Link(NodePort('z', torch.Size([2, 2])), x)
         interface = InterfaceNode('interface', sub_network, [y], [link])
 
         result = interface.probe({'z': torch.zeros(2, 2)})
