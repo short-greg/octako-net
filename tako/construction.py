@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
 from functools import partial, singledispatch, singledispatchmethod
 from os import path
-from typing import Any, Counter, Iterator, TypeVar
+from typing import Any, Counter, TypeVar
 import typing
 from numpy import isin
 import torch

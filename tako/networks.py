@@ -7,7 +7,7 @@ Classes related to Networks.
 They are a collection of modules connected together in a graph.
 
 """
-from abc import abstractmethod
+from abc import ABC, abstractmethod, abstractproperty
 import torch.nn as nn
 import torch
 import typing
@@ -17,23 +17,31 @@ import itertools
 from functools import singledispatch, singledispatchmethod
 
 
-@dataclasses.dataclass
-class ModRef(object):
-    node: str
+class By(object):
 
-    def select(self, by: typing.Dict):
-        return by.get(self.node)
+    def __init__(self, **kwargs):
+        self._data = kwargs
+        self._subs = {}
 
+    def get(self, node: str, default):
+        return self._data.get(node, default)
 
-@dataclasses.dataclass
-class IndexRef(ModRef):
-    index: int
-    def select(self, by: typing.Dict):
-        result = super().select(by)
-        if result is None:
-            return None
+    def update(self, node: str, datum):
+        self._data[node] = datum
 
-        return result[self.index]
+    def __contains__(self, node: str):
+        return node in self._data
+
+    def __setitem__(self, node: str, datum):
+        self._data[node] = datum
+
+    def __getitem__(self, node: str):
+        return self._data[node]
+
+    def get_or_add_sub(self, sub: str):
+        if sub not in self._subs:
+            self._subs[sub] = By()
+        return self._subs[sub]
 
 
 @dataclasses.dataclass
@@ -46,34 +54,91 @@ class Out:
 OutList = typing.List[Out]
 
 
-@dataclasses.dataclass
-class Port:
+class Port(ABC):
     """A port into or out of a node. Used for connecting nodes together."""
-    
-    # TODO: Decide whether to add a name to the port
-    # name: str
-    ref: ModRef
-    size: torch.Size
-    dtype: torch.dtype=torch.float
+
+    @abstractproperty
+    def node(self) -> str:
+        raise NotImplementedError
+
+    @abstractproperty
+    def size(self) -> torch.Size:
+        raise NotImplementedError
+
+    @abstractproperty
+    def dtype(self) -> torch.dtype:
+        raise NotImplementedError
+
+    @abstractmethod
+    def select(self, by: By):
+        raise NotImplementedError
+
+    @abstractmethod
+    def select_result(self, result):
+        raise NotImplementedError
+
+
+class NodePort(Port):
+
+    def __init__(self, node: str, size: torch.Size, dtype: torch.dtype=torch.float):
+
+        self._node = node
+        self._size = size
+        self._dtype = dtype
 
     @property
     def node(self) -> str:
-        return self.ref.node
+        return self._node
 
-    def select(self, by: typing.Dict):
+    @property
+    def dtype(self) -> torch.dtype:
+        return self._dtype
 
-        return self.ref.select(by)
-    
-    @staticmethod
-    def merge_results(ports, by: typing.Dict):
-        result = []
-        for port in ports:
-            cur = port.select(by)
-            if isinstance(cur, list):
-                result.extend(cur)
-            else:
-                result.append(cur)
+    @property
+    def size(self) -> str:
+        return self._size
+
+    def select(self, by: By):
+        return by.get(self.node)
+
+    def select_result(self, result):
         return result
+
+
+class IndexPort(Port):
+
+    def __init__(self, node: str, index: int, size: torch.Size, dtype: torch.dtype=torch.float):
+
+        self._node = node
+        self._index = index
+        self._size = size
+        self._dtype = dtype
+
+    @property
+    def node(self) -> str:
+        return self._node
+
+    @property
+    def index(self) -> str:
+        return self._index
+
+    @property
+    def dtype(self) -> torch.dtype:
+        return self._dtype
+
+    @property
+    def size(self) -> str:
+        return self._size
+
+    def select(self, by: By):
+        result = by.get(self.node)
+        if result is None:
+            return None
+
+        return result[self.index]
+
+    def select_result(self, result):
+        return result[self.index]
 
 
 @dataclasses.dataclass
@@ -91,6 +156,10 @@ class Multitap:
     @__getitem__.register
     def _(self, idx: int) -> Port:
         return self.ports[idx]
+    
+    def __iter__(self) -> typing.Iterator[Port]:
+        for port in self.ports:
+            return port
 
     @property
     def sizes(self):
@@ -115,15 +184,6 @@ class Multitap:
         for node in nodes:
             result.extend(node.ports)
         return cls(result)
-
-
-@dataclasses.dataclass
-class Operation:
-    """An operation performed and its output size. Used in creating the network.
-    """
-
-    op: nn.Module
-    out_size: torch.Size
 
 
 class Node(nn.Module):
@@ -265,7 +325,7 @@ class OpNode(Node):
     def __init__(
         self, name: str, operation: nn.Module, 
         inputs: typing.Union[Multitap, Port, typing.List[Port]],
-        outs: typing.Union[Out, typing.List[Out]],
+        outs: typing.Union[Out, OutList],
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
         annotation: str=None
     ):
@@ -285,7 +345,7 @@ class OpNode(Node):
         Returns:
             typing.List[str]: Names of the nodes input into the node
         """
-        return [in_.node for in_ in self.inputs]
+        return [in_.node for in_ in self._inputs]
     
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -300,9 +360,9 @@ class OpNode(Node):
             typing.Iterable[Port]: [The output ports for the node]
         """
         if isinstance(self._outs, list):
-            return [Port(IndexRef(self.name, i), out.size, out.dtype) for i, out in enumerate(self._outs)]
+            return [IndexPort(self.name, i, out.size, out.dtype) for i, out in enumerate(self._outs)]
 
-        return Port(ModRef(self.name), self._outs.size, self._outs.dtype),
+        return NodePort(self.name, self._outs.size, self._outs.dtype),
 
     # TODO: FIND OUT WHY NOT WORKING
     @property
@@ -323,8 +383,9 @@ class OpNode(Node):
 
         return self.op(*args, **kwargs)
 
-    def probe(self, by: typing.Dict, to_cache=True):
+    def probe(self, by: By, to_cache=True):
         
+        # need to check if all inputs in by
         if self.name in by:
             return by[self.name]
 
@@ -340,33 +401,6 @@ class OpNode(Node):
 class In(Node):
     """[Input node in a network.]"""
 
-    def __init__(
-        self, name, sz: torch.Size, dtype: typing.Union[type, torch.dtype], default_value, labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
-        """[initializer]
-
-        Args:
-            name ([type]): [Name of the in node]
-            out_size (torch.Size): [The size of the in node]
-        """
-        super().__init__(name, labels=labels, annotation=annotation)
-        self._dtype = dtype
-        self._out_size = sz
-        self._default_value = default_value
-
-    def to(self, device):
-        if self._dtype == torch.Tensor:
-            self._default_value = self._default_value.to(device)
-
-        self._default_value = self._default_value.to(device)
-
-    @property
-    def ports(self) -> typing.Iterable[Port]:
-        return Port(ModRef(self.name), self._out_size, self._dtype),
-    
-    def forward(x):
-
-        return x
-
     @property
     def inputs(self) -> Multitap:
         return Multitap([])
@@ -378,40 +412,91 @@ class In(Node):
             typing.List[str]: Names of the nodes input into the node
         """
         return []
-
-    def clone(self):
-        return In(
-            self.name, self._out_size, self._dtype, self._default_value, self._labels,
-            self._annotation
-
-        )
+    
+    @property
+    def default(self):
+        raise NotImplementedError
     
     @property
     def cache_names_used(self) -> typing.Set[str]:
         return set([self.name])
     
-    def probe(self, by: typing.Dict, to_cache: bool=True):
-        # TODO: Possibly check the value in by
-        return by.get(self.name, self._default_value)
+    def probe(self, by: By, to_cache: bool=True):
+        return by.get(self.name, self.default)
 
-    @classmethod
-    def from_tensor(
-        cls, name, sz: torch.Size, dtype: torch.dtype=torch.float, default_value: torch.Tensor=None, 
+
+class InTensor(In):
+
+    def __init__(
+        self, name, sz: torch.Size, 
+        dtype: typing.Union[type, torch.dtype], 
+        default=None, 
         labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, 
-        annotation: str=None, device: str='cpu'):
-        if default_value is None:
-            sz2 = []
-            for el in list(sz):
-                if el == -1:
-                    sz2.append(1)
-                else:
-                    sz2.append(el)
-            if len(sz2) != 0:
-                default_value = torch.zeros(*sz2, device=device)
-            else:
-                default_value = torch.tensor([], device=device)
-        return cls(name, sz, dtype, default_value, labels, annotation)
+        annotation: str=None):
+        """[initializer]
+
+        Args:
+            name ([type]): [Name of the in node]
+            out_size (torch.Size): [The size of the in node]
+        """
+        super().__init__(name, labels=labels, annotation=annotation)
+        self._dtype = dtype
+        self._out_size = sz
+        self._default = default
+
+    def forward(x: torch.Tensor):
+        return x
+
+    def to(self, device):
+        if self._default is not None:
+            self._default = self._default.to(device)
+
+    @property
+    def ports(self) -> typing.Iterable[Port]:
+        return NodePort(self.name, self._out_size, self._dtype),
+
+    def clone(self):
+        return InTensor(
+            self.name, self._out_size, self._dtype, self.default, self._labels,
+            self._annotation
+        )
     
+    # @classmethod
+    # def from_tensor(
+    #     cls, name, sz: torch.Size, dtype: torch.dtype=torch.float, default_value: torch.Tensor=None, 
+    #     labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, 
+    #     annotation: str=None, device: str='cpu'):
+    #     if default_value is None:
+    #         sz2 = []
+    #         for el in list(sz):
+    #             if el == -1:
+    #                 sz2.append(1)
+    #             else:
+    #                 sz2.append(el)
+    #         if len(sz2) != 0:
+    #             default_value = torch.zeros(*sz2, device=device)
+    #         else:
+    #             default_value = torch.tensor([], device=device)
+    #     return cls(name, sz, dtype, default_value, labels, annotation)
+    
+
+class InScalar(In):
+
+    def __init__(self, dtype: typing.Type, default, annotation: str=None):
+
+        self._dtype = dtype
+        self._default = default
+
+    def forward(x):
+        return x
+
+    def to(self, device):
+        pass
+
+    @property
+    def ports(self) -> typing.Iterable[Port]:
+        return NodePort(self.name, torch.Size([]), self._dtype),
+
     @classmethod
     def from_scalar(
         cls, name, default_type: typing.Type, default_value, 
@@ -421,64 +506,6 @@ class In(Node):
             name, torch.Size([]), default_type, 
             default_value, labels, annotation
         )
-
-
-class Parameter(Node):
-    """[Input node in a network.]"""
-
-    # value_type: typing.Type, default_value, 
-    def __init__(
-        self, name: str, sz: torch.Size, dtype: torch.dtype, reset_func: typing.Callable[[torch.Size], torch.Tensor], labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
-        """[initializer]
-
-        Args:
-            name ([type]): [Name of the in node]
-            out_size (torch.Size): [The size of the in node]
-        """
-        super().__init__(name, labels=labels, annotation=annotation)
-        self._reset_func = reset_func
-        self._out_size = sz
-        self._dtype = dtype
-        self._value = self._reset_func(self._out_size)
-
-    def reset(self):
-        self._value = self._reset_func(self._out_size)
-
-    def to(self, device):
-        self._value = self._value.to(device)
-
-    @property
-    def ports(self) -> typing.Iterable[Port]:
-        return Port(ModRef(self.name), self._out_size),
-    
-    def forward(x):
-        return x
-
-    @property
-    def inputs(self) -> Multitap:
-        return Multitap([])
-
-    @property
-    def input_nodes(self) -> typing.List[str]:
-        """
-        Returns:
-            typing.List[str]: Names of the nodes input into the node
-        """
-        return []
-
-    def clone(self):
-        return Parameter(
-            self.name, self._out_size, self._dtype, self._reset_func, self._labels,
-            self._annotation
-
-        )
-    
-    @property
-    def cache_names_used(self) -> typing.Set[str]:
-        return set([self.name])
-    
-    def probe(self, by: typing.Dict, to_cache: bool=True):
-        return by.get(self.name, self._value)
 
 
 class Network(nn.Module):
@@ -687,7 +714,7 @@ class Network(nn.Module):
         # TODO: Add in subnetwork
     
     def _probe_helper(
-        self, node: Node, by: typing.Dict[str, torch.Tensor], to_cache=True
+        self, node: Node, by: By, to_cache=True
     ):
         """Helper function to get the output for a "probe"
 
@@ -711,6 +738,7 @@ class Network(nn.Module):
             excitation = port.select(by)
 
             if excitation is not None:
+                
                 inputs.append(excitation)
                 continue
             try:
@@ -726,39 +754,42 @@ class Network(nn.Module):
         return cur_result
 
     def probe(
-        self, outputs: typing.List[str], 
+        self, outputs: typing.List[typing.Union[str, Port]], 
         by: typing.Dict[str, torch.Tensor], to_cache=True
     ) -> typing.List[torch.Tensor]:
         """Probe the network for its inputs
 
         Args:
-            outputs (typing.List[str]): The nodes to probe
+            outputs (typing.List[str, Port]): The nodes or Port to probe
             by (typing.Dict[str, torch.Tensor]): The values to input into the network
 
         Returns:
             typing.List[torch.Tensor]: The outptus for the probe
         """
-        if isinstance(outputs, str):
+        if isinstance(by, dict):
+            by = By(**by)
+        
+        if not isinstance(outputs, list):
             singular = True
             outputs = [outputs]
         else: singular = False
 
-        excitations = {**by}
         result = []
 
         for output in outputs:
-            if isinstance(output, Multitap):
-                cur_results = []
-                for name in [port.node for port in output.ports]:
-                    cur_results.append(
-                        self._probe_helper(self._nodes[name], excitations, to_cache)
-                    )
-            elif isinstance(output, Port):
-                cur_result = self._probe_helper(self._nodes[output.node], excitations, to_cache)
+            if isinstance(output, Port):
+                cur = self._probe_helper(
+                    self._nodes[output.node], 
+                    by, to_cache)
+                result.append(
+                    output.select_result(cur)
+                )
             else:
-                cur_result = self._probe_helper(self._nodes[output], excitations, to_cache)
-
-            result.append(cur_result)
+                result.append(
+                    self._probe_helper(
+                        self._nodes[output], 
+                        by, to_cache
+                ))
         
         if singular:
             return result[0]
@@ -868,16 +899,16 @@ class SubNetwork(object):
     def probe(
         self, outputs: typing.List[str], 
         inputs: typing.List[Link], 
-        by: typing.Dict, to_cache=True
+        by: By, to_cache=True
     ):
-        if self._name not in by:
-            by[self._name] = {}
+        sub_by = by.get_or_add_sub(self._name)
         
-        sub_by = by[self._name]
         for link in inputs:
             link.map(by, sub_by)
         
         probe_results = self._network.probe(outputs, sub_by, to_cache)
+        
+        # TODO: make sure this is necessary
         for output, result in zip(outputs, probe_results):
             sub_by[output] = result
 
@@ -913,7 +944,7 @@ class InterfaceNode(Node):
         Returns:
             typing.Iterable[Port]: [The output ports for the node]
         """
-        return [Port(IndexRef(self.name, i), port.size) for i, port in enumerate(self._outputs)]
+        return [IndexPort(self.name, i, port.size) for i, port in enumerate(self._outputs)]
 
     @property
     def cache_names_used(self) -> typing.Set[str]:
@@ -992,6 +1023,83 @@ class NetworkInterface(nn.Module):
             self._network, self._out + other._out, self._by + other._by
         )
 
+
+
+# class Parameter(Node):
+#     """[Input node in a network.]"""
+
+#     # value_type: typing.Type, default_value, 
+#     def __init__(
+#         self, name: str, sz: torch.Size, dtype: torch.dtype, reset_func: typing.Callable[[torch.Size], torch.Tensor], labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, annotation: str=None):
+#         """[initializer]
+
+#         Args:
+#             name ([type]): [Name of the in node]
+#             out_size (torch.Size): [The size of the in node]
+#         """
+#         super().__init__(name, labels=labels, annotation=annotation)
+#         self._reset_func = reset_func
+#         self._out_size = sz
+#         self._dtype = dtype
+#         self._value = self._reset_func(self._out_size)
+
+#     def reset(self):
+#         self._value = self._reset_func(self._out_size)
+
+#     def to(self, device):
+#         self._value = self._value.to(device)
+
+#     @property
+#     def ports(self) -> typing.Iterable[Port]:
+#         return NodePort(self.name, self._out_size),
+    
+#     def forward(x):
+#         return x
+
+#     @property
+#     def inputs(self) -> Multitap:
+#         return Multitap([])
+
+#     @property
+#     def input_nodes(self) -> typing.List[str]:
+#         """
+#         Returns:
+#             typing.List[str]: Names of the nodes input into the node
+#         """
+#         return []
+
+#     def clone(self):
+#         return Parameter(
+#             self.name, self._out_size, self._dtype, self._reset_func, self._labels,
+#             self._annotation
+
+#         )
+    
+#     @property
+#     def cache_names_used(self) -> typing.Set[str]:
+#         return set([self.name])
+    
+#     def probe(self, by: By, to_cache: bool=True):
+#         return by.get(self.name, self._value)
+
+
+# @dataclasses.dataclass
+# class Operation:
+#     """An operation performed and its output size. Used in creating the network.
+#     """
+
+#     op: nn.Module
+#     out_size: torch.Size
+
+
+# query - port 1, node
+# info - {1: torch.Tensor} 
+# need to almagamate all queries for a node into one selector
+
+
+# StepBy <- inherit from by
+
+
 # @dataclasses.dataclass
 # class NetworkPort(Port):
 #     """A port into or out of a node. Used for connecting nodes together.
@@ -1010,3 +1118,129 @@ class NetworkInterface(nn.Module):
 #             return None
 
 #         return self.ref.select(sub_by)
+
+
+
+# @dataclasses.dataclass
+# class ModRef(object):
+#     node: str
+
+#     def select(self, by: By):
+#         return by.get(self.node)
+
+
+# @dataclasses.dataclass
+# class IndexRef(ModRef):
+#     index: int
+#     def select(self, by: By):
+#         result = super().select(by)
+#         if result is None:
+#             return None
+
+#         return result[self.index]
+
+# class Query(ABC):
+    
+#     @abstractproperty
+#     def node(self):
+#         pass
+
+#     @abstractmethod
+#     def set_result(self, result):
+#         pass
+
+
+# class PortQuery(Query):
+
+#     def __init__(self, port: Port):
+#         self._port = port
+
+#     @property
+#     def result(self):
+#         return self._result
+
+#     def set_result(self, node_output):
+
+#         self._result = node_output
+
+#     def node(self):
+#         return self._port.node
+
+
+# class NodeQuery(Query):
+
+#     def __init__(self, node: str):
+#         self._node = node
+#         self.result = None
+    
+#     @property
+#     def result(self):
+#         return self._result
+
+#     def set_result(self, node_output):
+#         self._result = node_output
+
+#     def node(self):
+#         return self._node
+
+
+# class QueryList(object):
+    
+#     def __init__(self, *queries):
+
+#         self._queries = queries
+
+#     def __iter__(self):
+
+#         for query in self._queries:
+#             yield query
+      
+#     @property  
+#     def result(self):
+#         return [
+#             query.result for query in self._queries
+#         ]
+
+
+# class SingleQueryList(QueryList):
+
+#     def __init__(self, query):
+
+#         super().__init__(query)
+    
+#     def __iter__(self):
+
+#         yield self._queries[0]
+
+#     @property
+#     def result(self):
+#         return self._queries.result
+
+
+# @singledispatch
+# def to_query(output) -> Query:
+#     raise ValueError(f'Cannot convert type {type(output)} to query')
+
+# @to_query.register
+# def _(output: str):
+#     return NodeQuery(output)
+
+# @to_query.register
+# def _(output: Node):
+#     return NodeQuery(output.name)
+
+# @to_query.register
+# def _(output: Port):
+#     return PortQuery(output)
+
+
+# def to_querylist(outputs):
+#     if isinstance(outputs, QueryList):
+#         return outputs
+#     if not isinstance(outputs, list):
+#         return SingleQueryList(
+#             to_query(outputs), single=True
+#         )
+#     return QueryList(*[to_query(o) for o in outputs])
+
+    
