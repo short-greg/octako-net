@@ -29,7 +29,7 @@ class LabelSet:
 
 
 @dataclass
-class Info:
+class Meta:
 
     labels: LabelSet=field(default_factory=LabelSet)
     annotation: str=''
@@ -39,7 +39,7 @@ class Info:
             self.labels = LabelSet(self.labels)
     
     def spawn(self, labels: typing.List[str]=None, annotation: str=None):
-        return Info(
+        return Meta(
             LabelSet(labels) if labels is not None else self.labels,
             annotation if annotation is not None else self.annotation,
         )
@@ -217,11 +217,11 @@ class Multitap:
 class Node(nn.Module):
 
     def __init__(
-        self, name: str, info: Info=None
+        self, name: str, meta: Meta=None
     ):
         super().__init__()
         self._name = name
-        self._info = info or Info()
+        self._info = meta or Meta()
 
     @property
     def name(self):
@@ -353,9 +353,9 @@ class OpNode(Node):
     def __init__(
         self, name: str, operation: nn.Module, 
         inputs: typing.Union[Multitap, Port, typing.List[Port]],
-        outs: typing.Union[Out, OutList], info: Info=None
+        outs: typing.Union[Out, OutList], meta: Meta=None
     ):
-        super().__init__(name, info)
+        super().__init__(name, meta)
         if isinstance(inputs, Port):
             inputs = Multitap([inputs])
         elif isinstance(inputs, list):
@@ -456,7 +456,7 @@ class InTensor(In):
         self, name: str, sz: torch.Size, 
         dtype: typing.Union[type, torch.dtype], 
         default: torch.Tensor=None, 
-        info: Info=None,
+        meta: Meta=None,
         device: str='cpu'
     ):
         """[initializer]
@@ -465,7 +465,7 @@ class InTensor(In):
             name ([type]): [Name of the in node]
             out_size (torch.Size): [The size of the in node]
         """
-        super().__init__(name, info)
+        super().__init__(name, meta)
         self._dtype = dtype
         self._out_size = sz
         self._device = device
@@ -500,9 +500,9 @@ class InTensor(In):
 class InScalar(In):
 
     def __init__(
-        self, name, dtype: typing.Type, default, info: Info=None
+        self, name, dtype: typing.Type, default, meta: Meta=None
     ):
-        super().__init__(name, info)
+        super().__init__(name, meta)
         self._dtype = dtype
         self._default = default
 
@@ -874,12 +874,12 @@ class SubNetwork(object):
 
     def __init__(
         self, name: str, network: Network, 
-        info: Info=None
+        meta: Meta=None
     ):
         super().__init__()
         self._name = name
         self._network: Network = network
-        self._info = info or Info()
+        self._info = meta or Meta()
     
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -946,9 +946,9 @@ class InterfaceNode(Node):
         self, name: str, sub_network: SubNetwork, 
         outputs: Multitap,
         inputs: typing.List[Link],
-        info: Info=None
+        meta: Meta=None
     ):
-        super().__init__(name, info)
+        super().__init__(name, meta)
         self._sub_network: SubNetwork = sub_network
         self._outputs: Multitap = outputs
         self._inputs: typing.List[Link] = inputs
@@ -1047,7 +1047,7 @@ class NetworkInterface(nn.Module):
 
 
 # query - port 1, node
-# info - {1: torch.Tensor} 
+# meta - {1: torch.Tensor} 
 # need to almagamate all queries for a node into one selector
 
 

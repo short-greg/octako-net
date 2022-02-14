@@ -1,7 +1,7 @@
 import pytest
 import torch.nn as nn
 import torch
-from .networks import Info, InTensor, Link, Multitap, Network, InterfaceNode, NodePort, OpNode, Out, Port, SubNetwork
+from .networks import Meta, InTensor, Link, Multitap, Network, InterfaceNode, NodePort, OpNode, Out, Port, SubNetwork
 
 
 class TestNode:
@@ -40,7 +40,7 @@ class TestNode:
     def test_node_labels_are_correct(self):
 
         x = NodePort('x', torch.Size([-1, 2]))
-        node = OpNode("linear", nn.Linear(2, 2), [x], Out(torch.Size([-1, 2])), Info(labels=['linear']))
+        node = OpNode("linear", nn.Linear(2, 2), [x], Out(torch.Size([-1, 2])), Meta(labels=['linear']))
         assert 'linear' in node.labels
 
     def test_node_ports_is_correct_size(self):
