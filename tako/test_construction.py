@@ -272,7 +272,7 @@ class TestChain:
 
         op = OpFactory(ModFactory(nn.Linear, 2, 2))
         chain_ = ChainFactory(op, [Kwargs(), Kwargs()])
-        sequence, size = chain_.produce([Out(torch.Size([-1, 2]))])
+        sequence, _ = chain_.produce([Out(torch.Size([-1, 2]))])
 
         assert isinstance(sequence[0], nn.Linear)
 
@@ -280,7 +280,7 @@ class TestChain:
 
         op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
         chain_ = ChainFactory(op, [Kwargs(x=4), Kwargs(x=5)])
-        sequence, size = chain_.produce([Out(torch.Size([-1, 2]))])
+        sequence, _ = chain_.produce([Out(torch.Size([-1, 2]))])
 
         assert isinstance(sequence[0], nn.Linear)
 
@@ -389,7 +389,7 @@ class TestParameterFactory:
 
         factory = TensorFactory(torch.zeros, [1, 4], Kwargs())
         op = ParameterFactory(
-            factory, Info(name='hi')
+            factory, name='Hi'
         )
         in_ = op.produce()
         assert isinstance(in_, InTensor)
@@ -398,7 +398,7 @@ class TestParameterFactory:
 
         factory = TensorFactory(torch.zeros, [1, 4], Kwargs())
         op = ParameterFactory(
-            factory, Info(name='hi')
+            factory, name='Hi'
         )
         parameter = op.produce()
         print(parameter)
@@ -410,7 +410,7 @@ class TestNetBuilder:
     def test_produce_network_with_in(self):
 
         x = TensorInFactory(
-            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
+            TensorFactory(torch.randn, [1, 2]), name='x'
         )
         op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3)
@@ -443,7 +443,7 @@ class TestNetBuilder:
     def test_produce_network_with_two_ops_same_name(self):
 
         x = TensorInFactory(
-            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
+            TensorFactory(torch.randn, [1, 2]), name='x'
         )
         op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3)
@@ -465,7 +465,7 @@ class TestNetBuilder:
         )
 
         x = TensorInFactory(
-            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
+            TensorFactory(torch.randn, [1, 2]), name='x'
         )
         
         builder = NetBuilder()
@@ -482,7 +482,7 @@ class TestNetBuilder:
         )        
         
         x = TensorInFactory(
-            TensorFactory(torch.randn, [1, 2]), info=Info(name='x')
+            TensorFactory(torch.randn, [1, 2]), name='x'
         )
         
         builder = NetBuilder()

@@ -7,9 +7,9 @@ from typing import Any, Counter, TypeVar
 import typing
 from numpy import isin
 import torch
-from torch import clamp, nn, tensor
+from torch import nn
 from torch import Size
-from .networks import In, InScalar, InTensor, Multitap, Network, NetworkInterface, Node, NodePort, NodeSet, OpNode, Port, Out
+from .networks import In, Info, InScalar, InTensor, Multitap, Network, NetworkInterface, Node, NodePort, NodeSet, OpNode, Port, Out
 from .modules import Multi, Multi, Diverge
 from functools import wraps
 
@@ -120,53 +120,19 @@ class argf(object):
         return self._f(*_args)
 
 
-class LabelSet:
-    
-    def __init__(self, labels: typing.Iterable[str]=None):
-        labels = labels or []
-        self._labels = set(*labels)
-    
-    def __contains__(self, key):
-        return key in self._labels
-
-
-@dataclass
-class Info:
-
-    name: str=''
-    labels: LabelSet=field(default_factory=LabelSet)
-    annotation: str=''
-    fix: bool=False
-
-    def __post_init__(self):
-        if isinstance(self.labels, typing.List):
-            self.labels = LabelSet(self.labels)
-    
-    def spawn(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        return Info(
-            name if name is not None else self.name,
-            LabelSet(labels) if labels is not None else self.labels,
-            annotation if annotation is not None else self.annotation, 
-            fix if fix is not None else self.fix
-        )
-
-    def coalesce_name(self, default: str):
-        return default if self.name == '' else self.name
-
-
 class Namer(ABC):
 
     @abstractmethod
-    def name(self, info: Info, module=None, default: str='Op') -> str:
+    def name(self, name: str, module=None, default: str='Op') -> Info:
         raise NotImplementedError
     
     @abstractmethod
     def reset(self):
         raise NotImplementedError
 
-    def _base_name(self, info: Info, module=None, default: str='Op') -> str:
-        if info.name != '':
-            return info.name
+    def _base_name(self, name: str, module=None, default: str='Op') -> str:
+        if name != '':
+            return name
         elif module is not None:
             return type(module).__name__
         else:
@@ -179,7 +145,8 @@ def module_name(obj):
 
 class NetFactory(ABC):
 
-    def __init__(self, info: Info=None):
+    def __init__(self, name: str="", info: Info=None):
+        self._name = name
         self._info = info or Info()
 
     @abstractmethod
@@ -201,8 +168,9 @@ class NetFactory(ABC):
     def info(self):
         return self._info
 
-    def info_(self, name: str='', labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        pass
+    @abstractmethod
+    def info_(self, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
+        raise NotImplementedError
 
     @abstractmethod
     def to_ops(self):
@@ -214,8 +182,8 @@ class NetFactory(ABC):
 
 class FixedNamer(Namer):
 
-    def name(self, info: Info, module=None, default: str='Op') -> str:
-        return self._base_name(info, module, default)
+    def name(self, name: str, module=None, default: str='Op') -> Info:
+        return self._base_name(name, module, default)
 
     def reset(self):
         pass
@@ -226,12 +194,12 @@ class SequenceNamer(Namer):
     def __init__(self):
         self._names = Counter()
 
-    def name(self, info: Info, module=None, default: str='Op') -> str:
-        base_name = self._base_name(info, module, default)
-        self._names.update([base_name])
-        if self._names[base_name] > 1:
-            return f'{base_name}_{self._names[base_name]}'
-        return base_name
+    def name(self, info: Info, module=None, default: str='Op') -> Info:
+        name = self._base_name(info, module, default)
+        self._names.update([name])
+        if self._names[name] > 1:
+            name = f'{name}_{self._names[name]}'
+        return name
 
     def reset(self):
         self._names = Counter()
@@ -241,8 +209,8 @@ NetFactory.__call__ = NetFactory.to
 
 class SequenceFactory(NetFactory):
 
-    def __init__(self, op_factories: typing.List[NetFactory], info: Info=None):
-        super().__init__(info)
+    def __init__(self, op_factories: typing.List[NetFactory], name: str='', info: Info=None):
+        super().__init__(name, info)
         self._op_factories = op_factories
     
     def add(self, op_factory: NetFactory, position: int=None):
@@ -285,7 +253,7 @@ class SequenceFactory(NetFactory):
         return self._info
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):        
-        return SequenceFactory(self._op_factories, self._info.spawn(name, labels, annotation, fix))
+        return SequenceFactory(self._op_factories, name or self._name, self._info.spawn(labels, annotation, fix))
 
 
 @abstractmethod
@@ -470,9 +438,9 @@ class BaseMod(ABC):
 class OpFactory(NetFactory):
 
     def __init__(
-        self, module: BaseMod, info: Info=None, _out: typing.List[typing.List]=None
+        self, module: BaseMod, name: str="", info: Info=None, _out: typing.List[typing.List]=None
     ):
-        super().__init__(info)
+        super().__init__(name, info)
         self._mod = module
         self._out = _out
 
@@ -521,14 +489,13 @@ class OpFactory(NetFactory):
         
         namer = namer or FixedNamer()
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        name = namer.name(self._info, module=module)
+        name = namer.name(self._name, module=module)
 
         outs = self._out_sizes(module, in_)
         if len(outs) == 1:
             outs = outs[0]
         op_node = OpNode(
-            name, module, in_, outs, self._info.labels,
-            self._info.annotation
+            name, module, in_, outs, self._info.spawn()
         )
         yield op_node
 
@@ -539,8 +506,7 @@ class OpFactory(NetFactory):
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        
-        return OpFactory(self._mod, self._info.spawn(name, labels, annotation, fix))
+        return OpFactory(self._mod, name or self._name, self._info.spawn(labels, annotation, fix))
 
     
 ModType = typing.Union[typing.Type[nn.Module], arg]
@@ -626,28 +592,31 @@ class Instance(BaseMod):
 
 
 @singledispatch
-def factory(mod: ModType, *args, _info: Info=None, _out: typing.List[typing.List]=None, **kwargs):
-    return OpFactory(ModFactory(mod, *args, *kwargs), _info, _out)
+def factory(mod: ModType, *args, _name: str='', _info: Info=None, _out: typing.List[typing.List]=None, **kwargs):
+    return OpFactory(ModFactory(mod, *args, *kwargs), _name, _info, _out)
+
 
 @factory.register
-def _(mod: str, *args, _info: Info=None, _out: typing.List[typing.List]=None, **kwargs):
-    return OpFactory(ModFactory(arg(mod), *args, *kwargs), _info, _out)
+def _(mod: str, *args, _name: str='', _info: Info=None, _out: typing.List[typing.List]=None, **kwargs):
+    return OpFactory(ModFactory(arg(mod), *args, *kwargs), _name, _info, _out)
+
 
 @singledispatch
-def instance(mod: ModInstance, _info: Info=None, _out: typing.List[typing.List]=None):
-    return OpFactory(Instance(mod), info=_info, _out=_out)
+def instance(mod: ModInstance, _name: str='', _info: Info=None, _out: typing.List[typing.List]=None):
+    return OpFactory(Instance(mod), _name, info=_info, _out=_out)
+
 
 @instance.register
-def _(mod: str, _info: Info=None, _out: typing.List[typing.List]=None):
-    return OpFactory(Instance(arg(mod)), _info, _out)
+def _(mod: str, _name: str='', _info: Info=None, _out: typing.List[typing.List]=None):
+    return OpFactory(Instance(arg(mod)), _name, _info, _out)
 
 
 class DivergeFactory(NetFactory):
 
     def __init__(
-        self, op_factories: typing.List[NetFactory], info: Info=None
+        self, op_factories: typing.List[NetFactory], name: str='', info: Info=None
     ):
-        super().__init__(info)
+        super().__init__(name, info)
         self._op_factories = op_factories
     
     def to_ops(self):
@@ -685,7 +654,7 @@ class DivergeFactory(NetFactory):
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return DivergeFactory(self._op_factories, self._info.spawn(name, labels, annotation, fix))
+        return DivergeFactory(self._op_factories, name or self._name, self._info.spawn(labels, annotation, fix))
 
     def to_ops(self):
         return [self]
@@ -696,9 +665,9 @@ diverge = DivergeFactory
 class MultiFactory(NetFactory):
 
     def __init__(
-        self, op_factories: typing.List[NetFactory], info: Info=None
+        self, op_factories: typing.List[NetFactory], name: str='', info: Info=None
     ):
-        super().__init__(info)
+        super().__init__(name, info)
         self._op_factories = op_factories
     
     def to_ops(self):
@@ -733,7 +702,7 @@ class MultiFactory(NetFactory):
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
-        return MultiFactory(self._op_factories, self._info.spawn(name, labels, annotation, fix))
+        return MultiFactory(self._op_factories, name or self._name, self._info.spawn(labels, annotation, fix))
 
 
 multi = MultiFactory
@@ -742,9 +711,9 @@ multi = MultiFactory
 class ChainFactory(NetFactory):
     def __init__(
         self, op_factory: NetFactory, attributes: typing.Union[arg, typing.List[dict], typing.List[Kwargs]],
-        info: Info=None
+        name: str='', info: Info=None
     ):
-        super().__init__(info)
+        super().__init__(name, info)
 
         self._op_factory = op_factory
         self._attributes = attributes
@@ -807,13 +776,18 @@ class ChainFactory(NetFactory):
             self._info
         )
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        return ChainFactory(self._op_factory, self._attributes, self._info.spawn(name, labels, annotation, fix))
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        return ChainFactory(self._op_factory, self._attributes, name or self._name, self._info.spawn(labels, annotation))
 
 chain = ChainFactory
 
 
 class InFactory(ABC):
+
+    def __init__(self, name: str, info: Info=None):
+
+        self._name = name
+        self._info = info or Info()
 
     def coalesce_name(self, name):
         return name if name not in ('', None) else type(self).__name__
@@ -886,7 +860,8 @@ class TensorFactory(object):
 
 class TensorIn(InFactory):
 
-    def __init__(self, *size, dtype=torch.float, device='cpu', default=None, info=None):
+    def __init__(self, *size, dtype=torch.float, device='cpu', default=None, name="", info=None):
+        super().__init__(name or str("TensorIn"), info)
         self._size = to_size(size)
         self._dtype = dtype
         self._device = device
@@ -910,23 +885,23 @@ class TensorIn(InFactory):
             default = torch.tensor(self._default).to(self._device)
         else: default = None
         
-        name = namer.name(self._info, default='TensorIn')
+        name = namer.name(self._name, default='TensorIn')
         return InTensor(
-            name, torch.Size(self._size), self._dtype, default, 
-            self._info.labels, self._info.annotation, device=self._device
+            name, torch.Size(self._size), self._dtype, default,
+            info=self._info.spawn(), device=self._device
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        return TensorIn(*self._size, dtype=self._dtype, device=self._device, info=self._info.spawn(name, labels, annotation, fix))
+        return TensorIn(*self._size, dtype=self._dtype, device=self._device, name=name or self._name, info=self._info.spawn(labels, annotation, fix))
 
 
 class TensorInFactory(InFactory):
 
     def __init__(
-        self, t: TensorFactory, info: Info=None
+        self, t: TensorFactory, name: str="", info: Info=None
     ):
+        super().__init__(name or "TensorIn", info)
         self._t = t
-        self._info = info or Info(name='Tensor')
 
     def produce(self, namer: Namer=None) -> In:
         namer = namer or FixedNamer()
@@ -934,14 +909,13 @@ class TensorInFactory(InFactory):
         default = self._t.produce_default()
         size = self._t.size
 
-        name = namer.name(info=self._info, default='TensorIn')
+        name = namer.name(self._name, default='TensorIn')
         return InTensor(
-            name, size, self._t.dtype, default, 
-            self._info.labels, self._info.annotation, device=self._t.device
+            name, size, self._t.dtype, default, info=self._info, device=self._t.device
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        return TensorInFactory(self._t, self._info.spawn(name, labels, annotation, fix))
+        return TensorInFactory(self._t, name or self._name, self._info.spawn(labels, annotation))
 
     # @classmethod
     # def from_info(
@@ -955,26 +929,26 @@ class TensorInFactory(InFactory):
 
 class ScalarInFactory(InFactory):
 
-    def __init__(self, type_: typing.Type, default, call_default: bool=False, info: Info=None):
-
+    def __init__(self, type_: typing.Type, default, call_default: bool=False, name: str="", info: Info=None):
+        super().__init__(name or 'Scalar', info)
         self._type_ = type_
         self._default = default
         self._call_default = call_default
-        self._info = info or Info(name='Scalar')
 
     def produce(self, namer: Namer=None) -> In:
         namer = namer or FixedNamer()
 
         default = self._default() if self._call_default else self._default
-        name = namer.name(info=self._info, default='ScalarIn')
-        return InScalar(name, self._type_, default, self._info.labels, self._info.annotation)
+        name = namer.name(name=self._name, default=type(self).__name__)
+        return InScalar(name, default, self._info.spawn())
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         
         return ScalarInFactory(
             self._type_, self._default, 
             self._call_default, 
-            self._info.spawn(name, labels, annotation, fix)
+            name or self._name,
+            self._info.spawn(labels, annotation, fix)
         )
 
 
@@ -994,25 +968,25 @@ def scalarf(f, type_: type, _info: Info=None):
 
 class ParameterFactory(InFactory):
 
-    def __init__(self, t: TensorFactory, info: Info=None):
-        
+    def __init__(self, t: TensorFactory, name: str="", info: Info=None):
+        super().__init__(name or 'Param', info)
         self._t = t
-        self._info = info or Info(name='Param')
 
     def produce(self, namer: Namer=None) -> Node:
 
         namer = namer or FixedNamer()
-        name = namer.name(self._info, default='ParamIn')
+        name = namer.name(self._name, default='ParamIn')
 
         return InTensor(
             name, self._t.size, self._t.dtype, 
-            self._t.produce_default(), self._info.labels, self._info.annotation
+            self._t.produce_default(), self._info.spawn()
         )
-        
+
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         return ParameterFactory(
             self._t, 
-            self._info.spawn(name, labels, annotation, fix)
+            name or self._name,
+            self._info.spawn(labels, annotation, fix)
         )
 
 

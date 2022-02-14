@@ -15,6 +15,34 @@ import copy
 import dataclasses
 import itertools
 from functools import singledispatch, singledispatchmethod
+from dataclasses import dataclass, field
+
+
+class LabelSet:
+    
+    def __init__(self, labels: typing.Iterable[str]=None):
+        labels = labels or []
+        self._labels = set(labels)
+    
+    def __contains__(self, key):
+        return key in self._labels
+
+
+@dataclass
+class Info:
+
+    labels: LabelSet=field(default_factory=LabelSet)
+    annotation: str=''
+
+    def __post_init__(self):
+        if isinstance(self.labels, typing.List):
+            self.labels = LabelSet(self.labels)
+    
+    def spawn(self, labels: typing.List[str]=None, annotation: str=None):
+        return Info(
+            LabelSet(labels) if labels is not None else self.labels,
+            annotation if annotation is not None else self.annotation,
+        )
 
 
 class By(object):
@@ -189,29 +217,30 @@ class Multitap:
 class Node(nn.Module):
 
     def __init__(
-        self, name: str, 
-        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
-        annotation: str=None
+        self, name: str, info: Info=None
     ):
         super().__init__()
-        self.name: str = name
-        self._labels = labels
-        self._annotation = annotation or ''
+        self._name = name
+        self._info = info or Info()
+
+    @property
+    def name(self):
+        return self._name
     
     def add_label(self, label: str):
-        self._labels.append(label)
+        self._info.labels.append(label)
     
     @property
     def labels(self) -> typing.List[str]:
-        return copy.copy(self._labels)
+        return copy.copy(self._info.labels)
     
     @property
     def annotation(self) -> str:
-        return self._annotation
+        return self._info.annotation
 
     @annotation.setter
     def annotation(self, annotation: str) -> str:
-        self._annotation = annotation
+        self._info.annotation = annotation
 
     def cache_names_used(self):
         raise NotImplementedError
@@ -321,15 +350,12 @@ class OpNode(Node):
     A node in a network. It performs an operation and specifies which 
     nodes connect into it.
     """
-
     def __init__(
         self, name: str, operation: nn.Module, 
         inputs: typing.Union[Multitap, Port, typing.List[Port]],
-        outs: typing.Union[Out, OutList],
-        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
-        annotation: str=None
+        outs: typing.Union[Out, OutList], info: Info=None
     ):
-        super().__init__(name, labels, annotation)
+        super().__init__(name, info)
         if isinstance(inputs, Port):
             inputs = Multitap([inputs])
         elif isinstance(inputs, list):
@@ -375,8 +401,7 @@ class OpNode(Node):
 
     def clone(self):
         return OpNode(
-            self.name, self.op, self._inputs, self._outs, self._labels,
-            self._annotation
+            self.name, self.op, self._inputs, self._outs, self._info.spawn()
         )
     
     def forward(self, *args, **kwargs):
@@ -428,11 +453,10 @@ class In(Node):
 class InTensor(In):
 
     def __init__(
-        self, name, sz: torch.Size, 
+        self, name: str, sz: torch.Size, 
         dtype: typing.Union[type, torch.dtype], 
         default: torch.Tensor=None, 
-        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None, 
-        annotation: str=None,
+        info: Info=None,
         device: str='cpu'
     ):
         """[initializer]
@@ -441,7 +465,7 @@ class InTensor(In):
             name ([type]): [Name of the in node]
             out_size (torch.Size): [The size of the in node]
         """
-        super().__init__(name, labels=labels, annotation=annotation)
+        super().__init__(name, info)
         self._dtype = dtype
         self._out_size = sz
         self._device = device
@@ -465,8 +489,7 @@ class InTensor(In):
 
     def clone(self):
         return InTensor(
-            self.name, self._out_size, self._dtype, self._default, self._labels,
-            self._annotation
+            self.name, self._out_size, self._dtype, self._default, self._info.spawn()
         )
 
     @property
@@ -477,9 +500,9 @@ class InTensor(In):
 class InScalar(In):
 
     def __init__(
-        self, name, dtype: typing.Type, default, labels, annotation: str=None
+        self, name, dtype: typing.Type, default, info: Info=None
     ):
-        super().__init__(name, labels, annotation)
+        super().__init__(name, info)
         self._dtype = dtype
         self._default = default
 
@@ -496,7 +519,7 @@ class InScalar(In):
     @classmethod
     def from_scalar(
         cls, name, default_type: typing.Type, default_value, 
-        labels: typing.Set[str]=None, annotation: str=None):
+        labels: LabelSet=None, annotation: str=None):
 
         return cls(
             name, torch.Size([]), default_type, 
@@ -851,14 +874,12 @@ class SubNetwork(object):
 
     def __init__(
         self, name: str, network: Network, 
-        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
-        annotation: str=None
+        info: Info=None
     ):
         super().__init__()
-        self._network: Network = network
         self._name = name
-        self._labels = labels
-        self._annotation = annotation
+        self._network: Network = network
+        self._info = info or Info()
     
     @property
     def ports(self) -> typing.Iterable[Port]:
@@ -881,14 +902,17 @@ class SubNetwork(object):
     
     def clone(self):
         return SubNetwork(
-            self._name, self._network, 
-            self._labels, self._annotation
+            self._name, self._network, self._info.spawn()
         )
 
     def accept(self, visitor: NodeVisitor):
         visitor.visit(self)
     
     @property
+    def name(self):
+        return self._name
+
+    @name.setter
     def name(self, name: str):
         self._name = name
 
@@ -922,10 +946,9 @@ class InterfaceNode(Node):
         self, name: str, sub_network: SubNetwork, 
         outputs: Multitap,
         inputs: typing.List[Link],
-        labels: typing.List[typing.Union[typing.Iterable[str], str]]=None,
-        annotation: str=None
+        info: Info=None
     ):
-        super().__init__(name, labels, annotation)
+        super().__init__(name, info)
         self._sub_network: SubNetwork = sub_network
         self._outputs: Multitap = outputs
         self._inputs: typing.List[Link] = inputs
@@ -971,8 +994,8 @@ class InterfaceNode(Node):
     @property
     def clone(self):
         return InterfaceNode(
-            self.name, self._sub_network,
-            self._outputs, self._inputs, self._labels, self._annotation
+            self._name, self._sub_network,
+            self._outputs, self._inputs, self._info.spawn()
         )
 
     def accept(self, visitor: NodeVisitor):
@@ -1020,9 +1043,6 @@ class NetworkInterface(nn.Module):
         return NetworkInterface(
             self._network, self._out + other._out, self._by + other._by
         )
-
-
-
 
 
 
