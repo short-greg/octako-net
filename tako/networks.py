@@ -26,6 +26,10 @@ class LabelSet:
     
     def __contains__(self, key):
         return key in self._labels
+    
+    @property
+    def labels(self):
+        return [*self._labels]
 
 
 @dataclass

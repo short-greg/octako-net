@@ -67,6 +67,23 @@ class TestOpMod:
         result, _ = linear.produce([Out(torch.Size([1, 1]))])
         assert isinstance(result, nn.Linear)
 
+    def test_update_info(self):
+
+        opnn = OpMod(nn)
+        target = "Linear 1"
+        linear: OpFactory = opnn.Linear(1, 2)
+        result = linear.info_(name=target)
+        assert result.name == target
+
+
+    def test_update_labels(self):
+
+        opnn = OpMod(nn)
+        target = ['linear']
+        linear: OpFactory = opnn.Linear(1, 2)
+        result = linear.info_(labels=target)
+        assert result.meta.labels.labels == target
+
     def test_op_mod_with_nn_sigmoid(self):
 
         opnn = OpMod(nn)
@@ -201,6 +218,17 @@ class TestSequence:
         
         assert isinstance(nodes[1].op, nn.ReLU) and isinstance(nodes[3].op, nn.ReLU)
 
+    def test_update_info_for_sequential(self):
+
+        target = 'Sequence'
+        sequence = (
+            factory(nn.Linear, 2, 4) << 
+            factory('activation') <<
+            factory(nn.Linear, 4, 3)  <<
+            factory('activation')
+        ).info_(name=target)
+        assert sequence.name == target
+
     def test_sequence_produce_from_three_ops_and_args(self):
 
         size = torch.Size([1, 2])
@@ -265,6 +293,14 @@ class TestDiverge:
         assert p1.node == 'x'
         assert p2.node == 'y'
 
+    def test_update_info_for_diverge(self):
+
+        div = diverge ([
+            factory(nn.Linear, 2, 3),
+            factory(nn.Linear, 3, 4)
+        ]).info_('Diverge')
+        assert div.name == 'Diverge'
+
 
 class TestChain:
 
@@ -309,7 +345,6 @@ class TestChain:
 
         assert nodes[-1].ports[0].size == torch.Size([-1, 5])
 
-
     def test_chain_to_produce_nodes(self):
 
         op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
@@ -329,6 +364,12 @@ class TestChain:
         with pytest.raises(RuntimeError):
             for _ in chain_.produce_nodes(NodePort("x", torch.Size([-1, 2]))):
                 pass
+
+    def test_chain_(self):
+
+        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        chain_ = chain(op, [Kwargs(y=4), Kwargs(x=5)]).info_(name='Hi')
+        assert chain_.name == 'Hi'
 
 
 class TestTensorInFactory:

@@ -1,7 +1,7 @@
  
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
-from functools import partial, singledispatch, singledispatchmethod
+from functools import singledispatch, singledispatchmethod
 from os import path
 from typing import Any, Counter, TypeVar
 import typing
@@ -163,6 +163,10 @@ class NetFactory(ABC):
     
     def alias(self, **kwargs):
         return self.to(**{k: arg(v) for k, v in kwargs.items()})
+    
+    @property
+    def name(self):
+        return self._name
 
     @property
     def meta(self):
@@ -252,8 +256,8 @@ class SequenceFactory(NetFactory):
     def meta(self):
         return self._meta
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):        
-        return SequenceFactory(self._op_factories, name or self._name, self._meta.spawn(labels, annotation, fix))
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):        
+        return SequenceFactory(self._op_factories, name or self._name, self._meta.spawn(labels, annotation))
 
 
 @abstractmethod
@@ -505,8 +509,8 @@ class OpFactory(NetFactory):
             mod, self._meta
         )
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        return OpFactory(self._mod, name or self._name, self._meta.spawn(labels, annotation, fix))
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+        return OpFactory(self._mod, name or self._name, self._meta.spawn(labels, annotation), self._out)
 
     
 ModType = typing.Union[typing.Type[nn.Module], arg]
@@ -652,9 +656,9 @@ class DivergeFactory(NetFactory):
             self._met
         )
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
         
-        return DivergeFactory(self._op_factories, name or self._name, self._meta.spawn(labels, annotation, fix))
+        return DivergeFactory(self._op_factories, name or self._name, self._meta.spawn(labels, annotation))
 
     def to_ops(self):
         return [self]
@@ -798,6 +802,7 @@ class InFactory(ABC):
     @abstractmethod
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
         pass
+
 
 class SizeVal(object):
 
