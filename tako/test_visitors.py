@@ -31,47 +31,47 @@ class TestNullNodeProcessor:
         assert new_node.name == input_node.name
 
 
-class TestNetworkBuilder:
+# class TestNetworkBuilder:
 
-    @staticmethod
-    def _setup_node(input_node: In, name='name'):
-        return OpNode(
-            name, nn.Linear(2, 2), 
-            input_node.ports,
-            torch.Size([-1, 2]))
+#     @staticmethod
+#     def _setup_node(input_node: In, name='name'):
+#         return OpNode(
+#             name, nn.Linear(2, 2), 
+#             input_node.ports,
+#             torch.Size([-1, 2]))
 
-    @staticmethod
-    def _setup_input_node(name='name'):
-        return In(
-            name, torch.Size([-1, 2]), torch.Tensor, torch.randn(1, 2))
+#     @staticmethod
+#     def _setup_input_node(name='name'):
+#         return In(
+#             name, torch.Size([-1, 2]), torch.Tensor, torch.randn(1, 2))
 
-    def test_build_network(self):
-        builder = NetworkBuilder(NullNodeProcessor())
-        in_ = In('in', torch.Size([-1, 2]), torch.Tensor, torch.zeros(1, 2))
-        builder.add_node(in_)
-        builder.add_node(self._setup_node(in_))
-        network = builder.get_result()
-        x, = network.get_ports('name')
-        assert x.module == 'name'
+#     def test_build_network(self):
+#         builder = NetworkBuilder(NullNodeProcessor())
+#         in_ = In('in', torch.Size([-1, 2]), torch.Tensor, torch.zeros(1, 2))
+#         builder.add_node(in_)
+#         builder.add_node(self._setup_node(in_))
+#         network = builder.get_result()
+#         x, = network.get_ports('name')
+#         assert x.module == 'name'
 
 
-class TestUpdateNodeName:
+# class TestUpdateNodeName:
 
-    @staticmethod
-    def _setup_node(name='name'):
-        return OpNode(
-            name, nn.Linear(2, 2), 
-            [Port(ModRef('x'), torch.Size([-1, 2]))],
-            torch.Size([-1, 2]))
+#     @staticmethod
+#     def _setup_node(name='name'):
+#         return OpNode(
+#             name, nn.Linear(2, 2), 
+#             [Port(ModRef('x'), torch.Size([-1, 2]))],
+#             torch.Size([-1, 2]))
 
-    def test_update_node_name_with_prepend(self):
-        update_node = UpdateNodeName('x')
-        node = self._setup_node('1')
-        node2 = update_node.process_node(node)
-        assert node2.name == 'x1'
+#     def test_update_node_name_with_prepend(self):
+#         update_node = UpdateNodeName('x')
+#         node = self._setup_node('1')
+#         node2 = update_node.process_node(node)
+#         assert node2.name == 'x1'
         
-    def test_update_node_name_with_prepend(self):
-        update_node = UpdateNodeName(append_with='x')
-        node = self._setup_node('1')
-        node2 = update_node.process_node(node)
-        assert node2.name == '1x'
+#     def test_update_node_name_with_prepend(self):
+#         update_node = UpdateNodeName(append_with='x')
+#         node = self._setup_node('1')
+#         node2 = update_node.process_node(node)
+#         assert node2.name == '1x'

@@ -1,6 +1,3 @@
-
-# TODO: Rewrite tests and get everything working
-
 """
 Classes related to Networks.
 
@@ -596,7 +593,6 @@ class Network(nn.Module):
                 self._leaves.remove(input_node)
         self._leaves.add(node.name)
 
-        print(list(self._nodes.keys()))
         self._nodes[node.name] = node
         self._node_outputs[node.name] = []
         return node.ports
@@ -705,35 +701,35 @@ class Network(nn.Module):
         all_true = not (False in is_inputs)
         return all_true and not other_found
     
-    # TODO: Update traverse forward / traverse backward
-    # to just return an iterator over nodes
-    def traverse_forward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
+    def traverse_forward(
+        self, from_nodes: typing.List[str]=None, 
+        to_nodes: typing.Set[str]=None
+    ) ->  typing.Iterator[Node]:
 
         if from_nodes is None:
             from_nodes = self._roots
         
         for node_name in from_nodes:
             node: Node = self._nodes[node_name]
-            node.accept(visitor)
+            yield node
 
             if to_nodes is None or node_name not in to_nodes:
-                self.traverse_forward(visitor, self._node_outputs[node], to_nodes)
+                self.traverse_forward(self._node_outputs[node], to_nodes)
 
-        # TODO: consider whether to include the subnetwork
-
-    def traverse_backward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
+    def traverse_backward(
+        self, from_nodes: typing.List[str]=None, 
+        to_nodes: typing.Set[str]=None
+    ) -> typing.Iterator[Node]:
         
         if from_nodes is None:
             from_nodes = self._default_outs
         
         for node_name in from_nodes:
             node: Node = self._nodes[node_name]
-            node.accept(visitor)
+            yield node
 
             if to_nodes is None or node_name not in to_nodes:
-                self.traverse_backward(visitor, node.inputs, to_nodes)
-
-        # TODO: Add in subnetwork
+                self.traverse_backward(node.inputs, to_nodes)
     
     def _probe_helper(
         self, node: Node, by: By, to_cache=True
