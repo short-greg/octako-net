@@ -131,7 +131,7 @@ class Namer(ABC):
         raise NotImplementedError
 
     def _base_name(self, name: str, module=None, default: str='Op') -> str:
-        if name != '':
+        if name:
             return name
         elif module is not None:
             return type(module).__name__
@@ -148,6 +148,7 @@ class NetFactory(ABC):
     def __init__(self, name: str="", meta: Meta=None):
         self._name = name
         self._meta = meta or Meta()
+        print(f'Name: {self._name} Meta: {self._meta}')
 
     @abstractmethod
     def produce(self, in_size: torch.Size, **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
@@ -198,8 +199,8 @@ class SequenceNamer(Namer):
     def __init__(self):
         self._names = Counter()
 
-    def name(self, meta: Meta, module=None, default: str='Op') -> Meta:
-        name = self._base_name(meta, module, default)
+    def name(self, name: str, module=None, default: str='Op') -> Meta:
+        name = self._base_name(name, module, default)
         self._names.update([name])
         if self._names[name] > 1:
             name = f'{name}_{self._names[name]}'
@@ -249,7 +250,8 @@ class SequenceFactory(NetFactory):
     
     def to(self, **kwargs):
         return SequenceFactory(
-            [factory.to(**kwargs) for factory in self._op_factories]
+            [factory.to(**kwargs) for factory in self._op_factories],
+            self._name, self._meta
         )
     
     @property
@@ -493,6 +495,7 @@ class OpFactory(NetFactory):
         
         namer = namer or FixedNamer()
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
+        print(f'Name: {self._name} {type(module)}')
         name = namer.name(self._name, module=module)
 
         outs = self._out_sizes(module, in_)
@@ -506,7 +509,7 @@ class OpFactory(NetFactory):
     def to(self, **kwargs):
         mod = self._mod.to(**kwargs)
         return OpFactory(
-            mod, self._meta
+            mod, self._name, self._meta
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
@@ -597,22 +600,22 @@ class Instance(BaseMod):
 
 @singledispatch
 def factory(mod: ModType, *args, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=None, **kwargs):
-    return OpFactory(ModFactory(mod, *args, *kwargs), _name, _meta, _out)
+    return OpFactory(ModFactory(mod, *args, *kwargs), name=_name, meta=_meta, _out=_out)
 
 
 @factory.register
 def _(mod: str, *args, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=None, **kwargs):
-    return OpFactory(ModFactory(arg(mod), *args, *kwargs), _name, _meta, _out)
+    return OpFactory(ModFactory(arg(mod), *args, *kwargs), name=_name, meta=_meta, _out=_out)
 
 
 @singledispatch
 def instance(mod: ModInstance, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=None):
-    return OpFactory(Instance(mod), _name, meta=_meta, _out=_out)
+    return OpFactory(Instance(mod), name=_name, meta=_meta, _out=_out)
 
 
 @instance.register
 def _(mod: str, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=None):
-    return OpFactory(Instance(arg(mod)), _name, _meta, _out)
+    return OpFactory(Instance(arg(mod)), name=_name, meta=_meta, _out=_out)
 
 
 class DivergeFactory(NetFactory):
@@ -653,7 +656,7 @@ class DivergeFactory(NetFactory):
     def to(self, **kwargs):
         return DivergeFactory(
             [op_factory.to(**kwargs) for op_factory in self._op_factories],
-            self._met
+            self._name, self._meta
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
@@ -701,7 +704,7 @@ class MultiFactory(NetFactory):
     def to(self, **kwargs):
         return MultiFactory(
             [op_factory.to(**kwargs) for op_factory in self._op_factories],
-            self._meta
+            self._name, self._meta
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
@@ -777,6 +780,7 @@ class ChainFactory(NetFactory):
             
         return ChainFactory(
             self._op_factory.to(**kwargs), to_attributes,
+            self._name, 
             self._meta
         )
 
