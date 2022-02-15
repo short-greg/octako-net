@@ -932,10 +932,6 @@ class SubNetwork(object):
             link.map(by, sub_by)
         
         probe_results = self._network.probe(outputs, sub_by, to_cache)
-        
-        # TODO: make sure this is necessary
-        for output, result in zip(outputs, probe_results):
-            sub_by[output] = result
 
         if to_cache:
             by[self._name] = probe_results

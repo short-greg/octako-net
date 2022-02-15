@@ -396,6 +396,17 @@ class TestSubnetwork:
         linear1b, = sub_network['linear1'].ports
         assert linear1.node == linear1b.node
 
+    def test_get_port_returns_correct_ports(self):
+        network = self._setup_network()
+        x, y = network[['x', 'y']].ports
+        sub_network = SubNetwork('sub', network)
+        y2, linear = sub_network[['y', 'linear2']].ports
+        
+        result = sub_network.probe(
+            linear, [Link(y, y2)], {'y': torch.zeros(2, 2)}, True 
+        )
+        assert result.size() == torch.Size([2, 3])
+
 
 class TestNetworkInterface:
 
