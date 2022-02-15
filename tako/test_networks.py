@@ -339,6 +339,14 @@ class TestNetwork:
         assert 'y' in input_names
         assert 'linear1' not in input_names
 
+    def test_module_exists(self):
+        network = self._setup_network()
+        assert 'linear1' in network
+
+    def test_iter_over_nodes(self):
+        network = self._setup_network()
+        nodes = {k: v for k, v in network}
+        assert 'linear1' in nodes
 
 class TestSubnetwork:
 

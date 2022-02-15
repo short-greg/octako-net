@@ -42,7 +42,7 @@ class Meta:
         if isinstance(self.labels, typing.List):
             self.labels = LabelSet(self.labels)
     
-    def spawn(self, labels: typing.List[str]=None, annotation: str=None):
+    def spawn(self, labels: typing.List[str]=None, annotation: str=None, **kwargs):
         return Meta(
             LabelSet(labels) if labels is not None else self.labels,
             annotation if annotation is not None else self.annotation,
@@ -573,9 +573,6 @@ class Network(nn.Module):
                 self._default_outs.append(out)
             else:
                 self._default_outs.append(out.node)
-    
-    def is_name_taken(self, name):
-        return name in self._nodes
 
     def add_node(self, node: Node):
         if node.name in self._nodes:
@@ -1050,118 +1047,9 @@ class NetworkInterface(nn.Module):
             self._network, self._out + other._out, self._by + other._by
         )
 
-
-
 # query - port 1, node
 # meta - {1: torch.Tensor} 
 # need to almagamate all queries for a node into one selector
 
 
 # StepBy <- inherit from by
-
-
-# class Query(ABC):
-    
-#     @abstractproperty
-#     def node(self):
-#         pass
-
-#     @abstractmethod
-#     def set_result(self, result):
-#         pass
-
-
-# class PortQuery(Query):
-
-#     def __init__(self, port: Port):
-#         self._port = port
-
-#     @property
-#     def result(self):
-#         return self._result
-
-#     def set_result(self, node_output):
-
-#         self._result = node_output
-
-#     def node(self):
-#         return self._port.node
-
-
-# class NodeQuery(Query):
-
-#     def __init__(self, node: str):
-#         self._node = node
-#         self.result = None
-    
-#     @property
-#     def result(self):
-#         return self._result
-
-#     def set_result(self, node_output):
-#         self._result = node_output
-
-#     def node(self):
-#         return self._node
-
-
-# class QueryList(object):
-    
-#     def __init__(self, *queries):
-
-#         self._queries = queries
-
-#     def __iter__(self):
-
-#         for query in self._queries:
-#             yield query
-      
-#     @property  
-#     def result(self):
-#         return [
-#             query.result for query in self._queries
-#         ]
-
-
-# class SingleQueryList(QueryList):
-
-#     def __init__(self, query):
-
-#         super().__init__(query)
-    
-#     def __iter__(self):
-
-#         yield self._queries[0]
-
-#     @property
-#     def result(self):
-#         return self._queries.result
-
-
-# @singledispatch
-# def to_query(output) -> Query:
-#     raise ValueError(f'Cannot convert type {type(output)} to query')
-
-# @to_query.register
-# def _(output: str):
-#     return NodeQuery(output)
-
-# @to_query.register
-# def _(output: Node):
-#     return NodeQuery(output.name)
-
-# @to_query.register
-# def _(output: Port):
-#     return PortQuery(output)
-
-
-# def to_querylist(outputs):
-#     if isinstance(outputs, QueryList):
-#         return outputs
-#     if not isinstance(outputs, list):
-#         return SingleQueryList(
-#             to_query(outputs), single=True
-#         )
-#     return QueryList(*[to_query(o) for o in outputs])
-
-    
