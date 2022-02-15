@@ -1,7 +1,7 @@
 import pytest
 import torch.nn as nn
 import torch
-from .networks import Meta, InTensor, Link, Multitap, Network, InterfaceNode, NodePort, OpNode, Out, Port, SubNetwork
+from .networks import By, Meta, InTensor, Link, Multitap, Network, InterfaceNode, NodePort, OpNode, Out, Port, SubNetwork
 
 
 class TestNode:
@@ -246,6 +246,100 @@ class TestLink:
         assert to_['h'] is from_['t']
 
 
+class TestNetwork:
+
+    @staticmethod
+    def _setup_network():
+        network = Network(
+            [InTensor('x', torch.Size([2, 2]), torch.float, torch.zeros(2,2)),
+            InTensor('y', torch.Size([2, 3]), torch.float, torch.zeros(2,2))]
+        )
+
+        x, y = network[['x', 'y']].ports
+
+        network.add_node(
+            OpNode(
+              'linear1', nn.Linear(2, 3), x, Out(torch.Size([-1, 4])), 
+            ))
+        network.add_node(
+            OpNode(
+              'linear2', nn.Linear(2, 3), y, Out(torch.Size([-1, 4])), 
+            ))
+        return network
+
+    @staticmethod
+    def _setup_network_with_multiouts():
+        network = Network(
+            [InTensor('y', torch.Size([2, 3]), torch.float, torch.zeros(2,2))]
+        )
+
+        class Double(nn.Module):
+
+            def forward(self, x):
+                return x, x
+
+        y = network[['y']].ports
+
+        network.add_node(
+            OpNode(
+              'doubler', Double(), y, [Out(torch.Size([-1, 2]), Out(torch.Size([-1, 2])))], 
+            ))
+        return network
+
+    def test_probe_results_returns_correct_size(self):
+        network = self._setup_network()
+        x, = network['x'].ports
+        result = network.probe(
+            x, by=By(x2=torch.zeros(2, 2)) 
+        )
+        assert result.size() == torch.Size([2, 2])
+
+    def test_probe_results_returns_correct_size_when_probing_y(self):
+        network = self._setup_network()
+        linear2, = network['linear2'].ports
+        result = network.probe(
+            linear2, by=By(y=torch.zeros(2, 2)) 
+        )
+        assert result.size() == torch.Size([2, 3])
+
+    def test_probe_results_returns_correct_size_when_probing_by_node_name(self):
+        network = self._setup_network()
+        result = network.probe(
+            ['linear2'], by=By(y=torch.zeros(2, 2)) 
+        )
+        assert result[0].size() == torch.Size([2, 3])
+
+    def test_probe_results_returns_correct_size_when_probing_multiple_results(self):
+        network = self._setup_network_with_multiouts()
+        result = network.probe(
+            'doubler', by=By(y=torch.zeros(2, 2)) 
+        )
+        assert result[0].size() == torch.Size([2, 2])
+        assert result[1].size() == torch.Size([2, 2])
+
+    def test_probe_results_returns_correct_size_when_probing_multiple_results(self):
+        network = self._setup_network_with_multiouts()
+        result = network.probe(
+            ['doubler', 'doubler'], by=By(y=torch.zeros(2, 2)) 
+        )
+        assert result[1][1].size() == torch.Size([2, 2])
+        assert result[1][0].size() == torch.Size([2, 2])
+    
+    def test_roots_returns_all_roots(self):
+        network = self._setup_network()
+        roots = {root.name for root in network.roots}
+        assert 'x' in roots
+        assert 'y' in roots
+
+    def test_get_input_names(self):
+        network = self._setup_network()
+        input_names = network.get_input_names(['linear1', 'linear2'])
+
+        assert 'x' in input_names
+        assert 'y' in input_names
+        assert 'linear1' not in input_names
+
+
 class TestSubnetwork:
 
     @staticmethod
@@ -277,6 +371,7 @@ class TestSubnetwork:
             ['linear1'], [Link(x2, x)], {'x2': torch.zeros(2, 2)}, True 
         )
         assert result[0].size() == torch.Size([2, 3])
+
 
     def test_get_input_ports_returns_correct_ports(self):
         network = self._setup_network()

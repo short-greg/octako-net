@@ -599,6 +599,7 @@ class Network(nn.Module):
                 self._leaves.remove(input_node)
         self._leaves.add(node.name)
 
+        print(list(self._nodes.keys()))
         self._nodes[node.name] = node
         self._node_outputs[node.name] = []
         return node.ports
@@ -621,14 +622,14 @@ class Network(nn.Module):
         for name in self._roots:
             yield self._nodes[name]
     
-    def _get_input_names_helper(self, node: Node, use_input: typing.List[bool]):
+    def _get_input_names_helper(self, node: Node, use_input: typing.List[bool], roots: typing.List):
 
         for node_input_port in node.inputs:
             name = node_input_port.node
             try:
-                use_input[self._in_names.index(name)] = True
+                use_input[roots.index(name)] = True
             except ValueError:
-                self._get_input_names_helper(self._nodes[name], use_input)
+                self._get_input_names_helper(self._nodes[name], use_input, roots)
 
     def get_input_names(self, output_names: typing.List[str]) -> typing.List[str]:
         """
@@ -637,17 +638,18 @@ class Network(nn.Module):
         Returns:
             typing.List[str]: The names of all the inputs required for the arguments.
         """
-        use_input = [False] * len(self._in_names)
-        assert len(use_input) == len(self._in_names)
+        use_input = [False] * len(self._roots)
+        assert len(use_input) == len(self._roots)
 
         for output_name in output_names:
             if output_name not in self._nodes:
                 raise KeyError(f'Output name {output_name} is not in the network')
 
+        roots = list(self._roots)
         for name in output_names:
-            self._get_input_names_helper(self._nodes[name], use_input)
+            self._get_input_names_helper(self._nodes[name], use_input, roots)
 
-        return [input_name for input_name, to_use in zip(self._in_names, use_input) if to_use is True]
+        return [input_name for input_name, to_use in zip(self._roots, use_input) if to_use is True]
 
     def _is_input_name_helper(
         self, node: Node, input_names: typing.List[str], 
@@ -711,7 +713,7 @@ class Network(nn.Module):
     def traverse_forward(self, visitor: NodeVisitor, from_nodes: typing.List[str]=None, to_nodes: typing.Set[str]=None):
 
         if from_nodes is None:
-            from_nodes = self._in_names
+            from_nodes = self._roots
         
         for node_name in from_nodes:
             node: Node = self._nodes[node_name]
