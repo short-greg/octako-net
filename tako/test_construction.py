@@ -1,3 +1,4 @@
+from multiprocessing.sharedctypes import Value
 from re import X
 import typing
 import torch
@@ -6,7 +7,7 @@ from torch.nn.modules.container import Sequential
 from .networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
 from .construction import (
     ChainFactory, Meta, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
-    ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorIn, TensorMod, scalar_val, diverge, 
+    ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorIn, TensorMod, argf, scalar_val, diverge, 
     SequenceFactory, sz, arg, factory, arg_, chain
 )
 import pytest
@@ -56,6 +57,37 @@ class TestSz:
 
         with pytest.raises(ValueError):
             sz[1, 2].process([torch.Size([1, 2]), torch.Size([1, 2])])
+
+
+class TestArgf:
+
+    def test_argf_process_with_no_special_args(self):
+        v = argf(lambda x, y: x * y, [3, 2])
+        res = v.process([torch.Size([1, 2])])
+        assert res == 6
+
+    def test_argf_with_two_args(self):
+        v = argf(lambda x, y: x * y, [arg_.x, arg_.y])
+        res = v.process([torch.Size([1, 2])], x=3, y=2)
+        assert res == 6
+
+    def test_argf_to_with_two_args(self):
+        v = argf(lambda x, y: x * y, [arg_.x, arg_.y])
+        v = v.to(x=3, y=2)
+        res = v.process([torch.Size([1, 2])])
+        assert res == 6
+
+    def test_argf_to_with_one_arg_and_size(self):
+        v = argf(lambda x, y: x * y, [arg_.x, sz[1]])
+        v = v.to(x=3)
+        res = v.process([torch.Size([1, 2])])
+        assert res == 6
+
+    def test_argf_procses_without_overriding(self):
+        v = argf(lambda x, y: x * y, [arg_.x, arg_.y])
+        v = v.to(x=3)
+        with pytest.raises(ValueError):
+            v.process([torch.Size([1, 2])])
 
 
 class TestOpMod:

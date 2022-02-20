@@ -94,7 +94,13 @@ class sz(object, metaclass=SizeMeta):
 
 class argf(object):
 
-    def __init__(self, args, f):
+    def __init__(self, f, args):
+        """_summary_
+
+        Args:
+            f (_type_): _description_
+            args (_type_): _description_
+        """
 
         self._f = f
         self._args = args
@@ -103,10 +109,10 @@ class argf(object):
         args = []
         for a in self._args:
             if isinstance(a, arg):
-                args.append(a.to(kw))
+                args.append(a.to(**kw))
             else:
                 args.append(a)
-        return argf(args, self._f)
+        return argf(self._f, args)
     
     def process(self, sizes: typing.List[torch.Size], **kwargs):
         _args = []
@@ -114,7 +120,9 @@ class argf(object):
             if isinstance(a, sz):
                 _args.append(a.process(sizes))
             elif isinstance(a, arg):
-                _args.append(a.to(kwargs))
+                _args.append(a.to(**kwargs))
+                if isinstance(_args[-1], arg):
+                    raise ValueError(f"No value assigned to {_args[-1]}")
             else:
                 _args.append(a)
         return self._f(*_args)
@@ -148,7 +156,6 @@ class NetFactory(ABC):
     def __init__(self, name: str="", meta: Meta=None):
         self._name = name
         self._meta = meta or Meta()
-        print(f'Name: {self._name} Meta: {self._meta}')
 
     @abstractmethod
     def produce(self, in_size: torch.Size, **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
@@ -495,7 +502,6 @@ class OpFactory(NetFactory):
         
         namer = namer or FixedNamer()
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        print(f'Name: {self._name} {type(module)}')
         name = namer.name(self._name, module=module)
 
         outs = self._out_sizes(module, in_)
