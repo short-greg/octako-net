@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn.modules.container import Sequential
 from .networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
 from .construction import (
-    ChainFactory, Meta, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
+    ChainFactory, CounterNamer, Meta, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
     ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorIn, TensorMod, argf, scalar_val, diverge, 
     SequenceFactory, sz, arg, factory, arg_, chain
 )
@@ -88,6 +88,53 @@ class TestArgf:
         v = v.to(x=3)
         with pytest.raises(ValueError):
             v.process([torch.Size([1, 2])])
+
+
+class TestCounterNamer:
+
+    def test_name_one_module(self):
+
+        namer = CounterNamer()
+        name = namer.name('X', nn.Linear(2, 2))
+        assert name == 'X'
+
+    def test_name_with_same_base_name(self):
+
+        namer = CounterNamer()
+        namer.name('X', nn.Linear(2, 2))
+        name2 = namer.name('X', nn.Linear(2, 2))
+        assert name2 == 'X_2'
+
+    def test_name_with_two_different_base_names(self):
+
+        namer = CounterNamer()
+        namer.name('X', nn.Linear(2, 2))
+        name = namer.name('Y', nn.Linear(2, 2))
+        assert name == 'Y'
+
+    def test_name_three_with_same_base_names(self):
+
+        namer = CounterNamer()
+        namer.name('X', nn.Linear(2, 2))
+        namer.name('X', nn.Linear(2, 2))
+        name = namer.name('X', nn.Linear(2, 2))
+        assert name == 'X_3'
+
+    def test_retrieve_third_name(self):
+
+        namer = CounterNamer()
+        namer.name('X', nn.Linear(2, 2))
+        namer.name('X', nn.Linear(2, 2))
+        namer.name('X', nn.Linear(2, 2))
+        assert namer['X'][-1] == 'X_3'
+
+    def test_retrieve_first_and_second_name(self):
+
+        namer = CounterNamer()
+        namer.name('X', nn.Linear(2, 2))
+        namer.name('X', nn.Linear(2, 2))
+        namer.name('X', nn.Linear(2, 2))
+        assert namer['X'][:2] == ['X', 'X_2']
 
 
 class TestOpMod:
@@ -220,8 +267,7 @@ class TestSequence:
         assert isinstance(sequence, SequenceFactory)
 
     def test_sequence_produce_from_two_ops(self):
-
-        # linear = mod(nn.Linear, Sz(1), Var('x')).op(linear_out)
+    
         sequence, _ = (
             factory(nn.Linear, 2, 4) << 
             factory(nn.Sigmoid) <<

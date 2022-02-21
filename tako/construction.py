@@ -128,6 +128,10 @@ class argf(object):
         return self._f(*_args)
 
 
+def module_name(obj):
+    return type(obj).__name__
+
+
 class Namer(ABC):
 
     @abstractmethod
@@ -138,17 +142,13 @@ class Namer(ABC):
     def reset(self):
         raise NotImplementedError
 
-    def _base_name(self, name: str, module=None, default: str='Op') -> str:
+    def _base_name(self, name: str=None, module=None, default: str='Op') -> str:
         if name:
             return name
         elif module is not None:
-            return type(module).__name__
+            return module_name(module)
         else:
             return default
-
-
-def module_name(obj):
-    return type(obj).__name__
 
 
 class NetFactory(ABC):
@@ -201,20 +201,29 @@ class FixedNamer(Namer):
         pass
 
 
-class SequenceNamer(Namer):
+class CounterNamer(Namer):
 
     def __init__(self):
         self._names = Counter()
+        self._named: typing.Dict[str, typing.List[str]] = dict()
 
     def name(self, name: str, module=None, default: str='Op') -> Meta:
-        name = self._base_name(name, module, default)
-        self._names.update([name])
-        if self._names[name] > 1:
-            name = f'{name}_{self._names[name]}'
+        base_name = self._base_name(name, module, default)
+        self._names.update([base_name])
+        if self._names[base_name] > 1:
+            name = f'{base_name}_{self._names[base_name]}'
+        else: 
+            name = base_name
+            self._named[base_name] = []
+        self._named[base_name].append(name)
         return name
 
     def reset(self):
         self._names = Counter()
+
+    def __getitem__(self, key: str):
+        return self._named[key]
+
 
 NetFactory.__call__ = NetFactory.to
 
@@ -1112,10 +1121,10 @@ class NetBuilder(object):
     - Can set base labels that will apply to all nodes added to the network
     -  that use the convenience methods (not add_node)
     """
-    def __init__(self, namer_cls: typing.Type[Namer]=None):
+    def __init__(self, namer: Namer=None):
         self._net = Network()
         self._names = Counter()
-        self._namer = namer_cls() if namer_cls is not None else SequenceNamer()
+        self._namer = namer if namer is not None else CounterNamer()
 
     def __getitem__(self, keys):
         return self._net[keys].ports
