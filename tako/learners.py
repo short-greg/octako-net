@@ -23,7 +23,6 @@ class BinaryClassifierLearner(Learner, Tester, Classifier):
 """
 
 from dataclasses import dataclass
-import typing
 import torch
 import torch.optim
 import torch.nn as nn

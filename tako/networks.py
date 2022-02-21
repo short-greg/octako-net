@@ -1,8 +1,7 @@
 """
-Classes related to Networks.
+Network and its components to build up a graph.
 
-They are a collection of modules connected together in a graph.
-
+A network is a graph of nodes which process the input
 """
 from abc import ABC, abstractmethod, abstractproperty
 import torch.nn as nn
@@ -15,9 +14,16 @@ from functools import singledispatch, singledispatchmethod
 from dataclasses import dataclass, field
 
 
-class LabelSet:
+class LabelSet(object):
+    """Labels to tag a module
+    """
     
     def __init__(self, labels: typing.Iterable[str]=None):
+        """initializer
+
+        Args:
+            labels (typing.Iterable[str], optional): Labels to tag a node with. Defaults to None.
+        """
         labels = labels or []
         self._labels = set(labels)
     
@@ -27,10 +33,15 @@ class LabelSet:
     @property
     def labels(self):
         return [*self._labels]
+    
+    def add(self, label: str):
+        self._labels.add(label)
 
 
 @dataclass
 class Meta:
+    """Supplementary info for a module. Can be extended to add more info
+    """
 
     labels: LabelSet=field(default_factory=LabelSet)
     annotation: str=''
@@ -47,27 +58,59 @@ class Meta:
 
 
 class By(object):
+    """Stores the outputs of nodes in the network and 
+    the network's subnets.
+    """
 
-    def __init__(self, **kwargs):
-        self._data = kwargs
+    def __init__(self, **data):
+        """initializer
+
+        Args:
+          data: Initialize the ouputs of nodes 
+        """
+        self._data = data
         self._subs = {}
 
-    def get(self, node: str, default=None):
+    def get(self, node: str, default=None) -> typing.Union[torch.Tensor, typing.List[torch.Tensor]]:
+        """get output of a node
+
+        Args:
+            node (str): Node to get the output for
+            default (_type_, optional): Default value to return. Defaults to None.
+
+        Returns:
+            typing.Union[torch.Tensor, typing.List[torch.Tensor]]: _description_
+        """
+        
         return self._data.get(node, default)
 
     def update(self, node: str, datum):
+        """Update output of a node
+
+        Args:
+            node (str): node to update
+            datum (_type_): value to update with
+        """
         self._data[node] = datum
 
-    def __contains__(self, node: str):
+    def __contains__(self, node: str) -> bool:
+        """Check if node's output is defined
+        """
         return node in self._data
 
     def __setitem__(self, node: str, datum):
+        """Update the output of a node
+        """
         self._data[node] = datum
 
     def __getitem__(self, node: str):
+        """Get the output of a node
+        """
         return self._data[node]
 
     def get_or_add_sub(self, sub: str):
+        """Get or add a sub network
+        """
         if sub not in self._subs:
             self._subs[sub] = By()
         return self._subs[sub]
@@ -75,6 +118,8 @@ class By(object):
 
 @dataclasses.dataclass
 class Out:
+    """Definition of the output of a node
+    """
 
     size: torch.Size
     dtype: torch.dtype=torch.float
@@ -108,8 +153,17 @@ class Port(ABC):
 
 
 class NodePort(Port):
+    """Port for a node with a single port
+    """
 
     def __init__(self, node: str, size: torch.Size, dtype: torch.dtype=torch.float):
+        """initializer
+
+        Args:
+            node (str): Name of node
+            size (torch.Size): _description_
+            dtype (torch.dtype, optional): _description_. Defaults to torch.float.
+        """
 
         self._node = node
         self._size = size
@@ -117,27 +171,61 @@ class NodePort(Port):
 
     @property
     def node(self) -> str:
+        """
+        Returns:
+            str: Name of the node for the port
+        """
         return self._node
 
     @property
     def dtype(self) -> torch.dtype:
+        """
+        Returns:
+            torch.dtype: Dtype of the port
+        """
         return self._dtype
 
     @property
     def size(self) -> str:
+        """
+        Returns:
+            torch.Size: Size of the port
+        """
         return self._size
 
-    def select(self, by: By):
+    def select(self, by: By) -> torch.Tensor:
+        """
+        Args:
+            by (By)
+
+        Returns:
+            torch.Tensor: Output of thenode
+        """
         return by.get(self.node)
 
-    def select_result(self, result):
+    def select_result(self, result) -> torch.Tensor:
+        """Select result of an output
+
+        Args:
+            result (torch.Tensor): Output of a ndoe
+
+        Returns:
+            torch.Tensor
+        """
         return result
 
 
 class IndexPort(Port):
 
     def __init__(self, node: str, index: int, size: torch.Size, dtype: torch.dtype=torch.float):
+        """initializer
 
+        Args:
+            node (str): Name of node
+            index (int): Index of the port
+            size (torch.Size): _description_
+            dtype (torch.dtype, optional): _description_. Defaults to torch.float.
+        """
         self._node = node
         self._index = index
         self._size = size
@@ -145,33 +233,68 @@ class IndexPort(Port):
 
     @property
     def node(self) -> str:
+
+        """
+        Returns:
+            str: Name of the node for the port
+        """
         return self._node
 
     @property
     def index(self) -> str:
+        """_summary_
+
+        Returns:
+            str: _description_
+        """
         return self._index
 
     @property
     def dtype(self) -> torch.dtype:
+        """
+        Returns:
+            torch.dtype: Dtype of the port
+        """
         return self._dtype
 
     @property
     def size(self) -> str:
+        """
+        Returns:
+            torch.Size: Size of the port
+        """
         return self._size
 
     def select(self, by: By):
+        """
+        Args:
+            by (By)
+
+        Returns:
+            torch.Tensor: Output of the port for the index
+        """
         result = by.get(self.node)
         if result is None:
             return None
 
         return result[self.index]
 
-    def select_result(self, result):
+    def select_result(self, result) -> torch.Tensor:
+        """Select result of an output at the index
+
+        Args:
+            result (typing.List[torch.Tensor]): Output of a node
+
+        Returns:
+            torch.Tensor
+        """
         return result[self.index]
 
 
 @dataclasses.dataclass
 class Multitap:
+    """A set of ports
+    """
 
     ports: typing.List[Port]
 
@@ -216,32 +339,40 @@ class Multitap:
 
 
 class Node(nn.Module):
+    """Base class for a node in the network
+    """
 
     def __init__(
         self, name: str, meta: Meta=None
     ):
+        """_summary_
+
+        Args:
+            name (str): _description_
+            meta (Meta, optional): _description_. Defaults to None.
+        """
         super().__init__()
         self._name = name
-        self._info = meta or Meta()
+        self._meta = meta or Meta()
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self._name
     
     def add_label(self, label: str):
-        self._info.labels.append(label)
+        self._meta.labels.add(label)
     
     @property
     def labels(self) -> typing.List[str]:
-        return copy.copy(self._info.labels)
+        return copy.copy(self._meta.labels)
     
     @property
     def annotation(self) -> str:
-        return self._info.annotation
+        return self._meta.annotation
 
     @annotation.setter
     def annotation(self, annotation: str) -> str:
-        self._info.annotation = annotation
+        self._meta.annotation = annotation
 
     def cache_names_used(self):
         raise NotImplementedError
@@ -265,14 +396,35 @@ class Node(nn.Module):
     def clone(self):
         raise NotImplementedError
 
+    # TODO: I think i need to remove since I'll probably not use
     def accept(self, visitor):
         raise NotImplementedError
 
-    def probe(self, by: typing.Dict, to_cache: True):
+    def probe(self, by: By, to_cache: True):
+        """Probe the output of the node
+
+        Args:
+            by (By): 
+            to_cache (True): Whether to store the outputs
+        """
         raise NotImplementedError
 
 
 class NodeSet(object):
+    """Set of nodes in the network. Makes it more convenient to 
+    retrieve ports in the network
+
+    Usage:
+
+    # get the nodeset
+    nodeset = network[['x', 'y']]
+    
+    # output the ports
+    nodeset.ports
+
+    Args:
+        object (_type_): _description_
+    """
 
     def __init__(self, nodes: typing.List[Node]):
 
@@ -284,6 +436,10 @@ class NodeSet(object):
 
     @property
     def nodes(self) -> typing.List[Node]:
+        """
+        Returns:
+            typing.List[Node]: Nodes in the nodeset
+        """
 
         return [
             self._nodes[name]
@@ -292,6 +448,11 @@ class NodeSet(object):
 
     @property
     def ports(self):
+        """
+        Returns:
+            Multitap: Set of ports for the node set
+        """
+
         return Multitap.from_nodes(self.nodes)
 
     @singledispatchmethod
@@ -313,6 +474,15 @@ class NodeSet(object):
         return self._nodes[key]
     
     def unify(self, other):
+        """Unify two node sets
+
+        Args:
+            other (NodeSet)
+
+        Returns:
+            _type_: NodeSet
+        """
+
         nodes = [node for _, node in self._nodes.items()]
 
         for name in other._order:
@@ -323,6 +493,14 @@ class NodeSet(object):
     
     def intersect(self, other):
         
+        """Intersect two node sets
+
+        Args:
+            other (NodeSet)
+
+        Returns:
+            _type_: NodeSet
+        """
         nodes = []
         for name in self._order:
             if name in other._nodes:
@@ -331,7 +509,14 @@ class NodeSet(object):
         return NodeSet(nodes)
 
     def difference(self, other):
-        
+        """Get difference between two node sets
+
+        Args:
+            other (NodeSet)
+
+        Returns:
+            _type_: NodeSet
+        """
         nodes = []
         for name in self._order:
             if name not in other._nodes:
@@ -339,6 +524,7 @@ class NodeSet(object):
         return NodeSet(nodes)
 
 
+# TODO: Decide whether to use this
 class NodeVisitor(object):
 
     @singledispatch
