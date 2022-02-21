@@ -93,13 +93,24 @@ class SizeMeta(type):
 
 
 class sz(object, metaclass=SizeMeta):
+    """Reference to the Size of an input
+    """
 
     def __init__(self, dim_idx: int, port_idx: int=None):
+        """initializer
+
+        Args:
+            dim_idx (int): The dimensional index it refers to
+            port_idx (int, optional): The index to the port. Only use if node has multiple ports.
+            Defaults to None.
+        """
         
         self._port_idx = port_idx
         self._dim_idx= dim_idx
 
-    def process(self, sizes: typing.List[torch.Size]):
+    def process(self, sizes: typing.List[torch.Size]) -> int:
+        """Replace the reference with size passed in
+        """
 
         if self._port_idx is None:
             if len(sizes[0]) <= self._dim_idx:
@@ -155,9 +166,13 @@ def module_name(obj):
 
 
 class Namer(ABC):
+    """Module that names a node
+    """
 
     @abstractmethod
     def name(self, name: str, module=None, default: str='Op') -> Meta:
+        """Assign a name to a node
+        """
         raise NotImplementedError
     
     @abstractmethod
@@ -165,6 +180,8 @@ class Namer(ABC):
         raise NotImplementedError
 
     def _base_name(self, name: str=None, module=None, default: str='Op') -> str:
+        """Get base name to assign to a node
+        """
         if name:
             return name
         elif module is not None:
@@ -174,8 +191,16 @@ class Namer(ABC):
 
 
 class NetFactory(ABC):
+    """Factory that produces a network of nodes
+    """
 
     def __init__(self, name: str="", meta: Meta=None):
+        """initializer
+
+        Args:
+            name (str, optional): Name of the operation. Defaults to "".
+            meta (Meta, optional): . Defaults to None.
+        """
         self._name = name
         self._meta = meta or Meta()
 
@@ -192,10 +217,14 @@ class NetFactory(ABC):
         raise NotImplementedError
     
     def alias(self, **kwargs):
+        """Change the names of the args in the factory
+        """
         return self.to(**{k: arg(v) for k, v in kwargs.items()})
     
     @property
     def name(self):
+        """Name of the factory
+        """
         return self._name
 
     @property
