@@ -1,22 +1,38 @@
 """
 Basic learning machine classes. 
 
-Learning Machines define an operation, a learning algorithm
-for learning that operation and a testing algorithm for testing the operation.
+A learning machine consists of parameters, operations and the interface
+Mixins are used to flexibly define the interface for a learning machine
+Each Mixin is a "machine component" which defines an interface for the
+user to use. Mixins make it easy to reuse components.
+
+class BinaryClassifierLearner(Learner, Tester, Classifier):
+  
+  def __init__(self, ...):
+      # init operations
+
+  def classify(self, x):
+      # classify
+
+  def learn(self, x, t):
+      # update parameters of network
+    
+  def test(self, x, t):
+      # evaluate the ntwork
+
 """
 
 from dataclasses import dataclass
 import typing
 import torch
-from . import networks
 import torch.optim
 import torch.nn as nn
-from abc import abstractclassmethod, abstractmethod, abstractproperty
+from abc import abstractmethod
 
 
 def args_to_device(f):
-    # function decorator for converting the args to the 
-    # device of the learner
+    """decorator for converting the args to the device of the learner
+    """
     def wrapper(self, *args):
         args = tuple(a.to(self._device) for a in args)
         result = f(self, *args)
@@ -26,7 +42,8 @@ def args_to_device(f):
 
 
 def result_to_cpu(f):
-    # function decorator for converting the result to cpu
+    """decorator for converting the results to cpu
+    """
     def wrapper(self, *args):
         args = tuple(a.to(self._device) for a in args)
         result = f(self, *args)
@@ -36,7 +53,8 @@ def result_to_cpu(f):
 
 
 def dict_result_to_cpu(f):
-    # function decorator for converting the results to cpu
+    """decorator for converting the results in dict format to cpu
+    """
     def wrapper(self, *args):
         args = tuple(a.to(self._device) for a in args)
         result = f(self, *args)
@@ -47,50 +65,17 @@ def dict_result_to_cpu(f):
 
 
 class MachineComponent(nn.Module):
-
-    op = None
-
-    def __call__(self, *t: torch.Tensor):
-        raise NotImplementedError
+    """Base class for component. Use to build up a Learning Machine
+    """
 
     def is_(self, component_cls):
         if isinstance(self, component_cls):
             return True
 
 
-class LearningMachine(nn.Module):
-
-    def __init__(self, components: typing.List[MachineComponent]):
-        
-        # TODO: Check they do not conflict
-        for v in components:
-            setattr(self, v.name(), v)
-        self._components = components
-    
-    @property
-    def components(self):
-        return self._components
-    
-    def is_(self, component_cls: typing.Type):
-        
-        for component in self._components:
-            if component.is_(component_cls):
-                return True
-        return False
-
-
-def is_machine(obj: LearningMachine, cls: typing.Type[MachineComponent]):
-    """Check if a learning machine contains component cls"""
-
-    return isinstance(getattr(obj, cls.op), cls)
-
-
-# TODO: Update these components
-
 class Learner(MachineComponent):
-    """Base learning machine class
+    """Update the machine parameters
     """
-    op = 'learn'
 
     @abstractmethod
     def learn(self, x, t):
@@ -103,10 +88,9 @@ class Learner(MachineComponent):
         raise NotImplementedError
 
 
-class Validator(MachineComponent):
-    """Base learning machine class
+class Tester(MachineComponent):
+    """Evaluate the machine
     """
-    op = 'test'
 
     @abstractmethod
     def test(self, x, t):
@@ -120,17 +104,17 @@ class Validator(MachineComponent):
 
 
 class Regressor(MachineComponent):
-
-    op = 'regress'
+    """Output a real value
+    """
 
     @abstractmethod
-    def regress(self, x, t):
+    def regress(self, x: torch.Tensor):
         raise NotImplementedError
 
 
 class Classifier(MachineComponent):
-
-    op = 'classify'
+    """Output a categorical value
+    """
 
     @abstractmethod
     def classify(self, x: torch.Tensor):
