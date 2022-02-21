@@ -1,4 +1,12 @@
- 
+"""
+Modules for building a network
+
+
+
+
+"""
+
+
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
 from functools import singledispatch, singledispatchmethod
@@ -18,8 +26,15 @@ T = TypeVar('T')
 
 
 class arg(object):
+    """Argument for a factory
+    """
 
     def __init__(self, name: str):
+        """initializer
+
+        Args:
+            name (str): Name fo the argument
+        """
         self._name = name
     
     @property
@@ -27,10 +42,17 @@ class arg(object):
         return self._name
 
     def to(self, **kwargs):
+        """Update the value of the argument
+
+        Returns:
+            Any: value specified in kwargs if it is there else the arg
+        """
         return kwargs.get(self._name, self)
 
 
 class __arg(object):
+    """Convenience module for creating an arg
+    """
 
     def __getattribute__(self, __name: str) -> arg:
         return arg(__name)

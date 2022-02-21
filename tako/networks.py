@@ -374,9 +374,6 @@ class Node(nn.Module):
     def annotation(self, annotation: str) -> str:
         self._meta.annotation = annotation
 
-    def cache_names_used(self):
-        raise NotImplementedError
-
     @property
     def input_nodes(self) -> typing.List[str]:
         """
@@ -534,8 +531,7 @@ class NodeVisitor(object):
 
 class OpNode(Node):
     """
-    A node in a network. It performs an operation and specifies which 
-    nodes connect into it.
+    A node that performs an operation.
     """
     def __init__(
         self, name: str, operation: nn.Module, 
@@ -577,14 +573,9 @@ class OpNode(Node):
 
         return NodePort(self.name, self._outs.size, self._outs.dtype),
 
-    # TODO: FIND OUT WHY NOT WORKING
     @property
     def inputs(self) -> Multitap:
        return self._inputs.clone()
-    
-    @property
-    def cache_names_used(self) -> typing.Set[str]:
-        return set([self.name])
 
     def clone(self):
         return OpNode(
@@ -596,8 +587,18 @@ class OpNode(Node):
         return self.op(*args, **kwargs)
 
     def probe(self, by: By, to_cache=True):
-        
-        # need to check if all inputs in by
+        """probe the 
+
+        Args:
+            by (By): The excitations in the network
+            to_cache (bool, optional): Whether to cache the result or not. Defaults to True.
+
+        Raises:
+            RuntimeError: Could not probe the network
+
+        Returns:
+            _type_: _description_
+        """
         if self.name in by:
             return by[self.name]
 
@@ -627,11 +628,9 @@ class In(Node):
     
     @property
     def default(self):
+        """Default value for the input
+        """
         raise NotImplementedError
-    
-    @property
-    def cache_names_used(self) -> typing.Set[str]:
-        return set([self.name])
     
     def probe(self, by: By, to_cache: bool=True):
         return by.get(self.name, self.default)
@@ -728,7 +727,6 @@ class Network(nn.Module):
         self._node_outputs: typing.Dict[str, typing.List[str]] = {}
         self._default_ins: typing.List[str] = []
         self._default_outs: typing.List[str] = []
-        self._cache_names_used: typing.Set[str] = set()
         for in_ in inputs or []:
             self.add_node(in_)
 
@@ -767,9 +765,6 @@ class Network(nn.Module):
                     "There is no node named for input {} in the network.".format(input_node))
             
             self._node_outputs[input_node].append(node.name)
-        
-        if len(self._cache_names_used.intersection(node.cache_names_used)) > 0:
-            raise ValueError("Cannot add node {} because the cache names are already used.".format(node.name))
         
         if len(node.input_nodes) == 0:
             self._roots.add(node.name)
@@ -1122,6 +1117,8 @@ class SubNetwork(object):
 
 
 class InterfaceNode(Node):
+    """Node that is an interface to a network
+    """
 
     def __init__(
         self, name: str, sub_network: SubNetwork, 
@@ -1129,6 +1126,15 @@ class InterfaceNode(Node):
         inputs: typing.List[Link],
         meta: Meta=None
     ):
+        """initializer
+
+        Args:
+            name (str): Name of the interface
+            sub_network (SubNetwork): Network to interface to
+            outputs (Multitap): Ports used for the output
+            inputs (typing.List[Link]): Inputs into the network
+            meta (Meta, optional): Defaults to None.
+        """
         super().__init__(name, meta)
         self._sub_network: SubNetwork = sub_network
         self._outputs: Multitap = outputs
@@ -1147,10 +1153,6 @@ class InterfaceNode(Node):
             typing.Iterable[Port]: [The output ports for the node]
         """
         return [IndexPort(self.name, i, port.size) for i, port in enumerate(self._outputs)]
-
-    @property
-    def cache_names_used(self) -> typing.Set[str]:
-        return set([self.name, self._sub_network.name])
 
     @property
     def inputs(self) -> Multitap:
@@ -1179,10 +1181,16 @@ class InterfaceNode(Node):
             self._outputs, self._inputs, self._info.spawn()
         )
 
-    def accept(self, visitor: NodeVisitor):
-        visitor.visit(self)
+    def probe(self, by: By, to_cache=True) -> typing.List[torch.Tensor]:
+        """Probe the sub network
 
-    def probe(self, by: typing.Dict, to_cache=True):
+        Args:
+            by (typing.Dict): 
+            to_cache (bool, optional): Whether to cache the output. Defaults to True.
+
+        Returns:
+            list[Tensor]
+        """
 
         if self.name in by:
             return by[self.name]
@@ -1203,7 +1211,7 @@ class InterfaceNode(Node):
 
     
 class NetworkInterface(nn.Module):
-    """A node for probing a network with a standard interface"""
+    """A module for probing a network with a standard interface"""
 
     def __init__(
         self, network: Network, out: list, by: typing.List[str]
@@ -1224,10 +1232,3 @@ class NetworkInterface(nn.Module):
         return NetworkInterface(
             self._network, self._out + other._out, self._by + other._by
         )
-
-# query - port 1, node
-# meta - {1: torch.Tensor} 
-# need to almagamate all queries for a node into one selector
-
-
-# StepBy <- inherit from by
