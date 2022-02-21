@@ -1,34 +1,34 @@
-import torch.nn as nn
-import torch
-from .networks import In, Link, ModRef, Network, InterfaceNode, Node, Operation, OpNode, Port, SubNetwork
-from .visitors import NetworkBuilder, NullNodeProcessor, UpdateNodeName
+# import torch.nn as nn
+# import torch
+# from .networks import In, Link, ModRef, Network, InterfaceNode, Node, Operation, OpNode, Port, SubNetwork
+# from .visitors import NetworkBuilder, NullNodeProcessor, UpdateNodeName
 
 
-class TestNullNodeProcessor:
+# class TestNullNodeProcessor:
 
-    @staticmethod
-    def _setup_node(name='name'):
-        return OpNode(
-            name, nn.Linear(2, 2), 
-            [Port(ModRef('x'), torch.Size([-1, 2]))],
-            torch.Size([-1, 2]))
+#     @staticmethod
+#     def _setup_node(name='name'):
+#         return OpNode(
+#             name, nn.Linear(2, 2), 
+#             [Port(ModRef('x'), torch.Size([-1, 2]))],
+#             torch.Size([-1, 2]))
 
-    @staticmethod
-    def _setup_input_node(name='name'):
-        return In(
-            name, torch.Size([-1, 2]), torch.Tensor, torch.randn(1, 2))
+#     @staticmethod
+#     def _setup_input_node(name='name'):
+#         return In(
+#             name, torch.Size([-1, 2]), torch.Tensor, torch.randn(1, 2))
 
-    def test_update_node_name_with_prepend(self):
-        null_processor = NullNodeProcessor()
-        node = self._setup_node('1')
-        new_node = null_processor.process_node(node)
-        assert new_node.name == node.name
+#     def test_update_node_name_with_prepend(self):
+#         null_processor = NullNodeProcessor()
+#         node = self._setup_node('1')
+#         new_node = null_processor.process_node(node)
+#         assert new_node.name == node.name
         
-    def test_update_node_name_with_prepend(self):
-        update_node = NullNodeProcessor()
-        input_node = self._setup_input_node('1')
-        new_node = update_node.process_node(input_node)
-        assert new_node.name == input_node.name
+#     def test_update_node_name_with_prepend(self):
+#         update_node = NullNodeProcessor()
+#         input_node = self._setup_input_node('1')
+#         new_node = update_node.process_node(input_node)
+#         assert new_node.name == input_node.name
 
 
 # class TestNetworkBuilder:
