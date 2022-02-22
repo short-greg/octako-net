@@ -1,7 +1,10 @@
 import pytest
 import torch.nn as nn
 import torch
-from .networks import By, Meta, InTensor, Link, Multitap, Network, InterfaceNode, NodePort, OpNode, Out, Port, SubNetwork
+from ._networks import (
+    By, Meta, InTensor, Link, Multitap, Network, 
+    InterfaceNode, NodePort, OpNode, Out, SubNetwork
+)
 
 
 class TestNode:

@@ -1,8 +1,7 @@
 import torch
 import pytest
 
-from tako.construction import T
-from . import modules
+from . import _modules as modules
 
 
 class TestNetworkReorder:

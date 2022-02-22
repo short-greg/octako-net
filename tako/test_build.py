@@ -4,9 +4,9 @@ import typing
 import torch
 from torch import nn
 from torch.nn.modules.container import Sequential
-from .networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
-from .construction import (
-    ChainFactory, CounterNamer, Meta, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
+from ._networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
+from ._build import (
+    ChainFactory, CounterNamer, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
     ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorIn, TensorMod, argf, scalar_val, diverge, 
     SequenceFactory, sz, arg, factory, arg_, chain
 )

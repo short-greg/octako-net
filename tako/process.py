@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from functools import reduce
 import typing
-from .networks import Node, NodeSet
+from ._networks import Node, NodeSet
 
 
 class Q(ABC):
@@ -64,7 +64,7 @@ class DifferenceQ(Q):
         return self._q1(nodes) - self._q2(nodes)
 
 
-from .networks import NodeVisitor, Node, Port, Network, SubNetwork, OpNode, InterfaceNode
+from ._networks import NodeVisitor, Node, Port, Network, SubNetwork, OpNode, InterfaceNode
 from abc import ABC, abstractmethod
 import typing
 

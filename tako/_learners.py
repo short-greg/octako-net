@@ -68,6 +68,7 @@ class MachineComponent(nn.Module):
     """
 
     def __init__(self, device='cpu'):
+        super().__init__()
         super().to(device)
         self._device = device
     

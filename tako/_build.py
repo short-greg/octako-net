@@ -17,8 +17,13 @@ from numpy import isin
 import torch
 from torch import nn
 from torch import Size
-from .networks import In, Meta, InScalar, InTensor, Multitap, Network, NetworkInterface, Node, NodePort, NodeSet, OpNode, Port, Out
-from .modules import Multi, Multi, Diverge
+from ._networks import (
+    In, Meta, InScalar, InTensor, Multitap, 
+    Network, NetworkInterface, Node, NodePort, NodeSet, OpNode, Port, Out
+)
+from ._modules import (
+    Multi, Multi, Diverge
+)
 from functools import wraps
 
 
