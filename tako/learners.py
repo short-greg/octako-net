@@ -29,7 +29,7 @@ import torch.nn as nn
 from abc import abstractmethod
 
 
-def args_to_device(f):
+def todevice(f):
     """decorator for converting the args to the device of the learner
     """
     def wrapper(self, *args):
@@ -40,7 +40,7 @@ def args_to_device(f):
     return wrapper
 
 
-def result_to_cpu(f):
+def cpuresult(f):
     """decorator for converting the results to cpu
     """
     def wrapper(self, *args):
@@ -51,7 +51,7 @@ def result_to_cpu(f):
     return wrapper
 
 
-def dict_result_to_cpu(f):
+def dict_cpuresult(f):
     """decorator for converting the results in dict format to cpu
     """
     def wrapper(self, *args):
@@ -66,6 +66,14 @@ def dict_result_to_cpu(f):
 class MachineComponent(nn.Module):
     """Base class for component. Use to build up a Learning Machine
     """
+
+    def __init__(self, device='cpu'):
+        super().to(device)
+        self._device = device
+    
+    def to(self, device):
+        super().to(device)
+        self._device = device
 
     def is_(self, component_cls):
         if isinstance(self, component_cls):
