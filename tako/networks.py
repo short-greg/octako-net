@@ -725,35 +725,8 @@ class Network(nn.Module):
         self._roots: typing.Set[str] = set()
         self._nodes: nn.ModuleDict = nn.ModuleDict()
         self._node_outputs: typing.Dict[str, typing.List[str]] = {}
-        self._default_ins: typing.List[str] = []
-        self._default_outs: typing.List[str] = []
         for in_ in inputs or []:
             self.add_node(in_)
-
-    @property
-    def output_names(self):
-        return copy.copy(self._default_outs)
-
-    @property
-    def input_names(self):
-        return copy.copy(self._default_ins)
-    
-    def set_default_interface(self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]):
-        
-        self._default_ins = []
-        self._default_outs = []
-
-        for in_ in ins:
-            if isinstance(in_, str):
-                self._default_ins.append(in_)
-            else:
-                self._default_ins.append(in_.node)
-        
-        for out in outs:
-            if isinstance(out, str):
-                self._default_outs.append(out)
-            else:
-                self._default_outs.append(out.node)
 
     def add_node(self, node: Node):
         if node.name in self._nodes:
@@ -777,12 +750,6 @@ class Network(nn.Module):
         self._nodes[node.name] = node
         self._node_outputs[node.name] = []
         return node.ports
-    
-    @property
-    def nodes(self) -> typing.Iterator[Node]:
-
-        for node in self._nodes:
-            yield node
 
     @property
     def leaves(self) -> typing.Iterator[Node]:
@@ -795,92 +762,6 @@ class Network(nn.Module):
         
         for name in self._roots:
             yield self._nodes[name]
-    
-    def _get_input_names_helper(self, node: Node, use_input: typing.List[bool], roots: typing.List):
-
-        for node_input_port in node.inputs:
-            name = node_input_port.node
-            try:
-                use_input[roots.index(name)] = True
-            except ValueError:
-                self._get_input_names_helper(self._nodes[name], use_input, roots)
-
-    def get_input_names(self, output_names: typing.List[str]) -> typing.List[str]:
-        """
-        Args:
-            output_names (typing.List[str]): Output names in the network.
-        Returns:
-            typing.List[str]: The names of all the inputs required for the arguments.
-        """
-        use_input = [False] * len(self._roots)
-        assert len(use_input) == len(self._roots)
-
-        for output_name in output_names:
-            if output_name not in self._nodes:
-                raise KeyError(f'Output name {output_name} is not in the network')
-
-        roots = list(self._roots)
-        for name in output_names:
-            self._get_input_names_helper(self._nodes[name], use_input, roots)
-
-        return [input_name for input_name, to_use in zip(self._roots, use_input) if to_use is True]
-
-    def _is_input_name_helper(
-        self, node: Node, input_names: typing.List[str], 
-        is_inputs: typing.List[bool]
-    ) -> bool:
-        """Helper to check if the node is an input for an output
-
-        Args:
-            node (Node): A node in the network
-            input_names (typing.List[str]): Current input names
-            is_inputs (typing.List[bool]): A list of booleans that specifies
-            which nodes are inputs
-        Returns:
-            bool: Whether a node is an input
-        """
-        other_found = False
-        if not node.inputs:
-            return True
-
-        for node_input_port in node.inputs:
-            name = node_input_port.node
-
-            try:
-                is_inputs[input_names.index(name)] = True
-            except ValueError:
-                other_found = self._is_input_name_helper(self._nodes[name], input_names, is_inputs)
-                if other_found: break
-        
-        return other_found
-
-    def are_inputs(self, output_names: typing.List[str], input_names: typing.List[str]) -> bool:
-        """Check if a list of nodes are directly or indirectly inputs into other nodes
-
-        Args:
-            output_names (typing.List[str]): Names of nodes to check
-            input_names (typing.List[str]): Names of input candidates
-
-        Raises:
-            KeyError: Name of the module
-
-        Returns:
-            bool: Whether or not input_names are inputs
-        """
-        
-        is_inputs = [False] * len(input_names)
-
-        for name in itertools.chain(input_names, output_names):
-            if name not in self._nodes:
-                raise KeyError(f'Node name {name} does not exist')
-    
-        for name in output_names:
-            other_found: bool = self._is_input_name_helper(self._nodes[name], input_names, is_inputs)
-
-            if other_found:
-                break
-        all_true = not (False in is_inputs)
-        return all_true and not other_found
     
     def traverse_forward(
         self, from_nodes: typing.List[str]=None, 
@@ -1023,19 +904,21 @@ class Network(nn.Module):
         for k, v in self._nodes.items():
             yield k, v
 
-    def forward(self, *args, **kwargs) -> typing.List[torch.Tensor]:
-        """The standard 'forward' method for the network.
 
-        Returns:
-            typing.List[torch.Tensor]: Outputs of the network
-        """
+Network.forward = Network.probe
+    # def forward(self, *args, **kwargs) -> typing.List[torch.Tensor]:
+    #     """The standard 'forward' method for the network.
 
-        # TODO: UPDATE THIS FORWARD FUNCTION 
-        if (len(args) != len(self._default_ins)):
-            raise ValueError(f"Number of args {len(args)} does not match the number of inputs {len(self._default_ins)}'")
-        inputs = {self._default_ins[i]: x for i, x in enumerate(args)}
-        inputs.update(kwargs)
-        return self.probe(self._default_outs, inputs)
+    #     Returns:
+    #         typing.List[torch.Tensor]: Outputs of the network
+    #     """
+
+    #     # TODO: UPDATE THIS FORWARD FUNCTION 
+    #     if (len(args) != len(self._default_ins)):
+    #         raise ValueError(f"Number of args {len(args)} does not match the number of inputs {len(self._default_ins)}'")
+    #     inputs = {self._default_ins[i]: x for i, x in enumerate(args)}
+    #     inputs.update(kwargs)
+    #     return self.probe(self._default_outs, inputs)
 
 
 @dataclasses.dataclass
