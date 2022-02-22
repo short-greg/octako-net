@@ -128,7 +128,11 @@ class sz(object, metaclass=SizeMeta):
 class argf(object):
 
     def __init__(self, f, args):
-        """_summary_
+        """Get arg to a module by passing multiple args to a function
+
+        Usage:
+
+        argf(lambda x, y: x * y, [arg_.features, sz[1]])
 
         Args:
             f (_type_): _description_
@@ -191,7 +195,7 @@ class Namer(ABC):
 
 
 class NetFactory(ABC):
-    """Factory that produces a network of nodes
+    """Produces nodes and networks
     """
 
     def __init__(self, name: str="", meta: Meta=None):
@@ -206,6 +210,14 @@ class NetFactory(ABC):
 
     @abstractmethod
     def produce(self, in_size: torch.Size, **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+        """Produce an nn.Module
+
+        Args:
+            in_size (torch.Size): Input size to the network
+
+        Returns:
+            typing.Tuple[nn.Module, torch.Size]: Module plus the output size of the network
+        """
         raise NotImplementedError
     
     @abstractmethod
@@ -244,6 +256,13 @@ class NetFactory(ABC):
 
 
 class FixedNamer(Namer):
+    """Always outputs the same name for a given factory
+    Useful if you want to control the name used for the node
+
+    namer = FixedNamer()
+    print(namer.name("Linear")) # prints "Linear"
+    print(namer.name("Linear")) # prints "Linear"
+    """
 
     def name(self, name: str, module=None, default: str='Op') -> Meta:
         return self._base_name(name, module, default)
@@ -253,12 +272,32 @@ class FixedNamer(Namer):
 
 
 class CounterNamer(Namer):
+    """Appends the count of modules with the name to the name suggested by the factory
+
+    Usage:
+    namer = CounterNamer()
+    print(namer.name("Linear")) # prints "Linear"
+    print(namer.name("Linear")) # prints "Linear 1"
+
+    Args:
+        Namer (_type_): _description_
+    """
 
     def __init__(self):
         self._names = Counter()
         self._named: typing.Dict[str, typing.List[str]] = dict()
 
     def name(self, name: str, module=None, default: str='Op') -> Meta:
+        """Decide on a name for the module
+
+        Args:
+            name (str): _description_
+            module (_type_, optional): _description_. Defaults to None.
+            default (str, optional): _description_. Defaults to 'Op'.
+
+        Returns:
+            Meta: _description_
+        """
         base_name = self._base_name(name, module, default)
         self._names.update([base_name])
         if self._names[base_name] > 1:
