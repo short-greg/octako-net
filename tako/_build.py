@@ -1,9 +1,18 @@
 """
 Modules for building a network
 
+Arguments:
+arg - Evaluate arguments to a constructor 
+sz - Input size arguments to a constructor
+argf - Evaluate arguments to a constructor after building
 
-
-
+Node/Network building:
+In - Build input nodes to a network
+NetFactory - Build nodes to a network
+  they can also build a standard torch neural network with
+  Sequential
+NetBuilder - Building a neural network
+Namer - Name a node
 """
 
 
@@ -13,7 +22,6 @@ from functools import singledispatch, singledispatchmethod
 from os import path
 from typing import Any, Counter, TypeVar
 import typing
-from numpy import isin
 import torch
 from torch import nn
 from torch import Size
@@ -67,6 +75,11 @@ arg_ = __arg()
 
 
 def to_multitap(f):
+    """Decorator to convert args to a multitap
+
+    Args:
+        f: produce_nodes() function
+    """
 
     @wraps(f)
     def produce_nodes(self, in_, namer: Namer=None, **kwargs):
@@ -82,6 +95,8 @@ def to_multitap(f):
 
 
 class SizeMeta(type):
+    """Use to easily create an sz object with indexing
+    """
 
     def __call__(cls, *args, **kwargs):
 
@@ -161,6 +176,8 @@ class argf(object):
         for a in self._args:
             if isinstance(a, sz):
                 _args.append(a.process(sizes))
+            if a == sz:
+                _args.append(sizes)
             elif isinstance(a, arg):
                 _args.append(a.to(**kwargs))
                 if isinstance(_args[-1], arg):
@@ -175,7 +192,7 @@ def module_name(obj):
 
 
 class Namer(ABC):
-    """Module that names a node
+    """Names a node
     """
 
     @abstractmethod
@@ -324,12 +341,20 @@ NetFactory.__call__ = NetFactory.to
 
 
 class SequenceFactory(NetFactory):
+    """Create a sequence of nodes or nn.Sequential
+    """
 
     def __init__(self, op_factories: typing.List[NetFactory], name: str='', meta: Meta=None):
         super().__init__(name, meta)
         self._op_factories = op_factories
     
     def add(self, op_factory: NetFactory, position: int=None):
+        """Add op_factory to the sequence
+
+        Args:
+            op_factory (NetFactory): Factory to add to the sequence
+            position (int, optional): Position of sequence. If none, it appends it. Defaults to None.
+        """
 
         if position is None:
             self._op_factories.append(op_factory)
@@ -379,6 +404,8 @@ def _lshift(self, net_factory) -> SequenceFactory:
 
 
 class _ArgMap(ABC):
+    """Store args into a module
+    """
 
     @singledispatchmethod
     def _remap_arg(self, val, kwargs):
@@ -409,15 +436,36 @@ class _ArgMap(ABC):
         return val.process(in_size, kwargs)
 
     @abstractmethod
-    def lookup(self, in_size: torch.Size, kwargs):        
+    def lookup(self, in_size: torch.Size, kwargs):     
+        """Look up the values of args based on the kwargs and
+        in_size passed in
+
+        Args:
+            kwargs (_type_): Updated values
+
+        Returns:
+            arguments
+        """
+   
         raise NotImplementedError
 
     @abstractmethod
     def remap(self, kwargs):    
+        """Change the value of an argument if in kwargs
+
+        Args:
+            kwargs (_type_): Updated values
+
+        Returns:
+            cls: A new instance of the class
+        """
+
         raise NotImplementedError
 
 
 class Kwargs(_ArgMap):
+    """Key-value arguments into a factory
+    """
 
     def __init__(self, **kwargs):
 
@@ -428,25 +476,35 @@ class Kwargs(_ArgMap):
         return Kwargs(**{k: self._lookup_arg(v, in_size, kwargs) for k, v in self._kwargs.items()})
 
     def remap(self, kwargs):
-
-        return Kwargs(**{k: self._remap_arg(v, kwargs) for k, v in self._kwargs.items()})
+        return Kwargs(
+            **{k: self._remap_arg(v, kwargs) 
+            for k, v in self._kwargs.items()}
+        )
 
     def remap_keys(self, kwargs):
 
         remapped = {}
         for x, y in kwargs.items():
             if x in self._kwargs:
-                y: arg = y
                 remapped[y.name] = self._kwargs[x] 
 
         return Kwargs(**remapped)
 
     @property
     def items(self):
+        """The arguments
+
+        Returns:
+            dict[str, Any]: Arguments
+        """
         return self._kwargs
 
     @property
     def is_defined(self):
+        """        
+        Returns:
+            bool: whether the Kwargs have been defined.
+        """
         for a in self._kwargs.values():
             if isinstance(a, arg):
                 return False
@@ -454,6 +512,10 @@ class Kwargs(_ArgMap):
 
     @property
     def undefined(self):
+        """        
+        Returns:
+            list: The kwargs that have not been defined
+        """
         undefined = []
         for a in self._kwargs.values():
             if isinstance(a, arg):
@@ -477,11 +539,19 @@ class Args(_ArgMap):
     
     @property
     def items(self):
+        """The arguments
 
+        Returns:
+            dict[str, Any]: Arguments
+        """
         return self._args
     
     @property
     def is_defined(self):
+        """        
+        Returns:
+            bool: whether the args have been defined.
+        """
         for a in self._args:
             if isinstance(a, arg):
                 return False
@@ -489,6 +559,10 @@ class Args(_ArgMap):
 
     @property
     def undefined(self):
+        """        
+        Returns:
+            list: The args that have not been defined
+        """
         undefined = []
         for a in self._args:
             if isinstance(a, arg):
@@ -497,6 +571,8 @@ class Args(_ArgMap):
 
 
 class ArgSet(_ArgMap):
+    """Container for args and kwargs
+    """
 
     def __init__(self, *args, **kwargs):
 
@@ -508,15 +584,18 @@ class ArgSet(_ArgMap):
         return ArgSet(*self._args.lookup(sizes, kwargs).items, **self._kwargs.lookup(sizes, kwargs).items)
     
     def remap(self, kwargs):
-
         return ArgSet(*self._args.remap(kwargs).items, **self._kwargs.remap(kwargs).items)
 
     @property
     def kwargs(self):
+        """The kwargs in the ArgSet
+        """
         return self._kwargs.items
 
     @property
     def args(self):
+        """The args in the ArgSet
+        """
         return self._args.items
     
     def clone(self):
@@ -527,28 +606,56 @@ class ArgSet(_ArgMap):
     
     @property
     def is_defined(self):
+        """        
+        Returns:
+            bool: whether the args have been defined.
+        """
         return self._args.is_defined and self._kwargs.is_defined
 
     @property
     def undefined(self):
+        """        
+        Returns:
+            list: The args that have not been defined
+        """
         return self._args.undefined + self._kwargs.undefined
 
 
 class BaseMod(ABC):
+    """Base Module Factory
+    """
 
     @abstractmethod
     def to(self, **kwargs):
+        """Convert the args in the module
+        """
         raise NotImplementedError
 
     @abstractmethod
     def produce(self, in_: typing.List[Port], **kwargs):
+        """Produce the module
+        """
         raise NotImplementedError
 
     @abstractproperty
     def module(self):
+        """Produce the module
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def to_ops(self):
+        """
+        Returns
+            ops for the module
+        """
         raise NotImplementedError
 
     def __lshift__(self, other) -> SequenceFactory:
+        """
+        Returns
+            Sequence Factory for the two modules
+        """
         return SequenceFactory([*self.to_ops(), *other.to_ops()])
 
 
@@ -557,11 +664,23 @@ class OpFactory(NetFactory):
     def __init__(
         self, module: BaseMod, name: str="", meta: Meta=None, _out: typing.List[typing.List]=None
     ):
+        """A standard operation factory used for a non-container module
+
+        Args:
+            module (BaseMod): Factory of the module 
+            name (str, optional): Name of the module. Defaults to "".
+            meta (Meta, optional): Meta information for the module. Defaults to None.
+            _out (typing.List[typing.List], optional): The out size of the module. Defaults to None.
+        """
         super().__init__(name, meta)
         self._mod = module
         self._out = _out
 
-    def to_ops(self):
+    def to_ops(self) -> typing.List[NetFactory]:
+        """
+        Returns:
+            list[NetFactory]: The ops in the module 
+        """
         return [self]
 
     def _in_tensor(self, in_):
@@ -631,19 +750,36 @@ ModInstance = typing.Union[nn.Module, arg]
 
 
 class ModFactory(BaseMod):
-
+    """
+    Creates a module
+    """
     def __init__(self, module: ModType, *args, **kwargs):
+        """initializer
+
+        Args:
+            module (ModType): Module to create
+        """
 
         self._module = module
         self._args = ArgSet(*args, **kwargs)
 
     def to(self, **kwargs):
+        """Remap the args for the module
+
+        Returns:
+            ModFactory: Remapped modfactory
+        """
         args = self._args.remap(kwargs)
         module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
         return ModFactory(module, *args.args, **args.kwargs)
 
     @singledispatchmethod
     def produce(self, in_: typing.List[torch.Size], **kwargs):
+        """Produce  module
+
+        Returns:
+            nn.Module
+        """
         
         if isinstance(in_, torch.Size):
             in_ = [in_]
@@ -666,6 +802,10 @@ class ModFactory(BaseMod):
     
     @property
     def module(self):
+        """
+        Returns:
+            typing.Type[nn.Module]: Ne module
+        """
         return self._module
 
     @property
@@ -676,14 +816,29 @@ class ModFactory(BaseMod):
     def kwargs(self):
         return self._args.kwargs
 
-    def op(self, meta: Meta=None) -> OpFactory:
-        return OpFactory(self, meta)
+    def op(self, name: str='', meta: Meta=None) -> OpFactory:
+        """Convert to OpFactory
 
-    def to_ops(self):
+        Args:
+            meta (Meta, optional): Meta information. Defaults to None.
+
+        Returns:
+            OpFactory: _description_
+        """
+        return OpFactory(self, name, meta)
+
+    def to_ops(self) -> typing.List[OpFactory]:
+        """Convert to list of NetFactories
+
+        Returns:
+            typing.List[OpFactory]
+        """
         return [self.op()]
 
 
 class Instance(BaseMod):
+    """Wrap an already instantiate module in an op factory
+    """
 
     def __init__(self, module: ModInstance):
 
@@ -702,9 +857,21 @@ class Instance(BaseMod):
         return self._module
 
     def op(self, meta: Meta=None) -> OpFactory:
+        """Convert to OpFactory
+
+        Args:
+            meta (Meta, optional): Meta information. Defaults to None.
+
+        Returns:
+            OpFactory: _description_
+        """
         return OpFactory(self, meta)
 
-    def to_ops(self):
+    def to_ops(self) -> typing.List[OpFactory]:
+        """Convert to list of NetFactories
+        Returns:
+            typing.List[OpFactory]
+        """
         return [self.op()]
 
 
@@ -729,14 +896,27 @@ def _(mod: str, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=
 
 
 class DivergeFactory(NetFactory):
+    """Produces a DivergeModule
+    """
 
     def __init__(
         self, op_factories: typing.List[NetFactory], name: str='', meta: Meta=None
     ):
+        """initializer
+
+        Args:
+            op_factories (typing.List[NetFactory]): List of factories to 'diverge'
+            name (str, optional): Name of the factory. Defaults to ''.
+            meta (Meta, optional): Meta info for the factory. Defaults to None.
+        """
         super().__init__(name, meta)
         self._op_factories = op_factories
     
-    def to_ops(self):
+    def to_ops(self) -> typing.List[OpFactory]:
+        """Convert to list of NetFactories
+        Returns:
+            typing.List[OpFactory]
+        """
         return [self]
 
     def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
@@ -780,6 +960,8 @@ diverge = DivergeFactory
 
 
 class MultiFactory(NetFactory):
+    """Factory to create a 'Multi' module
+    """
 
     def __init__(
         self, op_factories: typing.List[NetFactory], name: str='', meta: Meta=None
