@@ -176,7 +176,7 @@ class argf(object):
         for a in self._args:
             if isinstance(a, sz):
                 _args.append(a.process(sizes))
-            if a == sz:
+            elif a == sz:
                 _args.append(sizes)
             elif isinstance(a, arg):
                 _args.append(a.to(**kwargs))
@@ -1271,7 +1271,7 @@ class TensorInFactory(InFactory):
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        return TensorDefFactory(self._t, name or self._name, self._meta.spawn(labels, annotation))
+        return TensorInFactory(self._t, name or self._name, self._meta.spawn(labels, annotation))
 
 
 class ScalarInFactory(InFactory):

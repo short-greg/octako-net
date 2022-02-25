@@ -546,7 +546,7 @@ class TestNetBuilder:
     def test_produce_network_with_one_op(self):
 
         x = TensorInFactory(
-            TensorFactory(torch.randn, [1, 2])
+            TensorFactory(torch.randn, [1, 2]), name='x'
         )
         op2 = OpFactory(
             ModFactory(nn.Linear, 2, 3)
