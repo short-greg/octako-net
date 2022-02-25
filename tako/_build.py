@@ -966,6 +966,13 @@ class MultiFactory(NetFactory):
     def __init__(
         self, op_factories: typing.List[NetFactory], name: str='', meta: Meta=None
     ):
+        """_summary_
+
+        Args:
+            op_factories (typing.List[NetFactory]): _description_
+            name (str, optional): _description_. Defaults to ''.
+            meta (Meta, optional): _description_. Defaults to None.
+        """
         super().__init__(name, meta)
         self._op_factories = op_factories
     
@@ -1128,9 +1135,17 @@ def to_default_size(a: list):
 
 
 class TensorFactory(object):
+    """Creates a tensor
+    """
 
     def __init__(self, f, size: typing.List[int], kwargs: Kwargs=None):
+        """initializer
 
+        Args:
+            f: Tensor creation function
+            size (typing.List[int]): Size of the tensor
+            kwargs (Kwargs, optional): Arguments to the tensor. Defaults to None.
+        """
         self._f = f
         self._size = torch.Size(to_size(size))
         self._kwargs = kwargs or Kwargs()
@@ -1140,11 +1155,19 @@ class TensorFactory(object):
         self._device = d.device
     
     @property
-    def dtype(self):
+    def dtype(self) -> torch.dtype:
+        """
+        Returns:
+            torch.dtype: dtype of the tenso
+        """
         return self._dtype
 
     @property
     def device(self):
+        """
+        Returns:
+            device of the tensor
+        """
         return self._device
 
     def produce_default(self) -> torch.Tensor:
@@ -1152,6 +1175,10 @@ class TensorFactory(object):
 
     @property
     def size(self) -> torch.Size:
+        """
+        Returns:
+            torch.Size: size of the tensor
+        """
         return torch.Size(self._size)
     
     def __call__(self, size=None) -> Any:
@@ -1159,7 +1186,10 @@ class TensorFactory(object):
         return self._f(*size, **self._kwargs.items)
 
 
-class TensorIn(InFactory):
+class TensorDefFactory(InFactory):
+    """
+
+    """
 
     def __init__(self, *size, dtype=torch.float, device='cpu', default=None, name="", meta=None):
         super().__init__(name or str("TensorIn"), meta)
@@ -1181,6 +1211,14 @@ class TensorIn(InFactory):
                 raise ValueError(f'Size of default {default.size()} does not match size {self._size}')
 
     def produce(self, namer: Namer=None) -> In:
+        """Produces the In Node
+
+        Args:
+            namer (Namer, optional): Namer to name the tensor. Defaults to None.
+
+        Returns:
+            In: _description_
+        """
         namer = namer or FixedNamer()
         if self._default:
             default = torch.tensor(self._default).to(self._device)
@@ -1193,18 +1231,35 @@ class TensorIn(InFactory):
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        return TensorIn(*self._size, dtype=self._dtype, device=self._device, name=name or self._name, meta=self._meta.spawn(labels, annotation, fix))
+        return TensorDefFactory(*self._size, dtype=self._dtype, device=self._device, name=name or self._name, meta=self._meta.spawn(labels, annotation, fix))
 
 
 class TensorInFactory(InFactory):
+    """Produces a TensorIn node from a function
+    """
 
     def __init__(
         self, t: TensorFactory, name: str="", meta: Meta=None
     ):
+        """initializer
+
+        Args:
+            t (TensorFactory): Produces a tensor
+            name (str, optional): Name of the factory. Defaults to "".
+            meta (Meta, optional): Meta info for the factory. Defaults to None.
+        """
         super().__init__(name or "TensorIn", meta)
         self._t = t
 
     def produce(self, namer: Namer=None) -> In:
+        """Produces the In Node
+
+        Args:
+            namer (Namer, optional): Namer to name the tensor. Defaults to None.
+
+        Returns:
+            In: _description_
+        """
         namer = namer or FixedNamer()
 
         default = self._t.produce_default()
@@ -1216,12 +1271,23 @@ class TensorInFactory(InFactory):
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        return TensorInFactory(self._t, name or self._name, self._meta.spawn(labels, annotation))
+        return TensorDefFactory(self._t, name or self._name, self._meta.spawn(labels, annotation))
 
 
 class ScalarInFactory(InFactory):
+    """
+    """
 
-    def __init__(self, type_: typing.Type, default, call_default: bool=False, name: str="", meta: Meta=None):
+    def __init__(self, type_: typing.Type, default: Any, call_default: bool=False, name: str="", meta: Meta=None):
+        """initailzier
+
+        Args:
+            type_ (typing.Type): Scalar type
+            default (Any): default Value
+            call_default (bool, optional): Whether to call the default . Defaults to False.
+            name (str, optional): Name of the factory. Defaults to "".
+            meta (Meta, optional): Meta info for the factory. Defaults to None.
+        """
         super().__init__(name or 'Scalar', meta)
         self._type_ = type_
         self._default = default
@@ -1295,6 +1361,8 @@ class TakoMod(ABC):
 
 
 class NNMod(TakoMod):
+    """Create OpFactories for an nn.Module
+    """
 
     def __init__(self, nnmodule: typing.Type[nn.Module]):
 
@@ -1308,10 +1376,18 @@ class NNMod(TakoMod):
 class TensorMod(TakoMod):
     
     def __init__(self, tensor_mod):
+        """
+        Args:
+            tensor_mod (typing.Callable): mod for creating a tensor
+        """
 
         self._tensor_mod = tensor_mod
 
-    def __call__(self, *size, _meta: Meta=None, **kwargs) -> OpFactory:
+    def __call__(self, *size, _meta: Meta=None, **kwargs) -> TensorInFactory:
+        """
+        Returns:
+            TensorInFactory: Tensor factory based on size and meta info
+        """
         try:
             factory = TensorFactory(
                 self._tensor_mod, size, Kwargs(**kwargs)
@@ -1323,11 +1399,17 @@ class TensorMod(TakoMod):
 
 
 class ParamMod(TakoMod):
+    """Create Parameter factory using torch functions
+    """
     
     def __init__(self, parameter_mod):
+        """
+        Args:
+            tensor_mod (typing.Callable): mod for creating a parameter
+        """
         self._parameter_mod = parameter_mod
 
-    def __call__(self, *size, _meta: Meta=None, **kwargs) -> OpFactory:
+    def __call__(self, *size, _meta: Meta=None, **kwargs) -> ParameterFactory:
         try: 
             factory = TensorFactory(self._parameter_mod, size, Kwargs(**kwargs))
         except Exception as e:
@@ -1361,6 +1443,7 @@ class OpMod(object):
             return factory(name)
         except Exception as e:
             raise RuntimeError(f'Could not get {factory} {name} for {mod}') from e
+
 
 def port_to_multitap(vals):
     """Convert port or set of ports to a multitap

@@ -7,7 +7,7 @@ from torch.nn.modules.container import Sequential
 from ._networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
 from ._build import (
     ChainFactory, CounterNamer, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
-    ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorIn, TensorMod, argf, scalar_val, diverge, 
+    ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorDefFactory, TensorMod, argf, scalar_val, diverge, 
     SequenceFactory, sz, arg, factory, arg_, chain
 )
 import pytest
@@ -463,20 +463,20 @@ class TestTensorInFactory:
 
     def test_produce_tensor_in_with_no_default(self):
 
-        op = TensorIn(-1, 5, dtype=torch.float)
+        op = TensorDefFactory(-1, 5, dtype=torch.float)
         in_ = op.produce()
         assert isinstance(in_, In)
 
     def test_produce_tensor_in_with_no_default_and_device(self):
 
-        op = TensorIn(-1, 5, dtype=torch.float, device='cpu')
+        op = TensorDefFactory(-1, 5, dtype=torch.float, device='cpu')
         in_ = op.produce()
         assert isinstance(in_, In)
 
     def test_produce_tensor_input_with_default(self):
 
         default = [[1, 2], [3, 4]]
-        op = TensorIn(2, 2, default=default)
+        op = TensorDefFactory(2, 2, default=default)
         in_ = op.produce()
         assert isinstance(in_, In)
 
@@ -619,7 +619,7 @@ class TestNetBuilder:
             ModFactory(nn.Linear, 3, 4)
         )
         
-        x = TensorIn(1, 2)
+        x = TensorDefFactory(1, 2)
         
         builder = NetBuilder()
         x_, = builder.add_in(x)
@@ -639,7 +639,7 @@ class TestNetBuilder:
         factory2 =  OpFactory(ModFactory(nn.Linear, 3, 4))
         factory3 =  OpFactory(ModFactory(nn.Linear, 4, 2))
         
-        x = TensorIn(1, 2)
+        x = TensorDefFactory(1, 2)
         
         builder = NetBuilder()
         x_, = builder.add_in(x)
@@ -656,7 +656,7 @@ class TestNetBuilder:
     def test_output_with_chained_factories(self):
 
         factory1 = OpFactory(ModFactory(nn.Linear, sz[1], arg_.out_features)) 
-        x = TensorIn(1, 2)
+        x = TensorDefFactory(1, 2)
         
         builder = NetBuilder()
         x_, = builder.add_in(x)
