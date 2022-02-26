@@ -14,8 +14,6 @@ NetFactory - Build nodes to a network
 NetBuilder - Building a neural network
 Namer - Name a node
 """
-
-
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
 from functools import singledispatch, singledispatchmethod
@@ -865,6 +863,35 @@ class ModFactory(BaseMod):
             typing.List[OpFactory]
         """
         return [self.op()]
+
+
+class argmodf(arg):
+    """Argument for a NetFactory/ModFactory
+    Use to add a value that is undefined 
+
+    x = arg('x').to(1)
+    -> x == 1
+    """
+
+    def __init__(self, mod_factory: ModFactory):
+        """initializer
+
+        Args:
+            name (str): Name fo the argument
+        """
+        self._mod_factory = mod_factory
+
+    def to(self, **kwargs):
+        """Update the value of the argument
+
+        Returns:
+            Any: value specified in kwargs if it is there else the arg
+        """
+        return argmodf(self._mod_factory.to(**kwargs))
+
+    def process(self, sizes: typing.List[torch.Size], kwargs: dict=None):
+        kwargs = kwargs or {}
+        return self._mod_factory.produce(sizes, **kwargs)
 
 
 class Instance(BaseMod):
