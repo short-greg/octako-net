@@ -39,7 +39,27 @@ T = TypeVar('T')
 
 
 class arg(object):
-    """Argument for a factory
+
+    @abstractmethod
+    def to(self, **kwargs):
+        """Update the value of the argument
+
+        Returns:
+            Any: value specified in kwargs if it is there else the arg
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def process(self, sizes: typing.List[torch.Size], kwargs: dict) -> int:
+        raise NotImplementedError
+
+
+class argv(arg):
+    """Argument for a NetFactory/ModFactory
+    Use to add a value that is undefined 
+
+    x = arg('x').to(1)
+    -> x == 1
     """
 
     def __init__(self, name: str):
@@ -62,15 +82,22 @@ class arg(object):
         """
         return kwargs.get(self._name, self)
 
+    def process(self, sizes: typing.List[torch.Size], kwargs: dict=None):
+        kwargs = kwargs or {}
+        return self.to(**kwargs)
+
 
 class __arg(object):
     """Convenience module for creating an arg
+
+    arg = arg_.x
+    -> arg == arg("x")
     """
 
     def __getattribute__(self, __name: str) -> arg:
-        return arg(__name)
+        return argv(__name)
 
-
+# an instance of __arg to create an arg
 arg_ = __arg()
 
 
@@ -112,7 +139,7 @@ class SizeMeta(type):
         return cls(idx)
 
 
-class sz(object, metaclass=SizeMeta):
+class sz(arg, metaclass=SizeMeta):
     """Reference to the Size of an input
     """
 
@@ -124,13 +151,16 @@ class sz(object, metaclass=SizeMeta):
             port_idx (int, optional): The index to the port. Only use if node has multiple ports.
             Defaults to None.
         """
-        
         self._port_idx = port_idx
         self._dim_idx= dim_idx
+    
+    def to(self, **kwargs):
+        return self
 
-    def process(self, sizes: typing.List[torch.Size]) -> int:
+    def process(self, sizes: typing.List[torch.Size], kwargs: dict=None) -> int:
         """Replace the reference with size passed in
         """
+        kwargs = kwargs or {}
 
         if self._port_idx is None:
             if len(sizes[0]) <= self._dim_idx:
@@ -146,6 +176,8 @@ class sz(object, metaclass=SizeMeta):
 
 
 class argf(object):
+    """Argument evaluated by a function
+    """
 
     def __init__(self, f, args):
         """Get arg to a module by passing multiple args to a function
@@ -170,16 +202,13 @@ class argf(object):
             else:
                 args.append(a)
         return argf(self._f, args)
-    
-    def process(self, sizes: typing.List[torch.Size], **kwargs):
+
+    def process(self, sizes: typing.List[torch.Size], kwargs: dict=None) -> int:
         _args = []
+        kwargs = kwargs or {}
         for a in self._args:
-            if isinstance(a, sz):
-                _args.append(a.process(sizes))
-            elif a == sz:
-                _args.append(sizes)
-            elif isinstance(a, arg):
-                _args.append(a.to(**kwargs))
+            if isinstance(a, arg):
+                _args.append(a.process(sizes, kwargs))
                 if isinstance(_args[-1], arg):
                     raise ValueError(f"No value assigned to {_args[-1]}")
             else:
@@ -253,7 +282,7 @@ class NetFactory(ABC):
     def alias(self, **kwargs):
         """Change the names of the args in the factory
         """
-        return self.to(**{k: arg(v) for k, v in kwargs.items()})
+        return self.to(**{k: argv(v) for k, v in kwargs.items()})
     
     @property
     def name(self):
@@ -415,9 +444,9 @@ class _ArgMap(ABC):
     def _(self, val: arg, kwargs):
         return val.to(**kwargs)
 
-    @_remap_arg.register
-    def _(self, val: argf, kwargs):
-        return val.to(**kwargs)
+    # @_remap_arg.register
+    # def _(self, val: argf, kwargs):
+    #     return val.to(**kwargs)
 
     @singledispatchmethod
     def _lookup_arg(self, val, in_size: torch.Size, kwargs):
@@ -425,15 +454,15 @@ class _ArgMap(ABC):
 
     @_lookup_arg.register
     def _(self, val: arg, in_size: torch.Size, kwargs):
-        return val.to(**kwargs)
-
-    @_lookup_arg.register
-    def _(self, val: sz, in_size: torch.Size, kwargs):
-        return val.process(in_size)
-
-    @_lookup_arg.register
-    def _(self, val: argf, in_size: torch.Size, kwargs):
         return val.process(in_size, kwargs)
+
+    # @_lookup_arg.register
+    # def _(self, val: sz, in_size: torch.Size, kwargs):
+    #     return val.process(in_size)
+
+    # @_lookup_arg.register
+    # def _(self, val: argf, in_size: torch.Size, kwargs):
+    #     return val.process(in_size, kwargs)
 
     @abstractmethod
     def lookup(self, in_size: torch.Size, kwargs):     
@@ -524,9 +553,10 @@ class Kwargs(_ArgMap):
 
 
 class Args(_ArgMap):
+    """Arguments for a factory
+    """
 
     def __init__(self, *args):
-
         self._args = args
 
     def lookup(self, in_size: torch.Size, kwargs):
@@ -751,7 +781,7 @@ ModInstance = typing.Union[nn.Module, arg]
 
 class ModFactory(BaseMod):
     """
-    Creates a module
+    Instantiates a module
     """
     def __init__(self, module: ModType, *args, **kwargs):
         """initializer
@@ -770,6 +800,7 @@ class ModFactory(BaseMod):
             ModFactory: Remapped modfactory
         """
         args = self._args.remap(kwargs)
+        
         module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
         return ModFactory(module, *args.args, **args.kwargs)
 
@@ -838,9 +869,20 @@ class ModFactory(BaseMod):
 
 class Instance(BaseMod):
     """Wrap an already instantiate module in an op factory
+
+    It is used so that one
+
+    factory = OpFactory(Instance(nn.Linear(2, 3)))
+    same = factory.produce(<size>) is factory.produce(<size>)
+    -> same is True
     """
 
     def __init__(self, module: ModInstance):
+        """initializer
+
+        Args:
+            module (ModInstance): An instance of a module
+        """
 
         self._module = module
 
@@ -876,23 +918,76 @@ class Instance(BaseMod):
 
 
 @singledispatch
-def factory(mod: ModType, *args, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=None, **kwargs):
+def factory(
+    mod: ModType, *args, _name: str='', 
+    _meta: Meta=None, _out: typing.List[typing.List]=None, **kwargs
+) -> OpFactory:
+    """Convenience function for creating a factory
+
+    Args:
+        mod (ModType): The class / factory for the module
+        _name (str, optional): Name of the factory. Defaults to ''.
+        _meta (Meta, optional): Meta info for the factory. Defaults to None.
+        _out (typing.List[typing.List], optional): Out size of the factory. Defaults to None.
+
+    Returns:
+        OpFactory
+    """
     return OpFactory(ModFactory(mod, *args, *kwargs), name=_name, meta=_meta, _out=_out)
 
 
 @factory.register
-def _(mod: str, *args, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=None, **kwargs):
-    return OpFactory(ModFactory(arg(mod), *args, *kwargs), name=_name, meta=_meta, _out=_out)
+def _(mod: str, *args, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=None, **kwargs) -> OpFactory:
+    """Convenience function for creating a factory where the module type is undefined
+
+    Args:
+        mod (str): Name of module factory
+        _name (str, optional): Name of the factory. Defaults to ''.
+        _meta (Meta, optional): Meta info for the factory. Defaults to None.
+        _out (typing.List[typing.List], optional): Out size of the factory. Defaults to None.
+
+    Returns:
+        OpFactory
+    """
+    return OpFactory(ModFactory(argv(mod), *args, *kwargs), name=_name, meta=_meta, _out=_out)
 
 
 @singledispatch
-def instance(mod: ModInstance, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=None):
+def instance(
+    mod: ModInstance, _name: str='', _meta: Meta=None, 
+    _out: typing.List[typing.List]=None
+) -> OpFactory:
+    """Convenience function for creating an instance factory
+
+    Args:
+        mod (ModInstance): The instance to 'produce'
+        _name (str, optional): Name of the factory. Defaults to ''.
+        _meta (Meta, optional): Meta info for the factory. Defaults to None.
+        _out (typing.List[typing.List], optional): Out size of the factory. Defaults to None.
+
+    Returns:
+        OpFactory
+    """
     return OpFactory(Instance(mod), name=_name, meta=_meta, _out=_out)
 
 
 @instance.register
-def _(mod: str, _name: str='', _meta: Meta=None, _out: typing.List[typing.List]=None):
-    return OpFactory(Instance(arg(mod)), name=_name, meta=_meta, _out=_out)
+def _(
+    mod: str, _name: str='', _meta: Meta=None, 
+    _out: typing.List[typing.List]=None
+) -> OpFactory:
+    """Convenience function for creating an instance factory
+
+    Args:
+        mod (str): The naem of the instance to 'produce'. Will create an 'arg'
+        _name (str, optional): Name of the factory. Defaults to ''.
+        _meta (Meta, optional): Meta info for the factory. Defaults to None.
+        _out (typing.List[typing.List], optional): Out size of the factory. Defaults to None.
+
+    Returns:
+        OpFactory
+    """
+    return OpFactory(Instance(argv(mod)), name=_name, meta=_meta, _out=_out)
 
 
 class DivergeFactory(NetFactory):
@@ -919,8 +1014,15 @@ class DivergeFactory(NetFactory):
         """
         return [self]
 
-    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[Diverge, torch.Size]:
+        """Produce a Diverge module
 
+        Args:
+            in_ (typing.List[Out]): The input size
+
+        Returns:
+            typing.Tuple[Diverge, torch.Size]: The Diverge module and the output size
+        """
         if isinstance(in_, Out):
             in_ = [in_]
         mods = []
@@ -934,7 +1036,18 @@ class DivergeFactory(NetFactory):
     
     @to_multitap
     def produce_nodes(self, in_: Multitap, namer: Namer=None, **kwargs) -> typing.Iterator[Node]:
-        
+        """Generator to produce nodes for diverging
+
+        Args:
+            in_ (Multitap): The input ports
+            namer (Namer, optional): Defaults to None.
+
+        Returns:
+            typing.Iterator[Node]
+
+        Yields:
+            Iterator[typing.Iterator[Node]]: Each node the generator produces
+        """
         namer = namer or FixedNamer()
         if isinstance(in_, Port):
             in_ = [in_]
@@ -944,13 +1057,30 @@ class DivergeFactory(NetFactory):
                 yield node
     
     def to(self, **kwargs):
+        """Update the args to the factory
+
+        Returns:
+            DivergeFactory: The factory with updated args
+        """
         return DivergeFactory(
             [op_factory.to(**kwargs) for op_factory in self._op_factories],
             self._name, self._meta
         )
 
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
-        
+    def info_(
+        self, name: str=None, labels: typing.List[str]=None, 
+        annotation: str=None, *args, **kwargs
+    ):
+        """Update the 'info' for the DivergeFactory
+
+        Args:
+            name (str, optional): Name of the factory. Defaults to None.
+            labels (typing.List[str], optional): Lables to the factory. Defaults to None.
+            annotation (str, optional): Factory annotation. Defaults to None.
+
+        Returns:
+            DivergeFactory: Diverge factory with updated info
+        """
         return DivergeFactory(self._op_factories, name or self._name, self._meta.spawn(labels, annotation))
 
     def to_ops(self):
@@ -966,7 +1096,7 @@ class MultiFactory(NetFactory):
     def __init__(
         self, op_factories: typing.List[NetFactory], name: str='', meta: Meta=None
     ):
-        """_summary_
+        """initializer
 
         Args:
             op_factories (typing.List[NetFactory]): _description_
@@ -979,8 +1109,15 @@ class MultiFactory(NetFactory):
     def to_ops(self):
         return [self]
 
-    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[Multi, torch.Size]:
+        """Produce a Multi module
 
+        Args:
+            in_ (typing.List[Out]): The input size
+
+        Returns:
+            typing.Tuple[Multi, torch.Size]: The Multi module and the output size
+        """
         if isinstance(in_, Out):
             in_ = [in_]
         mods = []
@@ -994,20 +1131,45 @@ class MultiFactory(NetFactory):
     
     @to_multitap
     def produce_nodes(self, in_: Multitap, namer: Namer=None, **kwargs) -> typing.Iterator[Node]:
-        
+        """Generator to produce nodes for MultiFactory
+
+        Args:
+            in_ (Multitap): The input ports
+            namer (Namer, optional): Defaults to None.
+
+        Returns:
+            typing.Iterator[Node]
+
+        Yields:
+            Iterator[typing.Iterator[Node]]: Each node the generator produces
+        """
         namer = namer or FixedNamer()
         for op_factory in self._op_factories:
             for node in op_factory.produce_nodes(in_, namer, **kwargs):
                 yield node
 
     def to(self, **kwargs):
+        """Convert 'args' in the MultiFactory
+
+        Returns:
+            MultiFactory
+        """
         return MultiFactory(
             [op_factory.to(**kwargs) for op_factory in self._op_factories],
             self._name, self._meta
         )
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-        
+        """ Update the 'info' for the MultiFactory
+
+        Args:
+            name (str, optional): Name of the factory. Defaults to None.
+            labels (typing.List[str], optional): Lables to the factory. Defaults to None.
+            annotation (str, optional): Factory annotation. Defaults to None.
+
+        Returns:
+            MultiFactory: Diverge factory with updated info
+        """
         return MultiFactory(self._op_factories, name or self._name, self._meta.spawn(labels, annotation, fix))
 
 
@@ -1027,8 +1189,15 @@ class ChainFactory(NetFactory):
     def to_ops(self):
         return [self]
 
-    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+    def produce(self, in_: typing.List[Size], **kwargs) -> typing.Tuple[nn.Sequential, torch.Size]:
+        """Produce a Sequence of modules based on the factory and attributes
 
+        Args:
+            in_ (typing.List[Out]): The input size
+
+        Returns:
+            typing.Tuple[nn.Sequential, torch.Size]: The Chain module and the output size
+        """
         if isinstance(in_, Size):
             in_ = [in_]
         attributes = self._attributes
@@ -1048,7 +1217,18 @@ class ChainFactory(NetFactory):
     
     @to_multitap
     def produce_nodes(self, in_: Multitap, namer: Namer=None, **kwargs) -> typing.Iterator[Node]:
-        
+        """Generator to produce chain of nodes
+
+        Args:
+            in_ (Multitap): The input ports
+            namer (Namer, optional): Defaults to None.
+
+        Returns:
+            typing.Iterator[Node]
+
+        Yields:
+            Iterator[typing.Iterator[Node]]: Each node the generator produces
+        """
         namer = namer or FixedNamer()
         attributes = self._attributes
         if isinstance(attributes, arg):
@@ -1069,6 +1249,11 @@ class ChainFactory(NetFactory):
                 in_ = Multitap(node.ports)
 
     def to(self, **kwargs):
+        """Update the args to the factory
+
+        Returns:
+            ChainFactory: The factory with updated args
+        """
         attributes = self._attributes
         if isinstance(self._attributes, arg):
             attributes = self._attributes.to(**kwargs)
@@ -1090,40 +1275,53 @@ chain = ChainFactory
 
 
 class InFactory(ABC):
+    """Factory that produces In nodes
+    """
 
     def __init__(self, name: str, meta: Meta=None):
+        """initializer
 
+        Args:
+            name (str): Name of the factory
+            meta (Meta, optional): Meta info for the factory. Defaults to None.
+        """
         self._name = name
         self._meta = meta or Meta()
 
-    def coalesce_name(self, name):
-        return name if name not in ('', None) else type(self).__name__
+    @abstractmethod
+    def produce(self, **kwargs) -> In:
+        """Produce In node
 
-    def produce(self, **kwargs) -> Node:
-        pass
+        Returns:
+            In: In node
+        """
+        raise NotImplementedError
 
     @abstractmethod
-    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
+    def info_(
+        self, name: str=None, labels: typing.List[str]=None, 
+        annotation: str=None, *args, **kwargs
+    ):
         pass
 
 
-class SizeVal(object):
+# class SizeVal(object):
 
-    def __init__(self, val: int, unknown: bool):
+#     def __init__(self, val: int, unknown: bool):
 
-        self._val = val
-        self._unkown = unknown
+#         self._val = val
+#         self._unkown = unknown
 
-    @property
-    def default(self):
-        return self._val
+#     @property
+#     def default(self):
+#         return self._val
 
-    @property
-    def actual(self):
-        if self._unkown:
-            return -1
+#     @property
+#     def actual(self):
+#         if self._unkown:
+#             return -1
 
-        return self._val
+#         return self._val
 
 
 def to_size(a: list):
@@ -1135,7 +1333,7 @@ def to_default_size(a: list):
 
 
 class TensorFactory(object):
-    """Creates a tensor
+    """Factory to create a tensor
     """
 
     def __init__(self, f, size: typing.List[int], kwargs: Kwargs=None):
@@ -1181,7 +1379,16 @@ class TensorFactory(object):
         """
         return torch.Size(self._size)
     
-    def __call__(self, size=None) -> Any:
+    def __call__(self, size=None) -> torch.tensor:
+        """Produce the tensor
+
+        Args:
+            size (_type_, optional): Override size of the tensor. 
+             Use default tensor if size=None
+
+        Returns:
+            torch.tensor: _description_
+        """
         size = size or self._default_size
         return self._f(*size, **self._kwargs.items)
 
@@ -1191,7 +1398,10 @@ class TensorDefFactory(InFactory):
 
     """
 
-    def __init__(self, *size, dtype=torch.float, device='cpu', default=None, name="", meta=None):
+    def __init__(
+        self, *size, dtype=torch.float, device='cpu', 
+        default=None, name="", meta=None
+    ):
         super().__init__(name or str("TensorIn"), meta)
         self._size = to_size(size)
         self._dtype = dtype

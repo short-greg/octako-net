@@ -6,7 +6,7 @@ from torch import nn
 from torch.nn.modules.container import Sequential
 from ._networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
 from ._build import (
-    ChainFactory, CounterNamer, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, 
+    ChainFactory, CounterNamer, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, argv,
     ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorDefFactory, TensorMod, argf, scalar_val, diverge, 
     SequenceFactory, sz, arg, factory, arg_, chain
 )
@@ -16,17 +16,17 @@ import pytest
 class TestArg:
 
     def test_to_arg_to_arg(self):
-        v = arg("x")
-        res = v.to(x=arg('y'))
+        v = argv("x")
+        res = v.to(x=argv('y'))
         assert isinstance(res, arg)
 
     def test_to_arg_to_value(self):
-        v = arg("x")
+        v = argv("x")
         res = v.to(x=1)
         assert res == 1
     
     def test_to_var_to_val_not_contained(self):
-        v = arg('x')
+        v = argv('x')
         res = v.to(y=2)
         assert res.name == "x"
     
@@ -68,7 +68,7 @@ class TestArgf:
 
     def test_argf_with_two_args(self):
         v = argf(lambda x, y: x * y, [arg_.x, arg_.y])
-        res = v.process([torch.Size([1, 2])], x=3, y=2)
+        res = v.process([torch.Size([1, 2])], dict(x=3, y=2))
         assert res == 6
 
     def test_argf_to_with_two_args(self):
@@ -231,13 +231,13 @@ class TestMod:
     
     def test_mod_with_nn_linear_and_arg(self):
 
-        m = factory(nn.Linear, sz[1], arg('x'))
+        m = factory(nn.Linear, sz[1], argv('x'))
         linear = m.produce(Out(torch.Size([-1, 4])), x=3)[0]
         assert isinstance(linear, nn.Linear)
 
     def test_mod_with_nn_linear_and_arg(self):
 
-        m = factory(nn.Linear, sz[1], arg('x'))
+        m = factory(nn.Linear, sz[1], argv('x'))
         linear = m.produce(Out(torch.Size([-1, 4])), x=3)[0]
         assert isinstance(linear, nn.Linear)
 
@@ -250,7 +250,7 @@ class TestMod:
 
     def test_mod_raises_error_when_arg_not_defined(self):
 
-        m = factory(nn.Linear, sz[1], arg('x'))
+        m = factory(nn.Linear, sz[1], argv('x'))
         with pytest.raises(RuntimeError):
             m.produce(Out(torch.Size([-1, 4])))
 
@@ -312,13 +312,13 @@ class TestSequence:
         size = torch.Size([1, 2])
 
         linear = (
-            factory(nn.Linear, sz[1], arg('out'), bias=False) << 
+            factory(nn.Linear, sz[1], argv('out'), bias=False) << 
             factory('activation')
         )
 
         sequence, _ = (
-            linear.to(out=arg('x')) << 
-            linear.to(out=arg('y'), activation=nn.Sigmoid)
+            linear.to(out=argv('x')) << 
+            linear.to(out=argv('y'), activation=nn.Sigmoid)
         ).produce(Out(size), activation=nn.ReLU, x=4, y=3)
         assert isinstance(sequence[1], nn.ReLU) and isinstance(sequence[3], nn.Sigmoid)
         assert sequence(torch.rand(1, 2)).size() == torch.Size([1, 3])
@@ -328,13 +328,13 @@ class TestSequence:
         size = torch.Size([1, 2])
         layer = (
             
-            factory(nn.Linear, sz[1], arg('out'), bias=False) << 
+            factory(nn.Linear, sz[1], argv('out'), bias=False) << 
             factory('activation')
         )
 
         sequence, sizes = (
             layer.alias(out='x') << 
-            layer.to(out=arg('y'), activation=nn.Sigmoid)
+            layer.to(out=argv('y'), activation=nn.Sigmoid)
         ).produce(Out(size), activation=nn.ReLU, x=4, y=3)
         assert isinstance(sequence[1], nn.ReLU) and isinstance(sequence[3], nn.Sigmoid)
         assert sequence(torch.rand(1, 2)).size() == torch.Size([1, 3])
@@ -392,7 +392,7 @@ class TestChain:
 
     def test_chained_linear_with_arg(self):
 
-        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        op = OpFactory(ModFactory(nn.Linear, sz[1], argv('x')))
         chain_ = ChainFactory(op, [Kwargs(x=4), Kwargs(x=5)])
         sequence, _ = chain_.produce([Out(torch.Size([-1, 2]))])
 
@@ -400,7 +400,7 @@ class TestChain:
 
     def test_chained_linear_size_is_correct(self):
 
-        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        op = OpFactory(ModFactory(nn.Linear, sz[1], argv('x')))
         chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
         sequence, out = chain_.produce([Out(torch.Size([-1, 2]))])
 
@@ -408,14 +408,14 @@ class TestChain:
 
     def test_chained_linear_size_raises_error_with_undefined_argument(self):
 
-        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        op = OpFactory(ModFactory(nn.Linear, sz[1], argv('x')))
         chain_ = chain(op, [Kwargs(y=4), Kwargs(x=5)])
         with pytest.raises(RuntimeError):
             _, out = chain_.produce([Out(torch.Size([-1, 2]))])
 
     def test_chained_produce_nodes(self):
 
-        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        op = OpFactory(ModFactory(nn.Linear, sz[1], argv('x')))
         chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
         nodes: typing.List[Node] = []
         for node in chain_.produce_nodes(Multitap([NodePort('x', torch.Size([-1, 2]))])):
@@ -425,9 +425,9 @@ class TestChain:
 
     def test_chain_to_produce_nodes(self):
 
-        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        op = OpFactory(ModFactory(nn.Linear, sz[1], argv('x')))
         chain_ = chain(op, [Kwargs(x=4), Kwargs(x=5)])
-        chain_ = chain_.to(x=arg('y'))
+        chain_ = chain_.to(x=argv('y'))
         nodes: typing.List[Node] = []
         for node in chain_.produce_nodes(NodePort("x", torch.Size([-1, 2]))):
             nodes.append(node)
@@ -436,16 +436,16 @@ class TestChain:
 
     def test_chain_to_produce_nodes_raises_error(self):
 
-        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        op = OpFactory(ModFactory(nn.Linear, sz[1], argv('x')))
         chain_ = chain(op, [Kwargs(y=4), Kwargs(x=5)])
-        chain_ = chain_.to(x=arg('y'))
+        chain_ = chain_.to(x=argv('y'))
         with pytest.raises(RuntimeError):
             for _ in chain_.produce_nodes(NodePort("x", torch.Size([-1, 2]))):
                 pass
 
     def test_chain_(self):
 
-        op = OpFactory(ModFactory(nn.Linear, sz[1], arg('x')))
+        op = OpFactory(ModFactory(nn.Linear, sz[1], argv('x')))
         chain_ = chain(op, [Kwargs(y=4), Kwargs(x=5)]).info_(name='Hi')
         assert chain_.name == 'Hi'
 

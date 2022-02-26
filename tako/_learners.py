@@ -19,6 +19,9 @@ class BinaryClassifierLearner(Learner, Tester, Classifier):
     
   def test(self, x, t):
       # evaluate the ntwork
+    
+  def forward(self, x):
+      # standard forward method
 
 """
 

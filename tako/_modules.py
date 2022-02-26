@@ -224,8 +224,15 @@ class Flatten(nn.Module):
 
 
 class ListAdapter(nn.Module):
+    """Adapts a module that takes in a list as input to the forward method
+    """
 
     def __init__(self, module: nn.Module):
+        """initializer
+
+        Args:
+            module (nn.Module): module to adapt to
+        """
 
         self._module = module
 
