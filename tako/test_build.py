@@ -58,6 +58,20 @@ class TestSz:
         with pytest.raises(ValueError):
             sz[1, 2].process([torch.Size([1, 2]), torch.Size([1, 2])])
 
+    def test_to_sz_with_valid_sz_only_port(self):
+        
+        target = torch.Size([1, 3])
+        result = sz(None, 1).process([torch.Size([1, 2]), target])
+        assert result == target
+
+    def test_to_sz_with_all(self):
+        
+        target1 = torch.Size([1, 3])
+        target2 = torch.Size([1, 4])
+        result = sz().process([target1, target2])
+        assert target1 == result[0]
+        assert target2 == result[1]
+
 
 class TestArgf:
 

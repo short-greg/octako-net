@@ -134,14 +134,14 @@ class SizeMeta(type):
             if len(idx) > 2:
                 raise KeyError(f'Index size must be less than or equal to 2 not {len(idx)}')
             return cls(idx[0], idx[1])
-        return cls(idx)
+        return cls(idx, 0)
 
 
 class sz(arg, metaclass=SizeMeta):
     """Reference to the Size of an input
     """
 
-    def __init__(self, dim_idx: int, port_idx: int=None):
+    def __init__(self, dim_idx: int=None, port_idx: int=None):
         """initializer
 
         Args:
@@ -160,11 +160,11 @@ class sz(arg, metaclass=SizeMeta):
         """
         kwargs = kwargs or {}
 
-        if self._port_idx is None:
-            if len(sizes[0]) <= self._dim_idx:
-                raise ValueError(f"Size dimension {len(sizes)} is smaller than the dimension index {self._dim_idx}.")
-            return sizes[0][self._dim_idx]
-        
+        if self._port_idx is None and self._dim_idx is None:
+            return sizes
+        elif self._dim_idx is None:
+            return sizes[self._port_idx]   
+
         if len(sizes) <= self._port_idx:
             raise ValueError(f"Number of ports {len(sizes)} is smaller than the port index {self._port_idx}")
 
