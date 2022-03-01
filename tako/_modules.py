@@ -7,9 +7,23 @@ import torch
 import typing
 
 
-class NullActivation(nn.Module):
+class Null(nn.Module):
+    """
+    Module that does not affect the input
+    """
 
-    def forward(self, x):
+    def __init__(self, multi: bool=False):
+        """initializer
+
+        Args:
+            multi (bool, optional): Whether there are multiple outputs. Defaults to False.
+        """
+        super().__init__()
+        self._multi = multi
+
+    def forward(self, *x):
+        if not self._multi:
+            return x[0]
         return x
 
 
@@ -174,7 +188,7 @@ class Lambda(nn.Module):
 
 class SelfMethod(nn.Module):
     """
-    Define a module inline
+    Define a module inline that refers to the 
     """
 
     def __init__(

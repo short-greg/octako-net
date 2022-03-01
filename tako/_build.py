@@ -21,14 +21,13 @@ from os import path
 from typing import Any, Counter, TypeVar
 import typing
 import torch
-from torch import nn
-from torch import Size
+from torch import nn, Size
 from ._networks import (
     In, Meta, InScalar, InTensor, Multitap, 
     Network, NetworkInterface, Node, NodePort, NodeSet, OpNode, Port, Out
 )
 from ._modules import (
-    Multi, Multi, Diverge, Lambda, SelfMethod
+    Multi, Multi, Diverge, Lambda, SelfMethod, Null
 )
 from functools import wraps
 
@@ -771,6 +770,18 @@ class OpFactory(NetFactory):
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
         return OpFactory(self._mod, name or self._name, self._meta.spawn(labels, annotation), self._out)
+
+
+class NullFactory(OpFactory):
+
+    def __init__(
+        self, multi: bool=False, name: str="", meta: Meta=None, _out: 
+        typing.List[typing.List]=None
+    ):
+        super().__init__(
+            ModFactory(Null, multi), name, meta, _out
+        )
+
 
     
 ModType = typing.Union[typing.Type[nn.Module], arg]

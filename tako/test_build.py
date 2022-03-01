@@ -8,8 +8,9 @@ from ._networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
 from ._build import (
     ChainFactory, CounterNamer, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, argv,
     ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorDefFactory, TensorMod, argf, scalar_val, diverge, 
-    SequenceFactory, sz, arg, factory, arg_, chain, LambdaMod, opself
+    SequenceFactory, sz, arg, factory, arg_, chain, LambdaMod, opself, NullFactory
 )
+from ._modules import Null
 import pytest
 
 
@@ -149,6 +150,26 @@ class TestCounterNamer:
         namer.name('X', nn.Linear(2, 2))
         namer.name('X', nn.Linear(2, 2))
         assert namer['X'][:2] == ['X', 'X_2']
+
+
+class TestNullFactory:
+
+    def test_null_factory_with_multi(self):
+
+        factory = NullFactory(True)
+        null, out_size = factory.produce([Out([-1, 3]),Out([-1, 3])])
+        x = [torch.rand(2, 3), torch.rand(1, 3)]
+        y = null(*x)
+        assert (y[0] == x[0]).all()
+        assert (y[1] == x[1]).all()
+
+    def test_null_factory_with_single(self):
+
+        factory = NullFactory()
+        null, out_size = factory.produce([Out([-1, 3])])
+        x = torch.rand(2, 3)
+        y = null(x)
+        assert (x == y).all()
 
 
 class TestOpMod:
