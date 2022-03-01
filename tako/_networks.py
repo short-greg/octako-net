@@ -124,6 +124,10 @@ class Out:
     size: torch.Size
     dtype: torch.dtype=torch.float
 
+    def __post_init__(self):
+        if not isinstance(self.size, torch.Size):
+            self.size = torch.Size(self.size)
+
 
 OutList = typing.List[Out]
 

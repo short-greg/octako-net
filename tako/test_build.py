@@ -8,7 +8,7 @@ from ._networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
 from ._build import (
     ChainFactory, CounterNamer, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, argv,
     ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorDefFactory, TensorMod, argf, scalar_val, diverge, 
-    SequenceFactory, sz, arg, factory, arg_, chain
+    SequenceFactory, sz, arg, factory, arg_, chain, LambdaMod, opself
 )
 import pytest
 
@@ -203,6 +203,24 @@ class TestOpMod:
         optorch = OpMod(torch, factory=TensorMod)
         zeros = optorch.zeros(2, 3).produce()
         assert isinstance(zeros, In)
+
+
+    def test_lambda_mod_with_torch_sigmoid(self):
+
+        torch.manual_seed(2)
+        x = torch.rand(2, 2)
+        optorch = OpMod(torch, LambdaMod)
+        sigmoid_mod = optorch.sigmoid()
+        sigmoid, _ = sigmoid_mod.produce([Out([-1, 2])])
+        assert (sigmoid(x) == torch.sigmoid(x)).all()
+
+    def test_selfmethod_mod_with_torch_sigmoid(self):
+
+        torch.manual_seed(2)
+        x = torch.rand(2, 2)
+        log_mod = opself.log()
+        log_, _ = log_mod.produce([Out([-1, 2])])
+        assert (log_(x) == x.log()).all()
 
     def test_op_mod_with_torch_tensor_raises_exception_with_invalid_args(self):
 

@@ -16,7 +16,7 @@ Namer - Name a node
 """
 from abc import ABC, abstractmethod, abstractproperty
 from dataclasses import dataclass, field
-from functools import singledispatch, singledispatchmethod
+from functools import partial, singledispatch, singledispatchmethod
 from os import path
 from typing import Any, Counter, TypeVar
 import typing
@@ -28,7 +28,7 @@ from ._networks import (
     Network, NetworkInterface, Node, NodePort, NodeSet, OpNode, Port, Out
 )
 from ._modules import (
-    Multi, Multi, Diverge
+    Multi, Multi, Diverge, Lambda, SelfMethod
 )
 from functools import wraps
 
@@ -1608,6 +1608,49 @@ class NNMod(TakoMod):
     def __call__(self, *args, _meta: Meta=None, **kwargs) -> OpFactory:
         
         return OpFactory(ModFactory(self._nnmodule, *args, **kwargs), _meta)
+
+
+class LambdaMod(TakoMod):
+    """Create OpFactories for an nn.Module
+    """
+
+    def __init__(self, torch_f):
+        """initializer
+
+        Args:
+            torch_f (function): torch function
+        """
+        self._torch_f = torch_f
+
+    def __call__(self, *args, _meta: Meta=None, **kwargs) -> OpFactory:
+
+        return OpFactory(ModFactory(Lambda, self._torch_f, *args, **kwargs), _meta)
+
+
+class SelfMod(TakoMod):
+    """Create OpFactories for an nn.Module
+    """
+
+    def __init__(self, name):
+        """initializer
+
+        Args:
+            torch_f (function): torch function
+        """
+        self._name = name
+
+    def __call__(self, *args, _meta: Meta=None, **kwargs) -> OpFactory:
+
+        return OpFactory(ModFactory(SelfMethod, self._name, *args, **kwargs), _meta)
+
+
+class __opself(object):
+
+    def __getattribute__(self, __name: str) -> Any:
+        return SelfMod(__name)
+
+
+opself = __opself()
 
 
 class TensorMod(TakoMod):

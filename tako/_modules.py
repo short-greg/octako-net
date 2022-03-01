@@ -149,7 +149,9 @@ class Lambda(nn.Module):
     Define a module inline
     """
 
-    def __init__(self, lambda_fn: typing.Callable[[], torch.Tensor]):
+    def __init__(
+        self, lambda_fn: typing.Callable[[], torch.Tensor], *args, **kwargs
+    ):
         """initializer
 
         Args:
@@ -158,6 +160,8 @@ class Lambda(nn.Module):
 
         super().__init__()
         self._lambda_fn = lambda_fn
+        self._args = args
+        self._kwargs = kwargs
     
     def forward(self, *x: torch.Tensor):
         """Execute the lambda function
@@ -165,8 +169,36 @@ class Lambda(nn.Module):
         Returns:
             list[torch.Tensor] or torch.Tensor 
         """
+        return self._lambda_fn(*x, *self._args, **self._kwargs)
 
-        return self._lambda_fn(*x)
+
+class SelfMethod(nn.Module):
+    """
+    Define a module inline
+    """
+
+    def __init__(
+        self, name: str, *args, **kwargs
+    ):
+        """initializer
+
+        Args:
+            name (str): name of the method
+        """
+
+        super().__init__()
+        self._name = name
+        self._args = args
+        self._kwargs = kwargs
+    
+    def forward(self, x: torch.Tensor):
+        """Execute the lambda function
+
+        Returns:
+            list[torch.Tensor] or torch.Tensor 
+        """
+        f = getattr(x, self._name)
+        return f(*self._args, **self._kwargs)
 
 
 class View(nn.Module):
