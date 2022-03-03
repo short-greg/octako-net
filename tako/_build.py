@@ -49,6 +49,7 @@ class arg(object):
     @abstractmethod
     def process(self, sizes: typing.List[torch.Size], kwargs: dict) -> int:
         raise NotImplementedError
+    
 
 
 class argv(arg):
@@ -82,6 +83,9 @@ class argv(arg):
     def process(self, sizes: typing.List[torch.Size], kwargs: dict=None):
         kwargs = kwargs or {}
         return self.to(**kwargs)
+
+    def __str__(self):
+        return f'Arg: {self._name}'
 
 
 class __arg(object):
@@ -171,6 +175,9 @@ class sz(arg, metaclass=SizeMeta):
             raise ValueError(f"Size dimension {len(sizes)} is smaller than the dimension index {self._dim_idx}")
         return sizes[self._port_idx][self._dim_idx]
 
+    def __str__(self):
+        return f'Port: {self._port_idx} Dim: {self._dim_idx}'
+
 
 class argf(object):
     """Argument evaluated by a function
@@ -211,6 +218,9 @@ class argf(object):
             else:
                 _args.append(a)
         return self._f(*_args)
+
+    def __str__(self):
+        return f'argf (Func: {self._f} Args: {self._args})'
 
 
 def module_name(obj):
