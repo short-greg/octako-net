@@ -179,7 +179,7 @@ class sz(arg, metaclass=SizeMeta):
         return f'Port: {self._port_idx} Dim: {self._dim_idx}'
 
 
-class argf(object):
+class argf(arg):
     """Argument evaluated by a function
     """
 
@@ -455,13 +455,10 @@ class _ArgMap(ABC):
     # def _(self, val: argf, kwargs):
     #     return val.to(**kwargs)
 
-    @singledispatchmethod
     def _lookup_arg(self, val, in_size: torch.Size, kwargs):
+        if isinstance(val, arg):
+            return val.process(in_size, kwargs)
         return val
-
-    @_lookup_arg.register
-    def _(self, val: arg, in_size: torch.Size, kwargs):
-        return val.process(in_size, kwargs)
 
     # @_lookup_arg.register
     # def _(self, val: sz, in_size: torch.Size, kwargs):
@@ -833,11 +830,14 @@ class ModFactory(BaseMod):
         
         if isinstance(in_, torch.Size):
             in_ = [in_]
+        
         module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
 
+        print('Looking up for ', module)
         args = self._args.lookup(in_, kwargs)
         undefined = args.undefined
         if len(undefined) > 0:
+            undefined = list(map(str, undefined))
             raise RuntimeError(f"Args {undefined} are not defined in {kwargs}")
         try:
             return module(*args.args, **args.kwargs)
