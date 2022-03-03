@@ -1825,3 +1825,20 @@ class NetBuilder(object):
     #         __qualname__ = name
 
     #     return _(self.net)
+
+def concat(factories: typing.List[NetFactory]) -> NetFactory:
+    """concat a series of factories
+
+    Args:
+        factories (typing.List[NetFactory]): List of factories
+
+    Returns:
+        NetFactory
+    """
+
+    if len(factories) == 0:
+        return NullFactory()
+    factory = factories[0]
+    for f in factories[1:]:
+        factory = factory << f
+    return factory

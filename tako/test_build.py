@@ -8,7 +8,7 @@ from ._networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
 from ._build import (
     ChainFactory, CounterNamer, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, argv,
     ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorDefFactory, TensorMod, argf, scalar_val, diverge, 
-    SequenceFactory, sz, arg, factory, arg_, chain, LambdaMod, opself, NullFactory
+    SequenceFactory, sz, arg, factory, arg_, chain, LambdaMod, opself, NullFactory, concat
 )
 from ._modules import Null
 import pytest
@@ -723,3 +723,28 @@ class TestNetBuilder:
         x = x_.node
         z = net.probe([y0, x], by={x: torch.randn(1, 2)})
         assert z[0].size(1) == 2
+
+
+class TestConcat:
+
+    def test_concat_with_none(self):
+
+        f = concat([])
+        assert isinstance(f, NullFactory)
+    
+    def test_concat_with_one(self):
+
+        f = factory(nn.Linear, sz[1], arg_.x)
+        f = concat([f])
+        linear, _ = f.produce([Out([-1, 2])], x=4)
+        y = linear.forward(torch.randn(2, 2))
+        assert y.size() == torch.Size([2, 4])
+
+    def test_concat_with_two(self):
+
+        f = factory(nn.Linear, sz[1], arg_.x)
+        f2 = factory(nn.Linear, sz[1], arg_.y)
+        f = concat([f, f2])
+        linear, _ = f.produce([Out([-1, 2])], x=4, y=5)
+        y = linear.forward(torch.randn(2, 2))
+        assert y.size() == torch.Size([2, 5])
