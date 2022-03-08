@@ -730,7 +730,11 @@ class OpFactory(NetFactory):
 
     def _out_sizes(self, mod, in_) -> typing.Tuple[torch.Size]:
 
+        training =mod.training
+        mod.eval()
         y = mod(*self._in_tensor(in_))
+        mod.train(training)
+        
         if isinstance(y, torch.Tensor):
             y = [y]
         
@@ -833,7 +837,6 @@ class ModFactory(BaseMod):
         
         module = self._module.to(**kwargs) if isinstance(self._module, arg) else self._module
 
-        print('Looking up for ', module)
         args = self._args.lookup(in_, kwargs)
         undefined = args.undefined
         if len(undefined) > 0:

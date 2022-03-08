@@ -60,6 +60,7 @@ def dict_cpuresult(f):
     def wrapper(self, *args):
         args = tuple(a.to(self._device) for a in args)
         result = f(self, *args)
+        print(list(result.values()))
         return {
             k: t.cpu() for k, t in result.items()
         }
