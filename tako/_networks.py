@@ -116,6 +116,27 @@ class By(object):
         return self._subs[sub]
 
 
+def check_size(x_size: typing.Iterable[int], port_size: typing.Iterable[int]) -> typing.Optional[str]:
+    """Check if the input size matches the size of the ports
+
+    Args:
+        x_size (typing.Iterable[int]): The input size
+        port_size (typing.Iterable[int]): The size of the port
+
+    Returns:
+        typing.Optional[str]: Error string if the sizes do not match
+    """
+    if len(x_size) != len(port_size):
+        return f"Dimensions of input size {x_size} does not match port size {port_size}"
+    
+    for i, (x_i, p_i) in enumerate(zip(x_size, port_size)):
+        if p_i == -1:
+            continue
+        if x_i != p_i:
+            return f"Size of input {x_size} at dim {i} must match size of ports {port_size}"
+    return None
+
+
 @dataclasses.dataclass
 class Out:
     """Definition of the output of a node

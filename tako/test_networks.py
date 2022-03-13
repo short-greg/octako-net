@@ -3,8 +3,32 @@ import torch.nn as nn
 import torch
 from ._networks import (
     By, Meta, InTensor, Link, Multitap, Network, 
-    InterfaceNode, NodePort, OpNode, Out, SubNetwork
+    InterfaceNode, NodePort, OpNode, Out, SubNetwork, check_size
 )
+
+
+class TestCheckSize:
+
+    def test_check_size_returns_none_when_match_exactly(self):
+        x_size = [1, 2, 3]
+        port_size = [1, 2, 3]
+        assert check_size(x_size, port_size) is None
+
+    def test_check_size_returns_none_when_match_with_port_size_having_minus_1(self):
+        x_size = [1, 2, 3]
+        port_size = [-1, 2, 3]
+        assert check_size(x_size, port_size) is None
+
+    def test_check_size_returns_error_when_sizes_have_different_length(self):
+        x_size = [1, 2, 3]
+        port_size = [-1, 2]
+        assert check_size(x_size, port_size) is not None
+
+    def test_check_size_returns_error_when_sizes_do_not_match(self):
+        x_size = [1, 2, 3]
+        port_size = [-1, 2, 4]
+        assert check_size(x_size, port_size) is not None
+
 
 
 class TestNode:
