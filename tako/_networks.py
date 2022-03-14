@@ -169,7 +169,7 @@ class Port(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def select(self, by: By):
+    def select(self, by: By, check: bool=False):
         raise NotImplementedError
 
     @abstractmethod
@@ -218,7 +218,7 @@ class NodePort(Port):
         """
         return self._size
 
-    def select(self, by: By) -> torch.Tensor:
+    def select(self, by: By, check: bool=False) -> torch.Tensor:
         """
         Args:
             by (By)
@@ -226,7 +226,15 @@ class NodePort(Port):
         Returns:
             torch.Tensor: Output of thenode
         """
-        return by.get(self.node)
+        x = by.get(self.node)
+
+        if x is None or not check:
+            return x
+
+        check_res = check_size(x, self.size)
+        if check_res is None:
+            return x
+        raise ValueError(f'For mod {self._node}, {check_res}')
 
     def select_result(self, result) -> torch.Tensor:
         """Select result of an output
@@ -290,7 +298,7 @@ class IndexPort(Port):
         """
         return self._size
 
-    def select(self, by: By):
+    def select(self, by: By, check: bool=False):
         """
         Args:
             by (By)
@@ -302,7 +310,14 @@ class IndexPort(Port):
         if result is None:
             return None
 
-        return result[self.index]
+        x = result[self.index]
+        if not check:
+            return x
+
+        check_res = check_size(x, self.size)
+        if check_res is None:
+            return x
+        raise ValueError(f'For mod {self._node} - index {self._index}, {check_res}')
 
     def select_result(self, result) -> torch.Tensor:
         """Select result of an output at the index
@@ -611,6 +626,11 @@ class OpNode(Node):
 
         return self.op(*args, **kwargs)
 
+    # def forward(self, *x):
+
+    #     return self.op(*args, **kwargs)
+
+    # TODO: Consider removing the pro
     def probe(self, by: By, to_cache=True):
         """probe the 
 
@@ -625,7 +645,8 @@ class OpNode(Node):
             _type_: _description_
         """
         if self.name in by:
-            return by[self.name]
+            return [in_.select(by) for in_ in self.inputs]
+            # return by[self.name]
 
         try:
             result = self.op(*[in_.select(by) for in_ in self.inputs])
@@ -787,7 +808,7 @@ class Network(nn.Module):
         
         for name in self._roots:
             yield self._nodes[name]
-    
+
     def traverse_forward(
         self, from_nodes: typing.List[str]=None, 
         to_nodes: typing.Set[str]=None
@@ -819,7 +840,7 @@ class Network(nn.Module):
                 self.traverse_backward(node.inputs, to_nodes)
     
     def _probe_helper(
-        self, node: Node, by: By, to_cache=True
+        self, node: Node, by: By, to_cache=True, check_size: bool=False
     ):
         """Helper function to get the output for a "probe"
 
@@ -840,7 +861,7 @@ class Network(nn.Module):
 
         for port in node.inputs:
             node_name = port.node
-            excitation = port.select(by)
+            excitation = port.select(by, check_size)
 
             if excitation is not None:
                 
@@ -849,18 +870,19 @@ class Network(nn.Module):
             try:
                 self._probe_helper(self._nodes[node_name], by)
                 inputs.append(
-                    port.select(by)
+                    port.select(by, check_size)
                 )
             # TODO: Create a better report for this
             except KeyError:
                 raise KeyError(f'Input or Node {node_name} does not exist')
 
+        # TODO: not using "inputs".. should use forward here, I think
         cur_result = node.probe(by, to_cache)
         return cur_result
 
     def probe(
         self, outputs: typing.List[typing.Union[str, Port]], 
-        by: typing.Dict[str, torch.Tensor], to_cache=True
+        by: typing.Dict[str, torch.Tensor], to_cache=True, check_size: bool=False
     ) -> typing.List[torch.Tensor]:
         """Probe the network for its inputs
 
@@ -885,7 +907,7 @@ class Network(nn.Module):
             if isinstance(output, Port):
                 cur = self._probe_helper(
                     self._nodes[output.node], 
-                    by, to_cache)
+                    by, to_cache, check_size)
                 result.append(
                     output.select_result(cur)
                 )
@@ -893,7 +915,7 @@ class Network(nn.Module):
                 result.append(
                     self._probe_helper(
                         self._nodes[output], 
-                        by, to_cache
+                        by, to_cache, check_size
                 ))
         
         if singular:
