@@ -2,6 +2,7 @@
 Network modules 
 """
 
+from functools import partial
 import torch.nn as nn
 import torch
 import typing
@@ -25,6 +26,32 @@ class Null(nn.Module):
         if not self._multi:
             return x[0]
         return x
+
+
+class OpAction(nn.Module):
+    """Call a function on an nn-module other than forward
+    """
+
+    def __init__(self, op: nn.Module, action: str, **kwargs):
+        """initializer
+
+        Args:
+            op (nn.Module): Module to execute the action on
+            action (str): action to call
+            kwargs : arguments to the action
+        """
+        super().__init__()
+
+        self._op = op
+        self._action = partial(getattr(self._op, action), **kwargs)
+
+    @property
+    def op(self):
+        return self._op
+
+    def forward(self, *x):
+
+        return self._action(*x)
 
 
 class Scaler(nn.Module):

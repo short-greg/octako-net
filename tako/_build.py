@@ -27,7 +27,7 @@ from ._networks import (
     Network, NetworkInterface, Node, NodePort, NodeSet, OpNode, Port, Out
 )
 from ._modules import (
-    Multi, Multi, Diverge, Lambda, SelfMethod, Null
+    Multi, Multi, Diverge, Lambda, SelfMethod, Null, OpAction
 )
 from functools import wraps
 
@@ -1790,7 +1790,7 @@ class NetBuilder(object):
         self._names = Counter()
         self._namer = namer if namer is not None else CounterNamer()
 
-    def __getitem__(self, keys):
+    def __getitem__(self, keys) -> typing.Iterable[Port]:
         return self._net[keys].ports
 
     def add_in(self, *in_args: InFactory, **in_kwargs: InFactory):
@@ -1812,9 +1812,43 @@ class NetBuilder(object):
             ports = self._net.add_node(node)
         return ports
     
-    def interface(self, out, by: typing.List[str]):
-        return NetworkInterface(self._net, out, by)
+    def interface(self, out: typing.List[Out], by: typing.List[str]):
+        """_summary_
 
+        Args:
+            out (typing.List[Out]): _description_
+            by (typing.List[str]): _description_
+
+        Returns:
+            _type_: _description_
+        """
+
+        return NetworkInterface(self._net, out, by)
+    
+    def op(self, op_node: str) -> nn.Module:
+        """Retrieve the operation for an op ndoe
+
+        Args:
+            op_node (str): _description_
+
+        Raises:
+            ValueError: If the name is not a valid node or is an opnode
+
+        Returns:
+            nn.Module
+        """
+
+        node: OpNode = self._net.get_node(op_node)
+
+        if not isinstance(node, OpNode):
+            raise ValueError(f'Node {node} is not an opnode')
+        
+        return node.op
+
+    def action(self, op_node: str, action: str, **kwargs) -> Instance:
+
+        return Instance(OpAction(self.op(op_node), action, **kwargs))
+    
     @property
     def net(self):
         return self._net
@@ -1823,12 +1857,12 @@ class NetBuilder(object):
     def namer(self):
         return self._namer
 
-    def set_default_interface(
-        self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]
-    ):
-        self._net.set_default_interface(
-            ins, outs
-        )
+    # def set_default_interface(
+    #     self, ins: typing.List[typing.Union[Port, str]], outs: typing.List[typing.Union[Port, str]]
+    # ):
+    #     self._net.set_default_interface(
+    #         ins, outs
+    #     )
 
     # TODO: Figure out how to implement
     # add in port mapping

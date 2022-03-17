@@ -627,8 +627,8 @@ class OpNode(Node):
         return self.op(*args, **kwargs)
 
     # def forward(self, *x):
-
-    #     return self.op(*args, **kwargs)
+    #     return self.op(*x)
+    
 
     # TODO: Consider removing the pro
     def probe(self, by: By, to_cache=True):
@@ -808,6 +808,10 @@ class Network(nn.Module):
         
         for name in self._roots:
             yield self._nodes[name]
+        
+    def get_node(self, key: str) -> Node:
+
+        return self._nodes[key]
 
     def traverse_forward(
         self, from_nodes: typing.List[str]=None, 
@@ -868,6 +872,10 @@ class Network(nn.Module):
                 inputs.append(excitation)
                 continue
             try:
+                # need to get the result
+                # TODO: as it is right now. it requires caching
+                # result = self._probe_helper() <- include by
+                # results.append(result) or results.extend(result)
                 self._probe_helper(self._nodes[node_name], by)
                 inputs.append(
                     port.select(by, check_size)
@@ -877,6 +885,10 @@ class Network(nn.Module):
                 raise KeyError(f'Input or Node {node_name} does not exist')
 
         # TODO: not using "inputs".. should use forward here, I think
+        # cur_result = node.forward(*inputs, by, to_cache, check_size)
+        #  ... i could turn caching off in 'by' also.. wouldn't
+        # that be better?
+        # forward function will cache the results if to cache is true
         cur_result = node.probe(by, to_cache)
         return cur_result
 
@@ -951,21 +963,7 @@ class Network(nn.Module):
         for k, v in self._nodes.items():
             yield k, v
 
-
 Network.forward = Network.probe
-    # def forward(self, *args, **kwargs) -> typing.List[torch.Tensor]:
-    #     """The standard 'forward' method for the network.
-
-    #     Returns:
-    #         typing.List[torch.Tensor]: Outputs of the network
-    #     """
-
-    #     # TODO: UPDATE THIS FORWARD FUNCTION 
-    #     if (len(args) != len(self._default_ins)):
-    #         raise ValueError(f"Number of args {len(args)} does not match the number of inputs {len(self._default_ins)}'")
-    #     inputs = {self._default_ins[i]: x for i, x in enumerate(args)}
-    #     inputs.update(kwargs)
-    #     return self.probe(self._default_outs, inputs)
 
 
 @dataclasses.dataclass

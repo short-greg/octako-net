@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
-from functools import reduce
+from functools import partial, reduce
 import typing
 from ._networks import Node, NodeSet
+from ._networks import NodeVisitor, Node, Port, Network, SubNetwork, OpNode, InterfaceNode
+from abc import ABC, abstractmethod
+import typing
 
 
 class Q(ABC):
@@ -64,11 +67,6 @@ class DifferenceQ(Q):
         return self._q1(nodes) - self._q2(nodes)
 
 
-from ._networks import NodeVisitor, Node, Port, Network, SubNetwork, OpNode, InterfaceNode
-from abc import ABC, abstractmethod
-import typing
-
-
 class NodeProcessor(ABC):
     
     @abstractmethod
@@ -83,24 +81,74 @@ class UpdateNodeName(NodeProcessor):
         self._prepend_with = prepend_with
         self._append_with = append_with
 
-    def _update_name(self, node: Node):
-
+    def __call__(self, node: Node) -> Node:
         name = self._prepend_with + node.name + self._append_with
         node = node.clone()
         node.name = name
         return node
 
-    def process(self, node: Node) -> Node:
-        return self._update_name(node)
 
+class Filter(ABC):
+    """Checks if a node should be processed or not
+    """
 
-class NullNodeProcessor(NodeProcessor):
-
-    def __init__(self):
+    @abstractmethod
+    def __call__(self, node) -> bool:
         pass
 
-    def process(self, node: Node) -> Node:
-        return node.clone()
+
+class NullFilter(Filter):
+    """
+    """
+
+    def __call__(self, node) -> bool:
+        return True
+
+
+class Traverser(object):
+
+    def __init__(self, filter: Filter=None):
+        """_summary_
+
+        Args:
+            filter (Filter, optional): Filters out nodes not to process. Defaults to None.
+        """
+
+        self._filter = filter
+    
+    def _traverse(self, traverse_f, processor: NodeProcessor):
+        for node in traverse_f():
+            if not self._filter(node):
+                continue
+            
+            processor(node)            
+    
+    def traverse_forward(self, net: Network, from_nodes, to_nodes, processor: NodeProcessor):
+        
+        self._traverse(
+            partial(net.traverse_forward(from_nodes, to_nodes), processor)
+        )
+
+    def traverse_backward(self, net: Network, from_nodes, to_nodes, processor: NodeProcessor):
+        
+        self._traverse(
+            partial(net.traverse_backward(from_nodes, to_nodes), processor)
+        )         
+
+
+class Backwardraverser(Traverser):
+
+    def __init__(self, filter: Q=None):
+
+        self._filter = filter
+
+# class NullNodeProcessor(NodeProcessor):
+
+#     def __init__(self):
+#         pass
+
+#     def process(self, node: Node) -> Node:
+#         return node.clone()
 
 
 

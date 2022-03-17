@@ -10,7 +10,7 @@ from ._build import (
     ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorDefFactory, TensorMod, argf, scalar_val, diverge, 
     SequenceFactory, sz, arg, factory, arg_, chain, LambdaMod, opself, NullFactory, concat
 )
-from ._modules import Null
+from ._modules import Null, OpAction
 import pytest
 
 
@@ -576,6 +576,14 @@ class TestParameterFactory:
         assert parameter.default.size() == torch.Size([1, 4])
 
 
+class Activation(nn.Module):
+
+    def forward(self, x):
+        return x
+    def reverse(self, x):
+        return x * 2
+
+
 class TestNetBuilder:
 
     def test_produce_network_with_in(self):
@@ -723,6 +731,48 @@ class TestNetBuilder:
         x = x_.node
         z = net.probe([y0, x], by={x: torch.randn(1, 2)})
         assert z[0].size(1) == 2
+
+    def test_produce_action_from_op(self):
+
+        sequence = OpFactory(
+            ModFactory(nn.Linear, 2, 3)
+        ) << OpFactory(
+            ModFactory(Activation)
+        )        
+        
+        x = TensorInFactory(
+            TensorFactory(torch.randn, [1, 2]), name='x'
+        )
+        
+        builder = NetBuilder()
+        multitap = builder.add_in(x)
+        y, = builder.append(multitap, sequence)
+        action = builder.action(y.node, 'reverse')
+        res = action.produce([Out((2, 3))])
+    
+        assert isinstance(res, OpAction)
+
+    def test_produce_action_from_op_gives_correct_results(self):
+
+        torch.manual_seed(2)
+        sequence = OpFactory(
+            ModFactory(nn.Linear, 2, 3)
+        ) << OpFactory(
+            ModFactory(Activation)
+        )        
+        
+        x = TensorInFactory(
+            TensorFactory(torch.randn, [1, 2]), name='x'
+        )
+        
+        builder = NetBuilder()
+        multitap = builder.add_in(x)
+        y, = builder.append(multitap, sequence)
+        action = builder.action(y.node, 'reverse')
+        res = action.produce([Out((2, 3))])
+    
+        x = torch.rand(2, 2)
+        assert (res.forward(x) == 2 * x).all()
 
 
 class TestConcat:
