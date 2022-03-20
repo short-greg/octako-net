@@ -1356,25 +1356,6 @@ class InFactory(ABC):
         pass
 
 
-# class SizeVal(object):
-
-#     def __init__(self, val: int, unknown: bool):
-
-#         self._val = val
-#         self._unkown = unknown
-
-#     @property
-#     def default(self):
-#         return self._val
-
-#     @property
-#     def actual(self):
-#         if self._unkown:
-#             return -1
-
-#         return self._val
-
-
 def to_size(a: list):
     return [*map(lambda x: max(-1, x), a)]
 

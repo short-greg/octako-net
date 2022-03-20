@@ -26,10 +26,12 @@ class BinaryClassifierLearner(Learner, Tester, Classifier):
 """
 
 from dataclasses import dataclass
+import typing
 import torch
 import torch.optim
 import torch.nn as nn
-from abc import abstractmethod
+from abc import ABC, abstractmethod
+from ._networks import Port, Network
 
 
 def todevice(f):
@@ -65,6 +67,23 @@ def dict_cpuresult(f):
             k: t.cpu() for k, t in result.items()
         }
     return wrapper
+
+
+@dataclass
+class Attributes(ABC):
+    pass
+
+
+@dataclass
+class LearnerAttributes(object):
+
+    net: Network
+    optim: torch.optim.Optimizer
+    out: Port
+    x: Port
+    loss: Port
+    validation: Port
+    t: Port
 
 
 class MachineComponent(nn.Module):
@@ -131,3 +150,45 @@ class Classifier(MachineComponent):
     @abstractmethod
     def classify(self, x: torch.Tensor):
         raise NotImplementedError
+
+
+class LearningMachine(Learner, Tester):
+    """Base class for a learning machine
+    """
+
+    def __init__(self):
+
+        self._p = self.build()
+
+    @abstractmethod
+    def build(self) -> LearnerAttributes:
+        raise NotImplementedError
+    
+    @todevice
+    @dict_cpuresult
+    def learn(self, x: torch.Tensor, t: torch.Tensor):
+        self._p.optim.zero_grad()
+        loss, validation = self._p.net.probe(
+            [self._p.loss, self._p.validation], {self._p.x.node: x, self._p.t.node: t}
+        )
+        loss.backward()
+        self._p.optim.step()
+        return {
+            'Loss': loss,
+            'Validation': validation
+        }
+
+    @todevice
+    @dict_cpuresult
+    def test(self, x: torch.Tensor, t: torch.Tensor):
+        loss, validation = self._p.net.probe([self._p.loss, self._p.validation], {self._p.x.node: x, self._p.t.node: t})
+
+        return {
+            'Loss': loss,
+            'Validation': validation
+        }
+
+    @todevice
+    @cpuresult
+    def forward(self, x: torch.Tensor):
+        return self._p.net.probe(self._p.out, by={self._p.x.node: x})

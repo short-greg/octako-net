@@ -861,28 +861,19 @@ class Network(nn.Module):
         if node.name in by:
             return by[node.name]
 
-        inputs = []
-
         for port in node.inputs:
-            node_name = port.node
-            excitation = port.select(by, check_size)
-
-            if excitation is not None:
-                
-                inputs.append(excitation)
-                continue
             try:
-                # need to get the result
-                # TODO: as it is right now. it requires caching
-                # result = self._probe_helper() <- include by
-                # results.append(result) or results.extend(result)
-                self._probe_helper(self._nodes[node_name], by)
-                inputs.append(
-                    port.select(by, check_size)
-                )
+                if port.select(by, check_size) is None:
+                    # need to get the result
+                    # TODO: as it is right now. it requires caching
+                    # result = self._probe_helper() <- include by
+                    # results.append(result) or results.extend(result)
+                    self._probe_helper(self._nodes[port.node], by)
+                    # port.select(by, check_size)
+
             # TODO: Create a better report for this
             except KeyError:
-                raise KeyError(f'Input or Node {node_name} does not exist')
+                raise KeyError(f'Input or Node {port.node} does not exist')
 
         # TODO: not using "inputs".. should use forward here, I think
         # cur_result = node.forward(*inputs, by, to_cache, check_size)
