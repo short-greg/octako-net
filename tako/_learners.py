@@ -156,8 +156,8 @@ class LearningMachine(Learner, Tester):
     """Base class for a learning machine
     """
 
-    def __init__(self):
-
+    def __init__(self, device='cpu'):
+        super().__init__(device)
         self._p = self.build()
 
     @abstractmethod
