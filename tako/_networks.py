@@ -622,13 +622,12 @@ class OpNode(Node):
             self.name, self.op, self._inputs, self._outs, self._info.spawn()
         )
     
-    def forward(self, *args, **kwargs):
+    def forward(self, *args, by: By=None):
 
-        return self.op(*args, **kwargs)
-
-    # def forward(self, *x):
-    #     return self.op(*x)
-    
+        result = self.op(*args)
+        if by is not None:
+            by[self.name] = result
+        return result
 
     # TODO: Consider removing the pro
     def probe(self, by: By, to_cache=True):
@@ -881,6 +880,8 @@ class Network(nn.Module):
         # that be better?
         # forward function will cache the results if to cache is true
         cur_result = node.probe(by, to_cache)
+        # pass in the cache to store 
+        # cure_result = node.forward(*inputs, by=by)
         return cur_result
 
     def probe(
