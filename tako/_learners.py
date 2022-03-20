@@ -79,6 +79,7 @@ class LearnerAttributes(object):
 
     net: Network
     optim: torch.optim.Optimizer
+    in_: Port
     out: Port
     x: Port
     loss: Port
