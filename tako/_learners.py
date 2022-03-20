@@ -81,7 +81,6 @@ class LearnerAttributes(object):
     optim: torch.optim.Optimizer
     in_: Port
     out: Port
-    x: Port
     loss: Port
     validation: Port
     t: Port
