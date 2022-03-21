@@ -738,7 +738,7 @@ class OpFactory(NetFactory):
         if isinstance(y, torch.Tensor):
             y = [y]
         
-        out_guide = self._out or [[] * len(y)]
+        out_guide = self._out or [[]] * len(y)
         outs = []
         for y_i, out_i in zip(y, out_guide):
             size = [*y_i.size()]

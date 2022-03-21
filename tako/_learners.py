@@ -62,7 +62,6 @@ def dict_cpuresult(f):
     def wrapper(self, *args):
         args = tuple(a.to(self._device) for a in args)
         result = f(self, *args)
-        print(list(result.values()))
         return {
             k: t.cpu() for k, t in result.items()
         }
@@ -169,7 +168,7 @@ class LearningMachine(Learner, Tester):
     def learn(self, x: torch.Tensor, t: torch.Tensor):
         self._p.optim.zero_grad()
         loss, validation = self._p.net.probe(
-            [self._p.loss, self._p.validation], {self._p.x.node: x, self._p.t.node: t}
+            [self._p.loss, self._p.validation], {self._p.in_.node: x, self._p.t.node: t}
         )
         loss.backward()
         self._p.optim.step()
@@ -181,7 +180,7 @@ class LearningMachine(Learner, Tester):
     @todevice
     @dict_cpuresult
     def test(self, x: torch.Tensor, t: torch.Tensor):
-        loss, validation = self._p.net.probe([self._p.loss, self._p.validation], {self._p.x.node: x, self._p.t.node: t})
+        loss, validation = self._p.net.probe([self._p.loss, self._p.validation], {self._p.in_.node: x, self._p.t.node: t})
 
         return {
             'Loss': loss,
@@ -191,4 +190,4 @@ class LearningMachine(Learner, Tester):
     @todevice
     @cpuresult
     def forward(self, x: torch.Tensor):
-        return self._p.net.probe(self._p.out, by={self._p.x.node: x})
+        return self._p.net.probe(self._p.out, by={self._p.in_.node: x})
