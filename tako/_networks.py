@@ -561,14 +561,6 @@ class NodeSet(object):
         return NodeSet(nodes)
 
 
-# TODO: Decide whether to use this
-class NodeVisitor(object):
-
-    @singledispatch
-    def visit(self, node: Node):
-        pass
-
-
 class OpNode(Node):
     """
     A node that performs an operation.
@@ -770,6 +762,7 @@ class Network(nn.Module):
         self._roots: typing.Set[str] = set()
         self._nodes: nn.ModuleDict = nn.ModuleDict()
         self._node_outputs: typing.Dict[str, typing.List[str]] = {}
+        
         for in_ in inputs or []:
             self.add_node(in_)
 
@@ -869,6 +862,10 @@ class Network(nn.Module):
                     # results.append(result) or results.extend(result)
                     self._probe_helper(self._nodes[port.node], by)
                     # port.select(by, check_size)
+                
+                # TODO: Once I retrieve the input then
+                # check the port to see if the size is correct
+
 
             # TODO: Create a better report for this
             except KeyError:
@@ -886,7 +883,7 @@ class Network(nn.Module):
 
     def probe(
         self, outputs: typing.List[typing.Union[str, Port]], 
-        by: typing.Dict[str, torch.Tensor], to_cache=True, check_size: bool=False
+        by: typing.Dict[str, torch.Tensor], to_cache: bool=True, check_size: bool=False
     ) -> typing.List[torch.Tensor]:
         """Probe the network for its inputs
 
@@ -919,7 +916,7 @@ class Network(nn.Module):
                 result.append(
                     self._probe_helper(
                         self._nodes[output], 
-                        by, to_cache, check_size
+                        by, to_cache
                 ))
         
         if singular:
@@ -1004,9 +1001,6 @@ class SubNetwork(object):
         return SubNetwork(
             self._name, self._network, self._info.spawn()
         )
-
-    def accept(self, visitor: NodeVisitor):
-        visitor.visit(self)
     
     @property
     def name(self):
