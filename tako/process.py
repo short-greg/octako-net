@@ -1,8 +1,7 @@
 from abc import ABC, abstractmethod
 from functools import partial, reduce
 import typing
-from ._networks import Node, NodeSet
-from ._networks import NodeVisitor, Node, Port, Network, SubNetwork, OpNode, InterfaceNode
+from ._networks import Node, NodeSet, Network
 from abc import ABC, abstractmethod
 import typing
 
