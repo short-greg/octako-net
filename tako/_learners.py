@@ -76,7 +76,6 @@ class Attributes(ABC):
 @dataclass
 class LearnerAttributes(object):
 
-    net: Network
     optim: torch.optim.Optimizer
     in_: Port
     out: Port
@@ -91,7 +90,7 @@ class MachineComponent(nn.Module):
 
     def __init__(self, device='cpu'):
         super().__init__()
-        super().to(device)
+        self.to(device)
         self._device = device
     
     def to(self, device):
@@ -157,17 +156,17 @@ class LearningMachine(Learner, Tester):
 
     def __init__(self, device='cpu'):
         super().__init__(device)
-        self._p = self.build()
+        self._net, self._p = self.build()
 
     @abstractmethod
-    def build(self) -> LearnerAttributes:
+    def build(self) -> typing.Tuple[nn.Module, LearnerAttributes]:
         raise NotImplementedError
     
     @todevice
     @dict_cpuresult
     def learn(self, x: torch.Tensor, t: torch.Tensor):
         self._p.optim.zero_grad()
-        loss, validation = self._p.net.probe(
+        loss, validation = self._net.probe(
             [self._p.loss, self._p.validation], {self._p.in_.node: x, self._p.t.node: t}
         )
         loss.backward()
@@ -180,7 +179,7 @@ class LearningMachine(Learner, Tester):
     @todevice
     @dict_cpuresult
     def test(self, x: torch.Tensor, t: torch.Tensor):
-        loss, validation = self._p.net.probe([self._p.loss, self._p.validation], {self._p.in_.node: x, self._p.t.node: t})
+        loss, validation = self._net.probe([self._p.loss, self._p.validation], {self._p.in_.node: x, self._p.t.node: t})
 
         return {
             'Loss': loss,
@@ -190,4 +189,4 @@ class LearningMachine(Learner, Tester):
     @todevice
     @cpuresult
     def forward(self, x: torch.Tensor):
-        return self._p.net.probe(self._p.out, by={self._p.in_.node: x})
+        return self._net.probe(self._p.out, by={self._p.in_.node: x})

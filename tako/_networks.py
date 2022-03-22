@@ -691,17 +691,15 @@ class InTensor(In):
         super().__init__(name, meta)
         self._dtype = dtype
         self._out_size = sz
-        self._device = device
-        self._default = default
         
-        if self._default is not None: 
-            self._default = self._default.to(device)
-        self._device = device
+        self._default = default
+        self.to(device)
 
     def forward(x: torch.Tensor):
         return x
 
     def to(self, device):
+        super().to(device)
         self._device = device
         if self._default is not None:
             self._default = self._default.to(device)
@@ -731,9 +729,6 @@ class InScalar(In):
 
     def forward(x):
         return x
-
-    def to(self, device):
-        pass
 
     @property
     def ports(self) -> typing.Iterable[Port]:
