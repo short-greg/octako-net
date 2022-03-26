@@ -28,6 +28,40 @@ class Null(nn.Module):
         return x
 
 
+class Setter(nn.Module):
+
+    def __init__(self, module: nn.Module, members: typing.List[str]):
+
+        super().__init__()
+        self._module = module
+        self._members = members
+        self._member_count = len(self._members)
+
+    def forward(self, *x):
+        
+        for member, x_i in zip(x[-self._member_count:], self._members):
+            setattr(self._module, member, x_i)
+        return self._module(*x[:-self._member_count])
+
+
+class Getter(nn.Module):
+
+    def __init__(self, module: nn.Module, members: typing.List[str]):
+
+        super().__init__()
+        self._module = module
+        self._members = members
+        self._member_count = len(self._members)
+
+    def forward(self, *x):
+        
+        y = self._module(*x)
+        if not isinstance(y, typing.Iterable):
+            y = (y,)
+        
+        return tuple(y) + tuple(getattr(self._module, member) for member in self._members)
+
+
 class OpAction(nn.Module):
     """Call a function on an nn-module other than forward
     """

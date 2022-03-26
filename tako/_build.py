@@ -693,6 +693,39 @@ class BaseMod(ABC):
         return SequenceFactory([*self.to_ops(), *other.to_ops()])
 
 
+def _in_tensor(self, in_):
+    
+    in_tensors = []
+    for in_i in in_:
+        size = [*in_i.size]
+        if size[0] == -1:
+            size[0] = 1
+        x = torch.zeros(*size, dtype=in_i.dtype)
+        in_tensors.append(x)
+    return in_tensors
+
+def _out_sizes(mod, in_, out_guide=None) -> typing.Tuple[torch.Size]:
+
+    training = mod.training
+    mod.eval()
+    y = mod(*_in_tensor(in_))
+    mod.train(training)
+    
+    if isinstance(y, torch.Tensor):
+        y = [y]
+    
+    out_guide = out_guide or [[]] * len(y)
+    outs = []
+    for y_i, out_i in zip(y, out_guide):
+        size = [*y_i.size()]
+        for i, out_el in enumerate(out_i):
+            if out_el == -1: size[i] = -1
+        else:
+            if size: size[0] = -1
+        
+        outs.append(Out(torch.Size(size), y_i.dtype))
+    return outs
+
 class OpFactory(NetFactory):
 
     def __init__(
@@ -717,38 +750,6 @@ class OpFactory(NetFactory):
         """
         return [self]
 
-    def _in_tensor(self, in_):
-        
-        in_tensors = []
-        for in_i in in_:
-            size = [*in_i.size]
-            if size[0] == -1:
-                size[0] = 1
-            x = torch.zeros(*size, dtype=in_i.dtype)
-            in_tensors.append(x)
-        return in_tensors
-
-    def _out_sizes(self, mod, in_) -> typing.Tuple[torch.Size]:
-
-        training =mod.training
-        mod.eval()
-        y = mod(*self._in_tensor(in_))
-        mod.train(training)
-        
-        if isinstance(y, torch.Tensor):
-            y = [y]
-        
-        out_guide = self._out or [[]] * len(y)
-        outs = []
-        for y_i, out_i in zip(y, out_guide):
-            size = [*y_i.size()]
-            for i, out_el in enumerate(out_i):
-                if out_el == -1: size[i] = -1
-            else:
-                if size: size[0] = -1
-            
-            outs.append(Out(torch.Size(size), y_i.dtype))
-        return outs
 
     def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
 
@@ -765,7 +766,7 @@ class OpFactory(NetFactory):
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
         name = namer.name(self._name, module=module)
 
-        outs = self._out_sizes(module, in_)
+        outs = _out_sizes(module, in_)
         if len(outs) == 1:
             outs = outs[0]
         op_node = OpNode(
@@ -781,6 +782,101 @@ class OpFactory(NetFactory):
 
     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
         return OpFactory(self._mod, name or self._name, self._meta.spawn(labels, annotation), self._out)
+
+from ._modules import Getter, Setter
+
+class Get(NetFactory):
+    
+    def __init__(self, op_factory: OpFactory, members: typing.List[str]):
+        
+        super().__init__(op_factory)
+        self._op = op_factory
+        self._members = members
+
+    def to(self, **kwargs):
+        op = self._op.to(**kwargs)
+        return Get(
+            op, [*self._members]
+        )
+
+    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+
+        if isinstance(in_, Out):
+            in_ = [in_]
+        
+        module = self._op.produce(in_, **kwargs)
+        getter = Getter(module, self._members)
+        return module, _out_sizes(getter, in_)
+    
+    @to_multitap
+    def produce_nodes(self, in_: Multitap, namer: Namer=None, **kwargs) -> typing.Iterator[Node]:
+        
+        namer = namer or FixedNamer()
+
+        module, _ = self._op.produce(in_, **kwargs)
+        name = namer.name(self._name, module=module)
+        getter = Getter(module, self._members)
+        outs = _out_sizes(module, in_)
+        if len(outs) == 1:
+            outs = outs[0]
+
+        op_node = OpNode(
+            name, getter, in_, outs, self._op._meta.spawn()
+        )
+        yield op_node
+
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+
+        op = self._op.info_(name, labels, annotation)
+        return Get(op, [*self._members])
+
+
+class Set(NetFactory):
+
+    def __init__(self, op_factory: OpFactory, members: typing.List[str]):
+        
+        super().__init__(op_factory)
+        self._op = op_factory
+        self._members = members
+
+    def to(self, **kwargs):
+        op = self._op.to(**kwargs)
+        return Get(
+            op, [*self._members]
+        )
+
+    def produce(self, in_: typing.List[Out], **kwargs) -> typing.Tuple[nn.Module, torch.Size]:
+
+        if isinstance(in_, Out):
+            in_ = [in_]
+
+        mod_in = in_[:-len(self._members)]
+        
+        module, out_sizes = self._op.produce(mod_in, **kwargs)
+        setter = Setter(module, self._members)
+        return module, out_sizes
+    
+    @to_multitap
+    def produce_nodes(self, in_: Multitap, namer: Namer=None, **kwargs) -> typing.Iterator[Node]:
+        
+        namer = namer or FixedNamer()
+
+        mod_in = in_[:-len(self._members)]
+        module, outs = self._op.produce(mod_in, **kwargs)
+        name = namer.name(self._name, module=module)
+        setter = Setter(module, self._members)
+        if len(outs) == 1:
+            outs = outs[0]
+
+        op_node = OpNode(
+            name, setter, in_, outs, self._op._meta.spawn()
+        )
+        yield op_node
+
+    def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None):
+
+        op = self._op.info_(name, labels, annotation)
+        return Set(op, [*self._members])
 
 
 class NullFactory(OpFactory):
