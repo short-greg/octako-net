@@ -693,7 +693,7 @@ class BaseMod(ABC):
         return SequenceFactory([*self.to_ops(), *other.to_ops()])
 
 
-def _in_tensor(self, in_):
+def _in_tensor(in_):
     
     in_tensors = []
     for in_i in in_:
@@ -757,7 +757,7 @@ class OpFactory(NetFactory):
             in_ = [in_]
 
         module = self._mod.produce([in_i.size for in_i in in_], **kwargs)
-        return module, self._out_sizes(module, in_)
+        return module, _out_sizes(module, in_)
     
     @to_multitap
     def produce_nodes(self, in_: Multitap, namer: Namer=None, **kwargs) -> typing.Iterator[Node]:
