@@ -4,6 +4,8 @@ Network and its components to build up a graph.
 A network is a graph of nodes which process the input
 """
 from abc import ABC, abstractmethod, abstractproperty
+from inspect import Parameter
+from re import T
 import torch.nn as nn
 import torch
 import typing
@@ -71,6 +73,7 @@ class By(object):
         self._data = data
         self._subs = {}
 
+    # TODO: add in port index
     def get(self, node: str, default=None) -> typing.Union[torch.Tensor, typing.List[torch.Tensor]]:
         """get output of a node
 
@@ -84,6 +87,7 @@ class By(object):
         
         return self._data.get(node, default)
 
+    # TODO: add in port index
     def update(self, node: str, datum):
         """Update output of a node
 
@@ -307,6 +311,13 @@ class IndexPort(Port):
             torch.Tensor: Output of the port for the index
         """
         result = by.get(self.node)
+        # TODO:
+        # by.get(self.node, self.index)
+        # TODO:
+        # For "Get" nodes.. i need some way to check
+        # if i can the output without executing the node
+        # i think i do need to use probe rather than
+        # forward
         if result is None:
             return None
 
@@ -560,6 +571,7 @@ class NodeSet(object):
                 nodes.append(self._nodes[name])
         return NodeSet(nodes)
 
+# TODO: Add OpNode subclass for get
 
 class OpNode(Node):
     """
@@ -621,9 +633,9 @@ class OpNode(Node):
             by[self.name] = result
         return result
 
-    # TODO: Consider removing the pro
+    # TODO: Add in ports to probe.. order them correctly
     def probe(self, by: By, to_cache=True):
-        """probe the 
+        """probe the node
 
         Args:
             by (By): The excitations in the network
@@ -648,39 +660,63 @@ class OpNode(Node):
         return result
 
 
-class In(Node):
-    """[Input node in a network.]"""
+class InDef(nn.Module):
 
-    @property
-    def inputs(self) -> Multitap:
-        return Multitap([])
+    def __init__(self, dtype, default, size: torch.Size=None):
+        super().__init__()
+        self.default = default
+        self.dtype = dtype
+        self.size = size or torch.Size([])
 
-    @property
-    def input_nodes(self) -> typing.List[str]:
-        """
-        Returns:
-            typing.List[str]: Names of the nodes input into the node
-        """
-        return []
-    
-    @property
-    def default(self):
-        """Default value for the input
-        """
-        raise NotImplementedError
-    
-    def probe(self, by: By, to_cache: bool=True):
-        return by.get(self.name, self.default)
+    def redefine(self, value):
+        return InDef(type(value), value, torch.Size([]))
 
 
-class InTensor(In):
+class TensorDef(InDef):
 
     def __init__(
-        self, name: str, sz: torch.Size, 
-        dtype: typing.Union[type, torch.dtype], 
-        default: torch.Tensor=None, 
-        meta: Meta=None,
-        device: str='cpu'
+        self, *size, dtype: torch.dtype=torch.float, 
+        default: typing.Union[torch.Tensor, nn.parameter.Parameter] = None
+    ):
+        super().__init__(dtype, default, size)
+        if isinstance(default, torch.Tensor):
+            self.default = nn.parameter.Parameter(self.default)
+
+    def redefine(self, value: torch.Tensor):
+        return TensorDef(*value.shape, dtype=value.dtype, default=value)
+
+
+class Undef(InDef):
+    
+    def __init__(self):
+        super().__init__(None, None, None)
+    
+    def redefine(self, value):
+        if isinstance(value, torch.Tensor):
+            return TensorDef(*value.shape, dtype=value.dtype, default=value)
+        return InDef(type(value), value, torch.Size([]))
+        
+
+
+class UndefinedSize(object):
+    """Used in order to specify a parameter in the network that is undefined.
+    Using an InNode with this and a Setter node will update the Setter to use 
+    this value on creation
+    """
+
+    def __init__(self, in_):
+
+        self._in: In = in_
+
+    def define(self, value):
+
+        self._in.define(value)
+
+
+class In(Node):
+
+    def __init__(
+        self, name: str, def_: InDef, meta: Meta=None
     ):
         """[initializer]
 
@@ -689,60 +725,130 @@ class InTensor(In):
             out_size (torch.Size): [The size of the in node]
         """
         super().__init__(name, meta)
-        self._dtype = dtype
-        self._out_size = sz
-        
-        self._default = default
-        self.to(device)
 
-    def forward(x: torch.Tensor):
+        self._def = def_
+        self._default = def_.default
+
+    def forward(self, x: torch.Tensor):
         return x
-
-    def to(self, device):
-        super().to(device)
-        self._device = device
-        if self._default is not None:
-            self._default = self._default.to(device)
 
     @property
     def ports(self) -> typing.Iterable[Port]:
-        return NodePort(self.name, self._out_size, self._dtype),
+        if self._def is Undef:
+            return NodePort(self.name, UndefinedSize(self), None)
+        return NodePort(self.name, self._def.size, self._def.dtype),
 
     def clone(self):
-        return InTensor(
-            self.name, self._out_size, self._dtype, self._default, self._info.spawn()
+        return In(
+            self.name, self._def, self._meta.spawn()
         )
+    
+    def redefine(self, value):
+        self._def = self._def.redefine(value)
 
     @property
-    def default(self) -> torch.Tensor:
+    def input_nodes(self) -> typing.List[str]:
+        """
+        Returns:
+            typing.List[str]: Names of the nodes input into the node
+        """
+        return []
+
+    @property
+    def inputs(self) -> Multitap:
+        return Multitap([])
+
+    @property
+    def default(self):
+        """Default value for the input
+        """
         return self._default
     
+    @default.setter
+    def default(self, value: torch.Tensor):
+        """Default value for the input
+        """
+        self._default = value
 
-class InScalar(In):
+    def probe(self, by: By, to_cache: bool=True):
+        return by.get(self.name, self.default)
 
-    def __init__(
-        self, name, dtype: typing.Type, default, meta: Meta=None
-    ):
-        super().__init__(name, meta)
-        self._dtype = dtype
-        self._default = default
 
-    def forward(x):
-        return x
+# class In(Node):
+#     """[Input node in a network.]"""
 
-    @property
-    def ports(self) -> typing.Iterable[Port]:
-        return NodePort(self.name, torch.Size([]), self._dtype),
+#     @property
+#     def inputs(self) -> Multitap:
+#         return Multitap([])
 
-    @classmethod
-    def from_scalar(
-        cls, name, default_type: typing.Type, default_value, 
-        labels: LabelSet=None, annotation: str=None):
+#     @property
+#     def input_nodes(self) -> typing.List[str]:
+#         """
+#         Returns:
+#             typing.List[str]: Names of the nodes input into the node
+#         """
+#         return []
+    
+#     @property
+#     def default(self):
+#         """Default value for the input
+#         """
+#         raise NotImplementedError
+    
+#     @default.setter
+#     def default(self, value):
+#         """Default value for the input
+#         """
+#         raise NotImplementedError
 
-        return cls(
-            name, torch.Size([]), default_type, 
-            default_value, labels, annotation
-        )
+
+#     def probe(self, by: By, to_cache: bool=True):
+#         return by.get(self.name, self.default)
+
+
+# class NullDefault(object):
+
+#     def __init__(self, size: torch.Size, dtype: torch.dtype):
+
+#         self.size = size
+#         self.dtype = dtype
+
+
+# class InScalar(In):
+
+#     def __init__(
+#         self, name, dtype: typing.Type, default, meta: Meta=None
+#     ):
+#         super().__init__(name, meta)
+#         self._dtype = dtype
+#         self._default = default
+
+#     def forward(x):
+#         return x
+
+#     @property
+#     def ports(self) -> typing.Iterable[Port]:
+#         return NodePort(self.name, torch.Size([]), self._dtype),
+
+#     @classmethod
+#     def from_scalar(
+#         cls, name, default_type: typing.Type, default_value, 
+#         labels: LabelSet=None, annotation: str=None):
+
+#         return cls(
+#             name, torch.Size([]), default_type, 
+#             default_value, labels, annotation
+#         )
+
+#     def default(self):
+#         """Default value for the input
+#         """
+#         return self._default
+    
+#     def default(self, value):
+#         """Default value for the input
+#         """
+#         self._default = value
 
 
 class Network(nn.Module):
@@ -750,6 +856,7 @@ class Network(nn.Module):
     Network of nodes. Use for building complex machines.
     """
 
+    # Set teh namer
     def __init__(self, inputs: typing.List[In]=None):
         super().__init__()
 
@@ -760,6 +867,8 @@ class Network(nn.Module):
         
         for in_ in inputs or []:
             self.add_node(in_)
+
+    # def add_in() <- uses a factory
 
     def add_node(self, node: Node):
         if node.name in self._nodes:
@@ -784,6 +893,8 @@ class Network(nn.Module):
         self._node_outputs[node.name] = []
         return node.ports
 
+    # def append() <- uses a factory
+
     @property
     def leaves(self) -> typing.Iterator[Node]:
         
@@ -795,7 +906,10 @@ class Network(nn.Module):
         
         for name in self._roots:
             yield self._nodes[name]
-        
+    
+    # def op
+    
+    # TODO: Remove
     def get_node(self, key: str) -> Node:
 
         return self._nodes[key]

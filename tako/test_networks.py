@@ -2,9 +2,10 @@ import pytest
 import torch.nn as nn
 import torch
 from ._networks import (
-    By, Meta, InTensor, Link, Multitap, Network, 
+    By, Meta, In, TensorDef, Undef, InDef, Link, Multitap, Network, 
     InterfaceNode, NodePort, OpNode, Out, SubNetwork, check_size
 )
+
 
 
 class TestCheckSize:
@@ -82,7 +83,7 @@ class TestNetwork:
     def test_get_one_input_ports(self):
 
         network = Network([
-            InTensor('x', torch.Size([-1, 16]), dtype=torch.float)
+            In('x', TensorDef(-1, 16, dtype=torch.float))
         ])
         
         x, = network['x'].ports
@@ -92,8 +93,8 @@ class TestNetwork:
     def test_get_two_input_ports(self):
 
         network = Network([
-            InTensor('x', torch.Size([-1, 16]), dtype=torch.float),
-            InTensor('y', torch.Size([-1, 24]), dtype=torch.float)
+            In('x', TensorDef(-1, 16, dtype=torch.float)),
+            In('y', TensorDef(-1, 24, dtype=torch.float))
         ])
         x, y = network[['x', 'y']].ports
         
@@ -103,7 +104,7 @@ class TestNetwork:
     def test_add_node_ports_are_equal(self):
 
         network = Network([
-            InTensor('x', torch.Size([-1, 2]), dtype=torch.float),
+            In('x', TensorDef(-1, 2, dtype=torch.float)),
         ])
         x, = network.add_node(
             OpNode(
@@ -116,8 +117,8 @@ class TestNetwork:
     @staticmethod
     def _setup_network():
         network = Network(
-            [InTensor('x', torch.Size([2, 2]), torch.float, torch.zeros(2,2)),
-            InTensor('y', torch.Size([2, 3]), torch.float, torch.zeros(2,2))]
+            [In('x', TensorDef(2, 2, dtype=torch.float, default=torch.zeros(2,2))),
+            In('y', TensorDef(2, 3, dtype=torch.float, default=torch.zeros(2,2)))]
         )
 
         x, y = network[['x', 'y']].ports
@@ -135,7 +136,7 @@ class TestNetwork:
     @staticmethod
     def _setup_network_with_multiouts():
         network = Network(
-            [InTensor('y', torch.Size([2, 3]), torch.float, torch.zeros(2,2))]
+            [In('y', TensorDef(2, 3, torch.float, torch.zeros(2,2)))]
         )
 
         class Double(nn.Module):
@@ -381,8 +382,8 @@ class TestSubnetwork:
     @staticmethod
     def _setup_network():
         network = Network(
-            [InTensor('x', torch.Size([2, 2]), torch.float, torch.zeros(2,2)),
-            InTensor('y', torch.Size([2, 3]), torch.float, torch.zeros(2,2))]
+            [In('x', TensorDef(2, 2, torch.float, torch.zeros(2,2))),
+            In('y', TensorDef(2, 3, torch.float, torch.zeros(2,2)))]
         )
 
         x, y = network[['x', 'y']].ports
@@ -441,8 +442,8 @@ class TestNetworkInterface:
     @staticmethod
     def _setup_network():
         network = Network(
-            [InTensor('x', torch.Size([2, 2]), torch.float, torch.zeros(2,2)),
-            InTensor('y', torch.Size([2, 3]), torch.float, torch.zeros(2,2))]
+            [In('x', TensorDef(-1, 2, torch.float, torch.zeros(2,2))),
+            In('y', TensorDef(-1, 3, torch.float, torch.zeros(2,2)))]
         )
 
         x, y = network[['x', 'y']].ports

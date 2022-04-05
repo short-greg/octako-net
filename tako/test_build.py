@@ -4,10 +4,10 @@ import typing
 import torch
 from torch import nn
 from torch.nn.modules.container import Sequential
-from ._networks import In, InTensor, Multitap, Node, NodePort, OpNode, Out, Port
+from ._networks import In, Multitap, Node, NodePort, OpNode, Out, Port
 from ._build import (
     ChainFactory, CounterNamer, Kwargs, ModFactory, NetBuilder, OpFactory, OpMod, ParamMod, argv,
-    ParameterFactory, ScalarInFactory, TensorFactory, TensorInFactory, TensorDefFactory, TensorMod, argf, scalar_val, diverge, 
+    ScalarInFactory, TensorFactory, TensorDefFactory, TensorInFactory, TensorMod, argf, diverge, 
     SequenceFactory, sz, arg, factory, arg_, chain, LambdaMod, opself, NullFactory, concat
 )
 from ._modules import Null, OpAction
@@ -247,25 +247,26 @@ class TestOpMod:
 
         optorch = OpMod(torch, factory=TensorMod)
         with pytest.raises(RuntimeError):
-            optorch.select(2, 3)
+            print(optorch.select(2, 3))
 
     def test_op_mod_with_torch_tensor_and_unknown_first_size(self):
 
         optorch = OpMod(torch, factory=TensorMod)
         with pytest.raises(RuntimeError):
-            optorch.select(2, 3)
+            t = optorch.select(2, 3)
+            t.produce()
 
     def test_op_mod_with_param_mod(self):
 
         optorch = OpMod(torch, factory=ParamMod)
         rand_param = optorch.rand(2, 3)
-        assert isinstance(rand_param, ParameterFactory)
+        assert isinstance(rand_param, TensorInFactory)
 
     def test_op_mod_produce_with_param_mod(self):
 
         optorch = OpMod(torch, factory=ParamMod)
         node = optorch.rand(2, 3).produce()
-        assert isinstance(node, InTensor)
+        assert isinstance(node, In)
 
 
 class TestMod:
@@ -522,14 +523,14 @@ class TestTensorInFactory:
 
     def test_produce_tensor_in_with_no_default_and_device(self):
 
-        op = TensorDefFactory(-1, 5, dtype=torch.float, device='cpu')
+        op = TensorDefFactory(-1, 5, dtype=torch.float)
         in_ = op.produce()
         assert isinstance(in_, In)
 
-    def test_produce_tensor_input_with_default(self):
+    def test_produce_tensor_input(self):
 
         default = [[1, 2], [3, 4]]
-        op = TensorDefFactory(2, 2, default=default)
+        op = TensorDefFactory(2, 2)
         in_ = op.produce()
         assert isinstance(in_, In)
 
@@ -559,17 +560,17 @@ class TestParameterFactory:
 
     def test_produce_tensor_input_with_call_default(self):
 
-        factory = TensorFactory(torch.zeros, [1, 4], Kwargs())
-        op = ParameterFactory(
+        factory = TensorFactory(torch.zeros, [1, 4], Kwargs(), requires_grad=True)
+        op = TensorInFactory(
             factory, name='Hi'
         )
         in_ = op.produce()
-        assert isinstance(in_, InTensor)
+        assert isinstance(in_, In)
 
     def test_produce_tensor_input_with_reset(self):
 
-        factory = TensorFactory(torch.zeros, [1, 4], Kwargs())
-        op = ParameterFactory(
+        factory = TensorFactory(torch.zeros, [1, 4], Kwargs(), requires_grad=True)
+        op = TensorInFactory(
             factory, name='Hi'
         )
         parameter = op.produce()
@@ -680,7 +681,7 @@ class TestNetBuilder:
             ModFactory(nn.Linear, 3, 4)
         )
         
-        x = TensorDefFactory(1, 2)
+        x = TensorDefFactory('x', 1, 2)
         
         builder = NetBuilder()
         x_, = builder.add_in(x)
@@ -700,7 +701,7 @@ class TestNetBuilder:
         factory2 =  OpFactory(ModFactory(nn.Linear, 3, 4))
         factory3 =  OpFactory(ModFactory(nn.Linear, 4, 2))
         
-        x = TensorDefFactory(1, 2)
+        x = TensorDefFactory('x', 1, 2)
         
         builder = NetBuilder()
         x_, = builder.add_in(x)
@@ -715,9 +716,9 @@ class TestNetBuilder:
         assert z[0].size(1) == 2
 
     def test_output_with_chained_factories(self):
-
+#
         factory1 = OpFactory(ModFactory(nn.Linear, sz[1], arg_.out_features)) 
-        x = TensorDefFactory(1, 2)
+        x = TensorDefFactory('x', 1, 2)
         
         builder = NetBuilder()
         x_, = builder.add_in(x)
