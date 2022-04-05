@@ -1493,30 +1493,10 @@ class TensorFactory(object):
             kwargs (Kwargs, optional): Arguments to the tensor. Defaults to None.
         """
         self._f = f
-        print(size)
         self._size = torch.Size(to_size(size))
         self._kwargs = kwargs or Kwargs()
         self._default_size = to_default_size(size)
-        # d = self.produce_default()
-        # self._dtype = d.dtype
-        # self._device = d.device
         self._requires_grad = requires_grad
-    
-    # @property
-    # def dtype(self) -> torch.dtype:
-    #     """
-    #     Returns:
-    #         torch.dtype: dtype of the tenso
-    #     """
-    #     return self._dtype
-
-    # @property
-    # def device(self):
-    #     """
-    #     Returns:
-    #         device of the tensor
-    #     """
-    #     return self._device
 
     def produce(self) -> torch.Tensor:
         t = nn.parameter.Parameter(
@@ -1524,14 +1504,6 @@ class TensorFactory(object):
             requires_grad=self._requires_grad
         )
         return TensorDef(*t.shape, dtype=t.dtype, default=t)
-
-    # @property
-    # def size(self) -> torch.Size:
-    #     """
-    #     Returns:
-    #         torch.Size: size of the tensor
-    #     """
-    #     return torch.Size(self._size)
     
     def __call__(self, size=None) -> torch.tensor:
         """Produce the tensor
@@ -1545,52 +1517,6 @@ class TensorFactory(object):
         """
         size = size or self._default_size
         return self._f(*size, **self._kwargs.items)
-
-# class TensorDefFactory(InFactory):
-#     """
-
-#     """
-
-#     def __init__(
-#         self, *size, dtype=torch.float, name="", meta=None
-#     ):
-#         super().__init__(name or str("TensorIn"), meta)
-#         self._size = to_size(size)
-#         self._dtype = dtype
-#         # self._device = device
-#         self._meta = meta or Meta()
-#         # self._default = default or [1 if s < 0 else s for s in size]
-
-#         # if default is not None:
-#         #     check_default = torch.zeros(self._size, device=self._device, dtype=self._dtype)
-#         #     self._check_size(check_default)
-
-#     # def _check_size(self, default) -> bool:
-#     #     if len(default.size()) != len(self._size):
-#     #         raise ValueError(f'Size of default {default.size()} does not match size {self._size}')
-#     #     for s1, s2 in zip(default.size(), self._size):
-#     #         if s2 > 1 and s1 != s2:
-#     #             raise ValueError(f'Size of default {default.size()} does not match size {self._size}')
-
-#     def produce(self, namer: Namer=None) -> In:
-#         """Produces the In Node
-
-#         Args:
-#             namer (Namer, optional): Namer to name the tensor. Defaults to None.
-
-#         Returns:
-#             In: _description_
-#         """
-#         namer = namer or FixedNamer()
-#         # default = NullDefault(self._size, self._dtype)
-        
-#         name = namer.name(self._name, default='TensorIn')
-#         return In(
-#             name, TensorDef(*self._size, self._dtype), meta=self._meta.spawn()
-#         )
-
-#     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-#         return TensorDefFactory(*self._size, dtype=self._dtype, name=name or self._name, meta=self._meta.spawn(labels, annotation, fix))
 
 
 class TensorInFactory(InFactory):
@@ -1700,30 +1626,6 @@ def scalarf(f, type_: type, _meta: Meta=None):
         f ([type]): [description]
     """
     return ScalarInFactory(type_, f, True, _meta)
-
-
-# class ParameterFactory(InFactory):
-
-#     def __init__(self, t: TensorFactory, name: str="", meta: Meta=None):
-#         super().__init__(name or 'Param', meta)
-#         self._t = t
-
-#     def produce(self, namer: Namer=None) -> Node:
-
-#         namer = namer or FixedNamer()
-#         name = namer.name(self._name, default='ParamIn')
-
-#         return InTensor(
-#             name, self._t.size, self._t.dtype, 
-#             self._t.produce_default(), self._meta.spawn()
-#         )
-
-#     def info_(self, name: str=None, labels: typing.List[str]=None, annotation: str=None, fix: bool=None):
-#         return ParameterFactory(
-#             self._t, 
-#             name or self._name,
-#             self._meta.spawn(labels, annotation, fix)
-#         )
 
 
 class TakoMod(ABC):
